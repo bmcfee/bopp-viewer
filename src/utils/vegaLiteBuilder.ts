@@ -158,6 +158,11 @@ export function buildBoppVegaLiteSpec(
   // Base Vega-Lite config (transparent for time-frequency charts to allow underlying spectrogram overlay)
   const isTimeFrequencyPlot = extentType === 'time_frequency_box' || payloadType === 'pitch_contour';
   const baseConfig = {
+    autosize: {
+      type: 'fit-x' as const,
+      contains: 'content' as const,
+    },
+    padding: { left: 24, right: 24, top: 14, bottom: 14 },
     background: isTimeFrequencyPlot ? 'transparent' : isDark ? '#0f172a' : '#ffffff',
     axis: {
       domainColor: axisColor,
@@ -170,6 +175,8 @@ export function buildBoppVegaLiteSpec(
       labelFontSize: 11,
       titleFontSize: 12,
       titleFontWeight: 'bold' as const,
+      titlePadding: 10,
+      labelPadding: 6,
     },
     legend: {
       labelColor: textColor,
@@ -444,6 +451,9 @@ export function buildBoppVegaLiteSpec(
           count: 1,
           color: sliceColor,
           active: isActive,
+          activeOpacity: isActive ? 1.0 : 0.0,
+          activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
+          activeStrokeWidth: isActive ? 3 : 0,
           stroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#334155' : '#cbd5e1'),
           strokeWidth: isActive ? 3 : 1,
           opacity: isActive
@@ -455,6 +465,7 @@ export function buildBoppVegaLiteSpec(
           confidence: candConf,
           confPct: confPct,
           badge: badgeText,
+          badgeOpacity: isActive && candConf !== null ? 1.0 : 0.0,
           status: isActive
             ? (candConf !== null ? `Candidate Key (${confPct})` : 'Detected Global Key')
             : 'Tonic Class',
@@ -514,10 +525,9 @@ export function buildBoppVegaLiteSpec(
             },
             mark: { type: 'arc', innerRadius: 75, outerRadius: 135 },
           },
-          // 2. Active Candidate Sector Outer Accent Ring
+          // 2. Active Candidate Sector Outer Accent Ring (all 12 sectors in stack to preserve alignment)
           {
             data: { values: circleValues },
-            transform: [{ filter: 'datum.active == true' }],
             encoding: {
               theta: {
                 field: 'count',
@@ -527,15 +537,15 @@ export function buildBoppVegaLiteSpec(
               },
               order: { field: 'fifths', type: 'quantitative' },
               color: { field: 'color', type: 'nominal', scale: null },
-              stroke: { value: isDark ? '#ffffff' : '#0f172a' },
-              strokeWidth: { value: 3 },
+              opacity: { field: 'activeOpacity', type: 'quantitative', scale: null },
+              stroke: { field: 'activeStroke', type: 'nominal', scale: null },
+              strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
             },
-            mark: { type: 'arc', innerRadius: 70, outerRadius: 142, opacity: 1.0 },
+            mark: { type: 'arc', innerRadius: 70, outerRadius: 142 },
           },
-          // 3. Confidence Badges on Active Slices
+          // 3. Confidence Badges on Active Slices (all 12 sectors in stack to preserve alignment)
           {
             data: { values: circleValues },
-            transform: [{ filter: 'datum.active == true && datum.badge != ""' }],
             encoding: {
               theta: {
                 field: 'count',
@@ -545,6 +555,7 @@ export function buildBoppVegaLiteSpec(
               },
               order: { field: 'fifths', type: 'quantitative' },
               text: { field: 'badge', type: 'nominal' },
+              opacity: { field: 'badgeOpacity', type: 'quantitative', scale: null },
             },
             mark: {
               type: 'text',
@@ -700,10 +711,11 @@ export function buildBoppVegaLiteSpec(
     const sortedData = [...data].sort(
       (a, b) => (typeof b.confidence === 'number' ? b.confidence : 1) - (typeof a.confidence === 'number' ? a.confidence : 1)
     );
+    const barWidth = typeof chartWidth === 'number' ? Math.max(260, chartWidth - 140) : chartWidth;
 
     return {
       $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-      width: chartWidth,
+      width: barWidth,
       height: tagHeight,
       title: {
         text: `Global ${payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
@@ -731,7 +743,7 @@ export function buildBoppVegaLiteSpec(
               type: 'nominal',
               title: 'Tag / Genre',
               sort: null,
-              axis: { labelFontSize: 12, labelFontWeight: 'bold' },
+              axis: { labelFontSize: 12, labelFontWeight: 'bold', titlePadding: 12, labelPadding: 8, minExtent: 110 },
             },
             x: {
               field: 'full_scale',
@@ -1068,6 +1080,9 @@ export function buildBoppVegaLiteSpec(
             axis: {
               labelFontWeight: 'bold',
               labelFontSize: 11,
+              titlePadding: 14,
+              labelPadding: 8,
+              minExtent: 70,
             },
           },
           color: {
@@ -1120,9 +1135,11 @@ export function buildBoppVegaLiteSpec(
     const cursor = makeCursorLayer(xField);
     if (cursor) layers.push(cursor);
 
+    const keyPlotWidth = typeof chartWidth === 'number' ? Math.max(280, chartWidth - 120) : chartWidth;
+
     return {
       $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-      width: chartWidth,
+      width: keyPlotWidth,
       height: Math.max(520, chartHeight ?? 480),
       title: {
         text: `BOPP Key Modulations: ${annotation.media_id}`,
@@ -1298,22 +1315,7 @@ export function buildBoppVegaLiteSpec(
     
     const isPitchScheme = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
     // mir_eval exact pitch class colors: 12 elements for semitones 0 (C) through 11 (B)
-    const pitchClassColors = isPitchScheme
-      ? MIR_EVAL_COLORMAPS.pitch
-      : [
-          MIR_EVAL_COLORMAPS.fifths[0],  // C (semitone 0)
-          MIR_EVAL_COLORMAPS.fifths[7],  // C# (semitone 1)
-          MIR_EVAL_COLORMAPS.fifths[2],  // D (semitone 2)
-          MIR_EVAL_COLORMAPS.fifths[9],  // D# (semitone 3)
-          MIR_EVAL_COLORMAPS.fifths[4],  // E (semitone 4)
-          MIR_EVAL_COLORMAPS.fifths[11], // F (semitone 5)
-          MIR_EVAL_COLORMAPS.fifths[6],  // F# (semitone 6)
-          MIR_EVAL_COLORMAPS.fifths[1],  // G (semitone 7)
-          MIR_EVAL_COLORMAPS.fifths[8],  // G# (semitone 8)
-          MIR_EVAL_COLORMAPS.fifths[3],  // A (semitone 9)
-          MIR_EVAL_COLORMAPS.fifths[10], // A# (semitone 10)
-          MIR_EVAL_COLORMAPS.fifths[5],  // B (semitone 11)
-        ];
+    const pitchClassColors = isPitchScheme ? MIR_EVAL_COLORMAPS.pitch : MIR_EVAL_COLORMAPS.fifths;
 
     // Internal transforms for unit-height centered notes:
     // Centered on datum.value: spans [datum.value - 0.5, datum.value + 0.5], unit height = 1.0!
@@ -1446,6 +1448,12 @@ export function buildBoppVegaLiteSpec(
             field: yField,
             type: yType,
             title: payloadType === 'multi_segment' ? 'Structural Level' : 'Section',
+            axis: {
+              titlePadding: 14,
+              labelPadding: 8,
+              labelFontWeight: 'bold',
+              minExtent: 75,
+            },
           },
           color: { field: colorField, type: 'nominal', title: 'Segment', scale: colorScale },
           opacity: hasConfidence && confidenceChannel === 'opacity'
@@ -1488,9 +1496,11 @@ export function buildBoppVegaLiteSpec(
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
 
+    const structPlotWidth = typeof chartWidth === 'number' ? Math.max(280, chartWidth - 80) : chartWidth;
+
     return {
       $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-      width: chartWidth,
+      width: structPlotWidth,
       height: chartHeight,
       title: { text: `BOPP Structural Segmentation: ${annotation.media_id}`, color: textColor },
       data: { values: data },

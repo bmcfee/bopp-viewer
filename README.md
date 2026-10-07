@@ -12,9 +12,14 @@ This project renders BOPP JSON (`.bopp`, `.bopp.json`) and MessagePack (`.bopp.m
 - Node.js ≥ 18.0.0
 - npm ≥ 9.0.0
 
-### Run Locally (Dev Server)
+### Install Dependencies
+Dependencies have been updated and pinned to ensure clean peer dependency resolution without requiring `--legacy-peer-deps`:
 ```bash
 npm install
+```
+
+### Run Locally (Dev Server)
+```bash
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
@@ -31,31 +36,32 @@ The compiled SPA output will be in `dist/`.
 
 The extension package (`jupyterlab-bopp`) registers a custom `DocumentWidgetFactory` in JupyterLab. When users double-click any `.bopp` or `.bopp.msgpack` file in the JupyterLab file browser, it opens and renders client-side with interactive Vega-Lite graphics and synchronized audio playback.
 
+The package uses modern PEP 517/621 packaging via `pyproject.toml` with `hatchling` and `hatch-jupyter-builder`, maintaining full compatibility with `setup.cfg`/`setup.py`.
+
 ### Prerequisites
 - Python ≥ 3.8
 - JupyterLab ≥ 4.0.0
-- Node.js ≥ 18.0.0 & `jlpm` (JupyterLab package manager)
-- `pip` & `wheel`
-
+- Node.js ≥ 18.0.0 & `jlpm` (or `npm`)
+- Modern packaging tools:
 ```bash
-pip install "jupyterlab>=4.0.0" build hatchling
+pip install "jupyterlab>=4.0.0" build hatchling "hatch-jupyter-builder>=0.5"
 ```
 
 ---
 
-### Step A: Local Development Installation (Editable)
+### Step A: Modern Local Development Installation (Editable)
 
-To install the extension directly from source in development mode:
+In JupyterLab 4+, the legacy command `jupyter labextension develop` is deprecated in favor of **`jupyter-builder develop`** or a direct editable pip install with `hatch-jupyter-builder`:
 
 ```bash
-# 1. Install package in editable mode
+# 1. Install package in editable mode (automatically builds extension assets via hatch-jupyter-builder)
 pip install -e .
 
-# 2. Symlink the extension assets to your JupyterLab environment
-jupyter labextension develop . --overwrite
+# 2. Symlink/develop extension in your JupyterLab environment using modern jupyter-builder:
+jupyter-builder develop . --overwrite
 
-# 3. Build the extension TypeScript library
-jlpm run build
+# (Alternative if jupyter-builder CLI is not installed separately)
+# pip install -e . automatically links labextension assets into share/jupyter/labextensions
 ```
 
 Verify that the extension is detected and enabled:
@@ -76,28 +82,26 @@ jupyter lab
 
 ### Step B: Building & Packaging a Standalone Wheel (`.whl`)
 
-To package `jupyterlab-bopp` for distribution or installation on other machines:
+To package `jupyterlab_bopp` for distribution or installation on other machines without needing Node.js:
 
 ```bash
 # 1. Clean previous build artifacts
-jlpm clean
+npm run clean
 
-# 2. Compile TypeScript and build labextension assets
-jlpm build:prod
-
-# 3. Build Python source distribution (sdist) and wheel (.whl)
+# 2. Build Python source distribution (sdist) and prebuilt wheel (.whl)
+# This automatically executes the frontend build via hatch-jupyter-builder
 python -m build
 ```
 
 This generates distribution packages in the `dist/` directory:
-- `dist/jupyterlab_bopp-1.0.0-py3-none-any.whl` (Python Wheel)
+- `dist/jupyterlab_bopp-1.0.0-py3-none-any.whl` (Python Wheel containing prebuilt assets)
 - `dist/jupyterlab_bopp-1.0.0.tar.gz` (Source Archive)
 
 ---
 
 ### Step C: Installing the Packaged Wheel Locally
 
-Once the `.whl` is built, you can install it into any Python environment:
+Once the `.whl` is built, you can install it into any Python environment without Node.js or jlpm:
 
 ```bash
 # Install the built wheel via pip
@@ -120,7 +124,7 @@ When actively modifying extension source code:
 
 ```bash
 # In terminal 1: Watch TypeScript and recompile on file save
-jlpm watch
+npm run watch
 
 # In terminal 2: Run JupyterLab in watch mode
 jupyter lab --watch
@@ -134,8 +138,7 @@ Changes to `src/*.ts` will automatically trigger rebuilds and reload the browser
 To remove the extension from your local environment:
 
 ```bash
-pip uninstall jupyterlab-bopp
-jupyter labextension unlink .
+pip uninstall jupyterlab_bopp
 ```
 
 ---

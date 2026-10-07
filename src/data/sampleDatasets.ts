@@ -139,6 +139,14 @@ const mozartNotes = [
   { t: 10.0, d: 1.8, midi: 48, conf: 0.90 }
 ].sort((a, b) => a.t - b.t);
 
+// Helper to convert decimal score quarter times and durations into rational fractions [num, denom]
+function floatToFraction(val: number): [number, number] {
+  const rounded = Math.round(val * 100);
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const g = gcd(rounded, 100);
+  return [rounded / g, 100 / g];
+}
+
 const MOZART_DATA: BoppAnnotation = {
   media_id: "audio:mozart_sonata_c_k545",
   bopp_version: "1.0",
@@ -146,7 +154,7 @@ const MOZART_DATA: BoppAnnotation = {
     metadata_type: "human",
     annotator_id: "musicologist_01",
     tool: "midi_score_transcriber",
-    description: "Mozart Piano Sonata No. 16 in C major, K. 545 (Allegro opening theme)"
+    description: "Mozart Piano Sonata No. 16 in C major, K. 545 (Allegro opening theme) with Time Interval extent in seconds"
   },
   extent: {
     extent_type: "time_interval",
@@ -161,6 +169,56 @@ const MOZART_DATA: BoppAnnotation = {
     confidence_type: "likelihood",
     confidence: mozartNotes.map(n => n.conf)
   }
+};
+
+// Mozart K.545: MIDI Interval Extent (Standard PPQ=480, BPM=120 ticks)
+const MOZART_MIDI_DATA: BoppAnnotation = {
+  media_id: "audio:mozart_sonata_c_k545_midi",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "musicologist_01",
+    tool: "standard_midi_file_converter",
+    description: "Mozart Piano Sonata No. 16 in C major, K. 545 with MIDI Interval extent (PPQ=480, BPM=120 standard ticks)",
+  },
+  extent: {
+    extent_type: "midi_interval",
+    tick: mozartNotes.map(n => Math.round(n.t * 960)),
+    duration: mozartNotes.map(n => Math.round(n.d * 960)),
+  },
+  payload: {
+    payload_type: "note_midi",
+    value: mozartNotes.map(n => n.midi),
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: mozartNotes.map(n => n.conf),
+  },
+};
+
+// Mozart K.545: Score Interval Extent (Fractional Quarter Notes [numerator, denominator])
+const MOZART_SCORE_DATA: BoppAnnotation = {
+  media_id: "audio:mozart_sonata_c_k545_score",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "musicologist_01",
+    tool: "musicxml_score_transcriber",
+    description: "Mozart Piano Sonata No. 16 in C major, K. 545 with Score Interval extent (quarter note rational fractions [num, denom])",
+  },
+  extent: {
+    extent_type: "score_interval",
+    quarter: mozartNotes.map(n => floatToFraction(n.t * 2)),
+    duration: mozartNotes.map(n => floatToFraction(n.d * 2)),
+  },
+  payload: {
+    payload_type: "note_midi",
+    value: mozartNotes.map(n => n.midi),
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: mozartNotes.map(n => n.conf),
+  },
 };
 
 // Hierarchical Song Structure
@@ -625,14 +683,38 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
   {
     id: "mozart_piano_k545",
     filename: "annotations/mozart_piano_k545.bopp",
-    title: "Mozart K.545 MIDI Piano Roll",
+    title: "Mozart K.545 Piano Roll (Time Seconds)",
     category: "music",
     format: "json",
-    description: "MIDI Interval extent with Note_Midi pitch payload and Likelihood confidence. Visualized as an interactive piano roll keyboard grid.",
+    description: "Time Interval extent (seconds) with Note_Midi pitch payload and Likelihood confidence. Visualized as an interactive piano roll keyboard grid.",
     extentType: "time_interval",
     payloadType: "note_midi",
     confidenceType: "likelihood",
     data: MOZART_DATA,
+  },
+  {
+    id: "mozart_k545_midi",
+    filename: "annotations/mozart_k545_midi.bopp",
+    title: "Mozart K.545 Piano Roll (MIDI Ticks)",
+    category: "music",
+    format: "json",
+    description: "MIDI Interval extent (standard PPQ=480, BPM=120 ticks) with Note_Midi pitch payload and Likelihood confidence. Synchronized with Web Audio sonifier.",
+    extentType: "midi_interval",
+    payloadType: "note_midi",
+    confidenceType: "likelihood",
+    data: MOZART_MIDI_DATA,
+  },
+  {
+    id: "mozart_k545_score",
+    filename: "annotations/mozart_k545_score.bopp",
+    title: "Mozart K.545 Piano Roll (Score Quarters)",
+    category: "score",
+    format: "json",
+    description: "Score Interval extent (rational fractions [num, denom] in quarter notes) with Note_Midi pitch payload and Likelihood confidence.",
+    extentType: "score_interval",
+    payloadType: "note_midi",
+    confidenceType: "likelihood",
+    data: MOZART_SCORE_DATA,
   },
   {
     id: "song_structure",

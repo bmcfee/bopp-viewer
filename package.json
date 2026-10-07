@@ -8,11 +8,18 @@
     "predev": "tsx scripts/generate_types.ts",
     "prebuild": "tsx scripts/generate_types.ts",
     "build": "tsx scripts/generate_types.ts && vite build",
+    "build:prod": "tsx scripts/generate_types.ts && vite build",
+    "install:extension": "tsx scripts/generate_types.ts && vite build",
+    "watch": "vite build --watch",
     "prelint": "tsx scripts/generate_types.ts",
     "dev": "vite --port=3000 --host=0.0.0.0",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist server.js jupyterlab_bopp/labextension",
     "lint": "tsx scripts/generate_types.ts && tsc --noEmit"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "jupyterlab_bopp/labextension"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -36,7 +43,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "json-schema-to-typescript": "^16.0.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.21.0",
