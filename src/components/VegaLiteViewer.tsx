@@ -535,9 +535,11 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const getPalettePreviewColors = (scheme: string): string[] => {
     switch (scheme) {
       case 'mir_eval_pitch':
+        // Chromatic C, C#, D, D#, E, F
         return ['#f2695a', '#f2aa5a', '#f2eb5a', '#5af27f', '#5af2c0', '#5ae2f2'];
       case 'mir_eval_fifths':
-        return ['#f2695a', '#5a60f2', '#f2eb5a', '#d55af2', '#5af2c0', '#f25a8c'];
+        // Circle of fifths C, G, D, A, E, B
+        return ['#f2695a', '#f2aa5a', '#f2eb5a', '#5af27f', '#5af2c0', '#5ae2f2'];
       case 'tableau10':
         return ['#4e79a7', '#f28e2b', '#e1575c', '#76b7b2', '#59a14f', '#edc948'];
       case 'category10':

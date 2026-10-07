@@ -16,6 +16,7 @@ import {
   parseKeyMode,
   ALL_24_KEYS_TOP_TO_BOTTOM,
   FIFTHS_ORDER_12_ROOTS,
+  CHROMATIC_ROOT_MAP,
   MIR_EVAL_COLORMAPS,
   registerMirEvalSchemes,
 } from './mirEvalColors';
@@ -365,28 +366,77 @@ export function buildBoppVegaLiteSpec(
     }
 
     // 0B. GLOBAL KEY MODE DISPLAY: Radial Circle of Fifths Plot with C at the top
+    // Supports single or multiple global key annotations (e.g. 75% C:maj and 25% A:min)
     if (payloadType === 'key_mode') {
-      const rawKey = String(data[0]?.value ?? 'C:maj');
-      const parsed = parseKeyMode(rawKey);
-      const isMinor = parsed?.isMinor ?? false;
-      const activeRoot = parsed?.root ?? 'C';
-      const activeColor = keyToMirEvalColor(rawKey);
-      const activeLabel = parsed ? `${parsed.root} ${parsed.isMinor ? 'Minor' : 'Major'}` : rawKey;
-      const confVal = typeof data[0]?.confidence === 'number' ? data[0].confidence : null;
+      const isPitchScheme = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
+      const mode = isPitchScheme ? 'pitch' : 'fifths';
+
+      // Parse all global key annotations from data records
+      const parsedCandidates = data
+        .map((d, idx) => {
+          const rawKey = String(d.value ?? '');
+          const p = parseKeyMode(rawKey);
+          const conf = typeof d.confidence === 'number' ? d.confidence : null;
+          return {
+            index: idx,
+            rawKey,
+            parsed: p,
+            root: p?.root ?? 'C',
+            semitone: p?.semitone ?? 0,
+            isMinor: p?.isMinor ?? false,
+            confidence: conf,
+            label: p ? `${p.root} ${p.isMinor ? 'Minor' : 'Major'}` : rawKey,
+            fullKey: p ? `${p.root}:${p.isMinor ? 'min' : 'maj'}` : rawKey,
+            color: p ? keyToMirEvalColor(rawKey, mode) : MIR_EVAL_COLORMAPS.neutral_gray,
+          };
+        })
+        .filter(c => Boolean(c.rawKey && c.parsed));
+
+      const candidates = parsedCandidates.length > 0
+        ? parsedCandidates
+        : [
+            {
+              index: 0,
+              rawKey: 'C:maj',
+              parsed: parseKeyMode('C:maj'),
+              root: 'C',
+              semitone: 0,
+              isMinor: false,
+              confidence: null as number | null,
+              label: 'C Major',
+              fullKey: 'C:maj',
+              color: keyToMirEvalColor('C:maj', mode),
+            },
+          ];
+
+      // Sort candidates by confidence descending
+      const sortedCandidates = [...candidates].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+      const primaryCandidate = sortedCandidates[0];
+      const hasMultipleCandidates = candidates.length > 1;
 
       // Circle of fifths roots in clockwise order: C, G, D, A, E, B, F#, Db, Ab, Eb, Bb, F
       const circleValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
-        const isActive =
-          k === activeRoot ||
-          (k === 'Db' && activeRoot === 'C#') ||
-          (k === 'Eb' && activeRoot === 'D#') ||
-          (k === 'F#' && activeRoot === 'Gb') ||
-          (k === 'Ab' && activeRoot === 'G#') ||
-          (k === 'Bb' && activeRoot === 'A#');
+        const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
+        // Check if any candidate matches this tonic pitch class
+        const matchingCand = sortedCandidates.find(c => c.semitone === kSem);
+        const isActive = Boolean(matchingCand);
+        const candConf = matchingCand?.confidence ?? null;
+        const candIsMinor = matchingCand?.isMinor ?? false;
 
-        const sliceColor = isActive
-          ? (isMinor ? MIR_EVAL_COLORMAPS.fifths_dark[i] : MIR_EVAL_COLORMAPS.fifths[i])
-          : MIR_EVAL_COLORMAPS.fifths[i];
+        let sliceColor: string;
+        if (mode === 'pitch') {
+          sliceColor = isActive
+            ? (candIsMinor ? MIR_EVAL_COLORMAPS.pitch_dark[kSem] : MIR_EVAL_COLORMAPS.pitch[kSem])
+            : MIR_EVAL_COLORMAPS.pitch[kSem];
+        } else {
+          // mir_eval circle of fifths colormap (indexed by semitone 0..11)
+          sliceColor = isActive
+            ? (candIsMinor ? MIR_EVAL_COLORMAPS.fifths_dark[kSem] : MIR_EVAL_COLORMAPS.fifths[kSem])
+            : MIR_EVAL_COLORMAPS.fifths[kSem];
+        }
+
+        const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
+        const badgeText = isActive && candConf !== null ? confPct : '';
 
         return {
           key: k,
@@ -396,36 +446,52 @@ export function buildBoppVegaLiteSpec(
           active: isActive,
           stroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#334155' : '#cbd5e1'),
           strokeWidth: isActive ? 3 : 1,
-          opacity: isActive ? 1.0 : 0.45,
+          opacity: isActive
+            ? Math.max(0.72, Math.min(1.0, 0.45 + (candConf ?? 1.0) * 0.55))
+            : (isDark ? 0.25 : 0.35),
           textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: `${k}:${isMinor ? 'min' : 'maj'}`,
-          status: isActive ? 'Detected Global Key' : 'Tonic Class',
+          fullKey: matchingCand ? matchingCand.fullKey : `${k}:maj`,
+          label: matchingCand ? matchingCand.label : k,
+          confidence: candConf,
+          confPct: confPct,
+          badge: badgeText,
+          status: isActive
+            ? (candConf !== null ? `Candidate Key (${confPct})` : 'Detected Global Key')
+            : 'Tonic Class',
         };
       });
 
       const wheelSize = typeof chartWidth === 'number' ? Math.min(460, Math.max(340, chartWidth - 60)) : 380;
+
       const centerData = [
         {
-          title: activeLabel,
-          key: rawKey,
-          color: activeColor,
-          conf: confVal !== null ? `${Math.round(confVal * 1000) / 10}% confidence` : 'Harmonic tonal center',
+          title: primaryCandidate.label,
+          subtitle: hasMultipleCandidates
+            ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}%` : ''} (Primary)`
+            : (primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 1000) / 10}% confidence` : 'Harmonic tonal center'),
+          detail: hasMultipleCandidates
+            ? sortedCandidates.slice(1).map(c => `${c.label} (${c.confidence !== null ? `${Math.round(c.confidence * 100)}%` : ''})`).join(' · ')
+            : '',
+          color: primaryCandidate.color,
         },
       ];
 
-      return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+      const radialChartSpec: Record<string, unknown> = {
         width: wheelSize,
         height: wheelSize,
         title: {
-          text: `Global Key: ${activeLabel} (Circle of Fifths)`,
-          subtitle: `Media ID: ${annotation.media_id} · Tonal center in circle-of-fifths order with C at the top`,
+          text: hasMultipleCandidates
+            ? `Global Key Candidates (${mode === 'pitch' ? 'Chromatic' : 'Circle of Fifths'})`
+            : `Global Key: ${primaryCandidate.label} (${mode === 'pitch' ? 'Chromatic' : 'Circle of Fifths'})`,
+          subtitle: hasMultipleCandidates
+            ? `Media ID: ${annotation.media_id} · ${sortedCandidates.map(c => `${c.label}${c.confidence !== null ? ` (${Math.round(c.confidence * 100)}%)` : ''}`).join(' · ')}`
+            : `Media ID: ${annotation.media_id} · Tonal center in circle-of-fifths order with C at the top`,
           color: textColor,
           subtitleColor: axisColor,
         },
         config: baseConfig,
         layer: [
-          // 1. Sector Arc Ring
+          // 1. Sector Arc Ring (12 tonal sectors around the circle)
           {
             data: { values: circleValues },
             encoding: {
@@ -448,7 +514,7 @@ export function buildBoppVegaLiteSpec(
             },
             mark: { type: 'arc', innerRadius: 75, outerRadius: 135 },
           },
-          // 2. Active Sector Outer Accent Ring
+          // 2. Active Candidate Sector Outer Accent Ring
           {
             data: { values: circleValues },
             transform: [{ filter: 'datum.active == true' }],
@@ -466,7 +532,29 @@ export function buildBoppVegaLiteSpec(
             },
             mark: { type: 'arc', innerRadius: 70, outerRadius: 142, opacity: 1.0 },
           },
-          // 3. Perimeter Tonic Note Labels (C at top 12 o'clock, clockwise in fifths)
+          // 3. Confidence Badges on Active Slices
+          {
+            data: { values: circleValues },
+            transform: [{ filter: 'datum.active == true && datum.badge != ""' }],
+            encoding: {
+              theta: {
+                field: 'count',
+                type: 'quantitative',
+                stack: true,
+                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
+              },
+              order: { field: 'fifths', type: 'quantitative' },
+              text: { field: 'badge', type: 'nominal' },
+            },
+            mark: {
+              type: 'text',
+              radius: 105,
+              fontSize: 11,
+              fontWeight: 'bold',
+              fill: isDark ? '#ffffff' : '#0f172a',
+            },
+          },
+          // 4. Perimeter Tonic Note Labels (C at 12 o'clock, clockwise in fifths)
           {
             data: { values: circleValues },
             encoding: {
@@ -488,14 +576,14 @@ export function buildBoppVegaLiteSpec(
               font: 'system-ui, -apple-system, sans-serif',
             },
           },
-          // 4. Center Key Title
+          // 5. Center Key Primary Title
           {
             data: { values: centerData },
             mark: {
               type: 'text',
               align: 'center',
               baseline: 'middle',
-              dy: -10,
+              dy: hasMultipleCandidates ? -14 : -8,
               fontSize: 18,
               fontWeight: 'bold',
               font: 'system-ui, -apple-system, sans-serif',
@@ -505,22 +593,104 @@ export function buildBoppVegaLiteSpec(
               color: { field: 'color', type: 'nominal', scale: null },
             },
           },
-          // 5. Center Descriptor & Confidence
+          // 6. Center Descriptor / Primary Confidence
           {
             data: { values: centerData },
             mark: {
               type: 'text',
               align: 'center',
               baseline: 'middle',
-              dy: 14,
+              dy: hasMultipleCandidates ? 5 : 14,
               fontSize: 11,
               fill: axisColor,
             },
             encoding: {
-              text: { field: 'conf', type: 'nominal' },
+              text: { field: 'subtitle', type: 'nominal' },
             },
           },
+          // 7. Center Secondary Candidates Detail (when multiple candidates exist)
+          ...(hasMultipleCandidates
+            ? [
+                {
+                  data: { values: centerData },
+                  mark: {
+                    type: 'text',
+                    align: 'center',
+                    baseline: 'middle',
+                    dy: 22,
+                    fontSize: 10,
+                    fill: axisColor,
+                  },
+                  encoding: {
+                    text: { field: 'detail', type: 'nominal' },
+                  },
+                },
+              ]
+            : []),
         ],
+      };
+
+      // If multiple candidates are present, append a Candidate Likelihood bar chart breakdown
+      if (hasMultipleCandidates) {
+        const candidateBarData = sortedCandidates.map(c => ({
+          key: c.label,
+          confidence: c.confidence ?? 0,
+          confPct: c.confidence !== null ? `${Math.round(c.confidence * 100)}%` : '',
+          color: c.color,
+        }));
+
+        const barChartSpec = {
+          width: wheelSize,
+          height: Math.max(90, sortedCandidates.length * 28 + 40),
+          title: {
+            text: 'Key Likelihood Distribution',
+            fontSize: 12,
+            color: textColor,
+          },
+          data: { values: candidateBarData },
+          encoding: {
+            y: {
+              field: 'key',
+              type: 'nominal',
+              sort: candidateBarData.map(d => d.key),
+              title: null,
+              axis: { labelColor: textColor, labelFontWeight: 'bold' },
+            },
+            x: {
+              field: 'confidence',
+              type: 'quantitative',
+              title: 'Likelihood',
+              scale: { domain: [0, 1] },
+              axis: { format: '%', titleColor: textColor, labelColor: axisColor },
+            },
+          },
+          layer: [
+            {
+              mark: { type: 'bar', cornerRadius: 4, height: 16 },
+              encoding: {
+                color: { field: 'color', type: 'nominal', scale: null },
+              },
+            },
+            {
+              mark: { type: 'text', align: 'left', dx: 6, fontSize: 11, fontWeight: 'bold' },
+              encoding: {
+                text: { field: 'confPct', type: 'nominal' },
+                color: { value: textColor },
+              },
+            },
+          ],
+        };
+
+        return {
+          $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+          config: baseConfig,
+          vconcat: [radialChartSpec, barChartSpec],
+        };
+      }
+
+      return {
+        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        ...radialChartSpec,
       };
     }
 
@@ -863,8 +1033,10 @@ export function buildBoppVegaLiteSpec(
     // In Vega-Lite ordinal y-scale, domain[0] is placed at the top and domain[last] is placed at the bottom.
     // ALL_24_KEYS_TOP_TO_BOTTOM (ordered from B:min down to C:maj) ensures C:maj is at the bottom!
     // Each tonic groups Major and Minor together consistently across all datasets.
+    const isPitchScheme = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
+    const mode = isPitchScheme ? 'pitch' : 'fifths';
     const keyDomain = [...ALL_24_KEYS_TOP_TO_BOTTOM];
-    const keyColors = keyDomain.map(k => keyToMirEvalColor(k));
+    const keyColors = keyDomain.map(k => keyToMirEvalColor(k, mode));
 
     const keyColorScale = {
       domain: keyDomain,
@@ -901,7 +1073,7 @@ export function buildBoppVegaLiteSpec(
           color: {
             field: 'value',
             type: 'nominal',
-            title: 'Key (Circle of Fifths)',
+            title: isPitchScheme ? 'Key (Chromatic Pitch)' : 'Key (Circle of Fifths)',
             scale: keyColorScale,
             legend: {
               orient: 'top',

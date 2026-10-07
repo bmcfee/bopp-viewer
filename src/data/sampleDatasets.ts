@@ -371,16 +371,16 @@ const KEY_GLOBAL_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     curator: "Brian McFee",
-    description: "Global musical key and mode across the entire media object (no temporal extent)",
+    description: "Global musical key and mode distribution across the entire media object with multiple candidate annotations (75% C Major, 25% A Minor)",
     dataset: "Harmonic Reference Benchmarks",
   },
   payload: {
     payload_type: "key_mode",
-    value: ["C:maj"]
+    value: ["C:maj", "A:min"]
   },
   confidence: {
     confidence_type: "likelihood",
-    confidence: [0.98]
+    confidence: [0.75, 0.25]
   }
 };
 
@@ -711,7 +711,7 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Global Key Mode (No Extent)",
     category: "music",
     format: "json",
-    description: "Demonstrates key_mode payload with NO extent at all (global attribute across entire media object).",
+    description: "Demonstrates key_mode payload with NO extent at all (global multiple candidate keys with likelihood confidences across media object).",
     extentType: "none",
     payloadType: "key_mode",
     confidenceType: "likelihood",

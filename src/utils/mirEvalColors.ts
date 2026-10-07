@@ -54,56 +54,59 @@ export const MIR_EVAL_COLORMAPS = {
     "#ad1f4e",
   ],
 
-  // Circle of fifths maps (cycling C, G, D, A, E, B, F#, C#/Db, G#/Ab, D#/Eb, A#/Bb, F)
+  // Circle of fifths maps (in mir_eval display.py, indexed by root semitone 0..11:
+  // 0:C, 1:C#/Db, 2:D, 3:D#/Eb, 4:E, 5:F, 6:F#/Gb, 7:G, 8:G#/Ab, 9:A, 10:A#/Bb, 11:B)
+  // When ordered by fifths (C, G, D, A, E, B, F#, Db, Ab, Eb, Bb, F), this produces a
+  // continuous rainbow hue cycle (Red, Orange, Yellow, Light Green, Teal, Cyan, Light Blue, Blue, Purple, Magenta, Pink, Rose)
   fifths: [
-    "#f2695a", // 0: C
-    "#5a60f2", // 1: G
-    "#f2eb5a", // 2: D
-    "#d55af2", // 3: A
-    "#5af2c0", // 4: E
-    "#f25a8c", // 5: B
-    "#5aa1f2", // 6: F# / Gb
-    "#f2aa5a", // 7: C# / Db
-    "#945af2", // 8: G# / Ab
-    "#5af27f", // 9: D# / Eb
-    "#f25acd", // 10: A# / Bb
-    "#5ae2f2", // 11: F
+    "#f2695a", // semitone 0: C  (Circle of 5ths: 0 - Red)
+    "#5a60f2", // semitone 1: C#/Db (Circle of 5ths: 7 - Blue)
+    "#f2eb5a", // semitone 2: D  (Circle of 5ths: 2 - Yellow)
+    "#d55af2", // semitone 3: D#/Eb (Circle of 5ths: 9 - Magenta)
+    "#5af2c0", // semitone 4: E  (Circle of 5ths: 4 - Teal)
+    "#f25a8c", // semitone 5: F  (Circle of 5ths: 11 - Rose)
+    "#5aa1f2", // semitone 6: F#/Gb (Circle of 5ths: 6 - Light Blue)
+    "#f2aa5a", // semitone 7: G  (Circle of 5ths: 1 - Orange)
+    "#945af2", // semitone 8: G#/Ab (Circle of 5ths: 8 - Purple)
+    "#5af27f", // semitone 9: A  (Circle of 5ths: 3 - Light Green)
+    "#f25acd", // semitone 10: A#/Bb (Circle of 5ths: 10 - Pink)
+    "#5ae2f2", // semitone 11: B (Circle of 5ths: 5 - Cyan)
   ],
   fifths_light: [
-    "#ffbab3", // C
-    "#b3b6ff", // G
-    "#fffbb3", // D
-    "#f1b3ff", // A
-    "#b3ffe6", // E
-    "#ffb3cc", // B
-    "#b3d7ff", // F# / Gb
-    "#ffdbb3", // C# / Db
-    "#d0b3ff", // G# / Ab
-    "#b3ffc5", // D# / Eb
-    "#ffb3ec", // A# / Bb
-    "#b3f7ff", // F
+    "#ffbab3", // semitone 0: C
+    "#b3b6ff", // semitone 1: C#/Db
+    "#fffbb3", // semitone 2: D
+    "#f1b3ff", // semitone 3: D#/Eb
+    "#b3ffe6", // semitone 4: E
+    "#ffb3cc", // semitone 5: F
+    "#b3d7ff", // semitone 6: F#/Gb
+    "#ffdbb3", // semitone 7: G
+    "#d0b3ff", // semitone 8: G#/Ab
+    "#b3ffc5", // semitone 9: A
+    "#ffb3ec", // semitone 10: A#/Bb
+    "#b3f7ff", // semitone 11: B
   ],
   fifths_dark: [
-    "#ad2d1f", // C
-    "#1f25ad", // G
-    "#ada71f", // D
-    "#931fad", // A
-    "#1fad7e", // E
-    "#ad1f4e", // B
-    "#1f62ad", // F# / Gb
-    "#ad6a1f", // C# / Db
-    "#561fad", // G# / Ab
-    "#1fad41", // D# / Eb
-    "#ad1f8b", // A# / Bb
-    "#1f9fad", // F
+    "#ad2d1f", // semitone 0: C
+    "#1f25ad", // semitone 1: C#/Db
+    "#ada71f", // semitone 2: D
+    "#931fad", // semitone 3: D#/Eb
+    "#1fad7e", // semitone 4: E
+    "#ad1f4e", // semitone 5: F
+    "#1f62ad", // semitone 6: F#/Gb
+    "#ad6a1f", // semitone 7: G
+    "#561fad", // semitone 8: G#/Ab
+    "#1fad41", // semitone 9: A
+    "#ad1f8b", // semitone 10: A#/Bb
+    "#1f9fad", // semitone 11: B
   ],
   // Gray for out-of-gamut 'X' or no-chord 'N'
   neutral_gray: "#94a3b8",
 };
 
-// Circle of fifths root order: index in fifths colormap
-// C=0, G=1, D=2, A=3, E=4, B=5, F#=6, C#=7, G#=8, D#=9, A#=10, F=11
-const FIFTHS_ROOT_MAP: Record<string, number> = {
+// Clockwise rank on Circle of Fifths with C at 12 o'clock (0..11)
+// C=0, G=1, D=2, A=3, E=4, B=5, F#=6, Db=7, Ab=8, Eb=9, Bb=10, F=11
+export const CIRCLE_OF_FIFTHS_CLOCKWISE_INDEX: Record<string, number> = {
   C: 0,
   "B#": 0,
   G: 1,
@@ -126,8 +129,11 @@ const FIFTHS_ROOT_MAP: Record<string, number> = {
   "E#": 11,
 };
 
-// Chromatic pitch root map: index in pitch colormap (0..11)
-const CHROMATIC_ROOT_MAP: Record<string, number> = {
+// Backwards-compatible alias
+export const FIFTHS_ROOT_MAP = CIRCLE_OF_FIFTHS_CLOCKWISE_INDEX;
+
+// Chromatic pitch root map: index in semitone colormaps (0..11)
+export const CHROMATIC_ROOT_MAP: Record<string, number> = {
   C: 0,
   "B#": 0,
   "C#": 1,
@@ -251,19 +257,24 @@ export function getKeyTonicRank(keyStr: string): number {
 }
 
 /**
- * Maps a key_mode label to mir_eval circle-of-fifths palette
- * Major keys use fifths, Minor keys use fifths_dark
+ * Maps a key_mode label to mir_eval circle-of-fifths or chromatic pitch palette
+ * Major keys use bright fifths/pitch, Minor keys use darker fifths_dark/pitch_dark
+ * In mir_eval display.py, both 'fifths' and 'pitch' colormaps are indexed by root semitone (0=C..11=B).
  */
-export function keyToMirEvalColor(keyStr: string): string {
+export function keyToMirEvalColor(keyStr: string, mode: 'fifths' | 'pitch' = 'fifths'): string {
   const parsed = parseKeyMode(keyStr);
   if (!parsed) return MIR_EVAL_COLORMAPS.neutral_gray;
 
-  // Use true circle-of-fifths index: C=0, G=1, D=2, A=3, E=4, B=5, F#=6, Db=7, Ab=8, Eb=9, Bb=10, F=11
-  const fifthsIdx = FIFTHS_ROOT_MAP[parsed.root] ?? ((parsed.semitone * 7) % 12);
-  if (parsed.isMinor) {
-    return MIR_EVAL_COLORMAPS.fifths_dark[fifthsIdx];
+  const semitone = parsed.semitone;
+  if (mode === 'pitch') {
+    return parsed.isMinor
+      ? MIR_EVAL_COLORMAPS.pitch_dark[semitone]
+      : MIR_EVAL_COLORMAPS.pitch[semitone];
   }
-  return MIR_EVAL_COLORMAPS.fifths[fifthsIdx];
+
+  return parsed.isMinor
+    ? MIR_EVAL_COLORMAPS.fifths_dark[semitone]
+    : MIR_EVAL_COLORMAPS.fifths[semitone];
 }
 
 /**
