@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "extents.json",
+  "title": "Any Extent",
+  "description": "A discriminated union of all supported columnar extent types.",
+  "oneOf": [
+    { "$ref": "extent/times.json" },
+    { "$ref": "extent/time_interval.json" },
+    { "$ref": "extent/time_frequency_box.json" },
+    { "$ref": "extent/pixel_box.json" },
+    { "$ref": "extent/score_quarter.json" },
+    { "$ref": "extent/score_interval.json" },
+    { "$ref": "extent/midi_tick.json" },
+    { "$ref": "extent/midi_interval.json" }
+  ],
+  "discriminator": {
+    "propertyName": "extent_type"
+  }
+}

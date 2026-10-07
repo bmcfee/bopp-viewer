@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "extents/time_frequency_box.json",
+  "title": "Time-Frequency Box Extent",
+  "type": "object",
+  "properties": {
+    "extent_type": {
+      "const": "time_frequency_box"
+    },
+    "time": {
+      "$ref": "../core.json#/$defs/Array",
+      "description": "Array of start times in seconds.",
+      "items": {
+        "type": "number",
+        "minimum": 0.0
+      }
+    },
+    "duration": {
+      "$ref": "../core.json#/$defs/Array",
+      "description": "Array of box durations in seconds.",
+      "items": {
+        "type": "number",
+        "minimum": 0.0
+      }
+    },
+    "freq_min": {
+      "$ref": "../core.json#/$defs/Array",
+      "description": "Array of minimum frequencies in Hz.",
+      "items": {
+        "type": "number",
+        "minimum": 0.0
+      }
+    },
+    "freq_max": {
+      "$ref": "../core.json#/$defs/Array",
+      "description": "Array of maximum frequencies in Hz.",
+      "items": {
+        "type": "number",
+        "minimum": 0.0
+      }
+    }
+  },
+  "required": ["extent_type", "time", "duration", "freq_min", "freq_max"]
+}

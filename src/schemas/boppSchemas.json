@@ -1,0 +1,1112 @@
+{
+  "annotation.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "v1/annotation.json",
+    "title": "Annotation",
+    "type": "object",
+    "properties": {
+      "id": {
+        "description": "Unique identifier generated via UUIDv5 based on canonical annotation content",
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-5[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      },
+      "parents": {
+        "description": "List of parent annotation IDs from which this annotation was derived",
+        "type": "array",
+        "items": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "media_id": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9]+:.*$"
+      },
+      "bopp_version": {
+        "type": "string",
+        "pattern": "^1\\.\\d+$",
+        "description": "The Semantic Version of the BOPP schema (e.g., 1.0)"
+      },
+      "metadata": {
+        "description": "The metadata describing the annotation",
+        "$ref": "metadata.json"
+      },
+      "extent": {
+        "description": "The parallel array of time/space boundaries (e.g., time_interval, point)",
+        "$ref": "extents.json"
+      },
+      "payload": {
+        "description": "The parallel array of values (e.g., beat, chord)",
+        "$ref": "payloads.json"
+      },
+      "confidence": {
+        "description": "Optional parallel array of likelihoods or votes",
+        "$ref": "confidences.json"
+      },
+      "sandbox": {
+        "description": "Unstructured storage area for arbitrary user-defined data",
+        "type": "object"
+      }
+    },
+    "required": [
+      "media_id",
+      "payload",
+      "bopp_version"
+    ]
+  },
+  "core.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "v1/core.json",
+    "title": "BOPP Core Primitives",
+    "$defs": {
+      "Array": {
+        "type": "array",
+        "description": "A dense columnar array buffer."
+      },
+      "Fraction": {
+        "type": "array",
+        "description": "Rational number encoded as numerator and non-zero denominator",
+        "minLength": 2,
+        "maxLength": 2,
+        "items": [
+          {
+            "type": "integer",
+            "description": "Numerator, signed integer"
+          },
+          {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Denominator. Strictly positive to prevent zero-division and negative bases."
+          }
+        ]
+      },
+      "FractionNonnegative": {
+        "type": "array",
+        "description": "Non-negative rational number",
+        "minLength": 2,
+        "maxLength": 2,
+        "items": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Numerator, non-negative integer"
+          },
+          {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Denominator. Strictly positive to prevent zero-division and negative bases."
+          }
+        ]
+      }
+    }
+  },
+  "extents.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents.json",
+    "title": "Any Extent",
+    "description": "A discriminated union of all supported columnar extent types.",
+    "oneOf": [
+      {
+        "$ref": "extent/times.json"
+      },
+      {
+        "$ref": "extent/time_interval.json"
+      },
+      {
+        "$ref": "extent/time_frequency_box.json"
+      },
+      {
+        "$ref": "extent/pixel_box.json"
+      },
+      {
+        "$ref": "extent/score_quarter.json"
+      },
+      {
+        "$ref": "extent/score_interval.json"
+      },
+      {
+        "$ref": "extent/midi_tick.json"
+      },
+      {
+        "$ref": "extent/midi_interval.json"
+      }
+    ],
+    "discriminator": {
+      "propertyName": "extent_type"
+    }
+  },
+  "extent/times.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/times.json",
+    "title": "Times",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "time"
+      },
+      "time": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "An array of time values.",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "time"
+    ]
+  },
+  "extent/time_interval.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/time_interval.json",
+    "title": "Time Interval Extent",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "time_interval"
+      },
+      "time": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of interval start times in seconds.",
+        "items": {
+          "type": "number"
+        }
+      },
+      "duration": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of interval durations in seconds.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "time",
+      "duration"
+    ]
+  },
+  "extent/time_frequency_box.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/time_frequency_box.json",
+    "title": "Time-Frequency Box Extent",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "time_frequency_box"
+      },
+      "time": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of start times in seconds.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "duration": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of box durations in seconds.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "freq_min": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of minimum frequencies in Hz.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "freq_max": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of maximum frequencies in Hz.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "time",
+      "duration",
+      "freq_min",
+      "freq_max"
+    ]
+  },
+  "extent/pixel_box.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/pixel_box.json",
+    "title": "Pixel Box Extent",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "pixel_box"
+      },
+      "x": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of x-coordinates in pixels.",
+        "items": {
+          "type": "number"
+        }
+      },
+      "width": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of box widths in pixels.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      },
+      "y": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of y-coordinates in pixels.",
+        "items": {
+          "type": "number"
+        }
+      },
+      "height": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of box heights in pixels.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "x",
+      "width",
+      "y",
+      "height"
+    ]
+  },
+  "extent/score_quarter.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/score_quarter.json",
+    "title": "Score quarter notes",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "score_quarter"
+      },
+      "quarter": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "An array of fractional quarter values.",
+        "items": {
+          "$ref": "../core.json#/$defs/Fraction"
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "quarter"
+    ]
+  },
+  "extent/score_interval.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/score_interval.json",
+    "title": "Score Interval",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "score_interval"
+      },
+      "quarter": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of interval start times in fractional quarter notes.",
+        "items": {
+          "$ref": "../core.json#/$defs/Fraction"
+        }
+      },
+      "duration": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of interval durations in fractional quarter notes.",
+        "items": {
+          "$ref": "../core.json#/$defs/FractionNonnegative"
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "quarter",
+      "duration"
+    ]
+  },
+  "extent/midi_tick.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/midi_tick.json",
+    "title": "MIDI Ticks",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "midi_tick"
+      },
+      "tick": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "An array of MIDI tick values.",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "tick"
+    ]
+  },
+  "extent/midi_interval.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "extents/midi_interval.json",
+    "title": "MIDI Interval",
+    "type": "object",
+    "properties": {
+      "extent_type": {
+        "const": "midi_interval"
+      },
+      "tick": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of interval start times in MIDI ticks.",
+        "items": {
+          "type": "number"
+        }
+      },
+      "duration": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Array of interval durations in MIDI ticks.",
+        "items": {
+          "type": "number",
+          "minimum": 0.0
+        }
+      }
+    },
+    "required": [
+      "extent_type",
+      "tick",
+      "duration"
+    ]
+  },
+  "payloads.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payloads.json",
+    "title": "Any Payload",
+    "description": "A discriminated union of all supported columnar payload types.",
+    "oneOf": [
+      {
+        "$ref": "payload/beat.json"
+      },
+      {
+        "$ref": "payload/chord.json"
+      },
+      {
+        "$ref": "payload/key_mode.json"
+      },
+      {
+        "$ref": "payload/lyrics.json"
+      },
+      {
+        "$ref": "payload/mood_thayer.json"
+      },
+      {
+        "$ref": "payload/note_hz.json"
+      },
+      {
+        "$ref": "payload/note_midi.json"
+      },
+      {
+        "$ref": "payload/object.json"
+      },
+      {
+        "$ref": "payload/onset.json"
+      },
+      {
+        "$ref": "payload/pitch_contour_hz.json"
+      },
+      {
+        "$ref": "payload/relation.json"
+      },
+      {
+        "$ref": "payload/segment_multi.json"
+      },
+      {
+        "$ref": "payload/segment_open.json"
+      },
+      {
+        "$ref": "payload/tag_open.json"
+      },
+      {
+        "$ref": "payload/tempo.json"
+      }
+    ],
+    "discriminator": {
+      "propertyName": "payload_type"
+    }
+  },
+  "payload/beat.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/beat.json",
+    "title": "Beat Position Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "beat"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "The metric position of the beat within the measure (e.g., 1 for downbeat, 2, 3, 4).",
+        "items": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/chord.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/chord.json",
+    "title": "Chord Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "chord"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "A musical chord string in extended Harte notation.",
+        "items": {
+          "type": "string",
+          "pattern": "^((N|X)|(([A-G](b*|#*))((:(maj|min|dim|aug|1|5|sus2|sus4|maj6|min6|7|maj7|min7|dim7|hdim7|minmaj7|aug7|9|maj9|min9|11|maj11|min11|13|maj13|min13)(\\((\\*?((b*|#*)([1-9]|1[0-3]?))(,\\*?((b*|#*)([1-9]|1[0-3]?)))*)\\))?)|(:\\((\\*?((b*|#*)([1-9]|1[0-3]?))(,\\*?((b*|#*)([1-9]|1[0-3]?)))*)\\)))?((/((b*|#*)([1-9]|1[0-3]?)))?)?))$"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/key_mode.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/key_mode.json",
+    "title": "Key_Mode Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "key_mode"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Key and optional mode (major/minor or Greek modes)",
+        "items": {
+          "type": "string",
+          "pattern": "^N|([A-G][b#]?)(:(major|minor|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian))?$"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/lyrics.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/lyrics.json",
+    "title": "Lyrics Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "lyrics"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Open strings for lyrics annotations",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/mood_thayer.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/mood_thayer.json",
+    "title": "Mood_Thayer Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "mood_thayer"
+      },
+      "valence": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Valence",
+        "items": {
+          "type": "number"
+        }
+      },
+      "arousal": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Arousal",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "valence",
+      "arousal"
+    ]
+  },
+  "payload/note_hz.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/note_hz.json",
+    "title": "Note_Hz Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "note_hz"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Note pitches in Hz",
+        "items": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/note_midi.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/note_midi.json",
+    "title": "Note_Midi Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "note_midi"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Note pitches in (fractional) MIDI note numbers",
+        "items": {
+          "type": "number"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/object.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/object.json",
+    "title": "Object Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "object"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Annotations consisting of structured object data",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/onset.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/onset.json",
+    "title": "Onset Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "onset"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Onset event markers",
+        "items": {}
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/pitch_contour_hz.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/pitch_contour.json",
+    "title": "Pitch_Contour Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "pitch_contour"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Pitch contours: (index, frequency, voicing)",
+        "items": {
+          "type": "object"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/relation.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/relation",
+    "title": "Relation Payload",
+    "description": "Columnar payload defining relationships between works (covers, quotes, etc).",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "relation"
+      },
+      "performance_id": {
+        "type": "string"
+      },
+      "value": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Array of referenced work or clique identifiers."
+      },
+      "relation": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "enum": [
+            "cover",
+            "quote",
+            "medley_part",
+            "sample",
+            "interpolation",
+            "remix",
+            "live_performance"
+          ]
+        },
+        "description": "Array of relation types parallel to work_id."
+      }
+    },
+    "required": [
+      "payload_type",
+      "performance_id",
+      "value"
+    ],
+    "additionalProperties": false
+  },
+  "payload/segment_multi.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/multi_segment.json",
+    "title": "Multi_Segment Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "multi_segment"
+      },
+      "label": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Multi-level segmentation labels.",
+        "items": {
+          "type": "string"
+        }
+      },
+      "level": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Multi-level segmentation levels.",
+        "items": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "label",
+      "level"
+    ]
+  },
+  "payload/segment_open.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/segment_open.json",
+    "title": "Segment_Open Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "segment_open"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Open vocabulary segment labels",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/tag_open.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/tag_open.json",
+    "title": "Tag_Open Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "tag_open"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Open tag vocabularies allow all strings",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "payload/tempo.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "payload/tempo.json",
+    "title": "Tempo Payload",
+    "type": "object",
+    "properties": {
+      "payload_type": {
+        "const": "tempo"
+      },
+      "value": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "Tempo measurements, in beats per minute (BPM)",
+        "items": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "required": [
+      "payload_type",
+      "value"
+    ]
+  },
+  "confidences.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "confidences.json",
+    "title": "Any Confidence",
+    "description": "A discriminated union of all supported columnar confidence types.",
+    "oneOf": [
+      {
+        "$ref": "confidence/agreement.json"
+      },
+      {
+        "$ref": "confidence/likelihood.json"
+      },
+      {
+        "$ref": "confidence/variance.json"
+      }
+    ],
+    "discriminator": {
+      "propertyName": "confidence_type"
+    }
+  },
+  "confidence/agreement.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "confidence/agreement.json",
+    "title": "Confidence by inter-annotator agreement",
+    "type": "object",
+    "properties": {
+      "confidence_type": {
+        "const": "agreement"
+      },
+      "n_annotators_common": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "The number of annotators who produced all observations"
+      },
+      "confidence": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "The fraction of annotators agreeing on this measurement",
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "n_annotators": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "The number of annotators who produced each observation",
+        "items": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "required": [
+      "confidence_type",
+      "confidence"
+    ]
+  },
+  "confidence/likelihood.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "confidence/likelihood.json",
+    "title": "Likelihood Confidence",
+    "type": "object",
+    "properties": {
+      "confidence_type": {
+        "const": "likelihood"
+      },
+      "confidence": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "The likelihood (probability) of each observation",
+        "items": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "required": [
+      "confidence_type",
+      "confidence"
+    ]
+  },
+  "confidence/variance.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "confidence/variance.json",
+    "title": "Variance Confidence",
+    "type": "object",
+    "properties": {
+      "confidence_type": {
+        "const": "variance"
+      },
+      "confidence": {
+        "$ref": "../core.json#/$defs/Array",
+        "description": "The variance of each observation",
+        "items": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "required": [
+      "confidence_type",
+      "confidence"
+    ]
+  },
+  "metadata.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata.json",
+    "title": "Annotation metadata",
+    "description": "A discriminated union of all supported metadata types.",
+    "oneOf": [
+      {
+        "$ref": "metadata/human.json"
+      },
+      {
+        "$ref": "metadata/algorithm.json"
+      },
+      {
+        "$ref": "metadata/crowd.json"
+      },
+      {
+        "$ref": "metadata/sensor.json"
+      },
+      {
+        "$ref": "metadata/derived.json"
+      },
+      {
+        "$ref": "metadata/other.json"
+      }
+    ],
+    "discriminator": {
+      "propertyName": "metadata_type"
+    }
+  },
+  "metadata/algorithm.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata/algorithm.json",
+    "title": "Algorithm Annotation Metadata",
+    "description": "Metadata for annotations created by algorithms or models.",
+    "type": "object",
+    "properties": {
+      "metadata_type": {
+        "const": "algorithm"
+      },
+      "algorithm_id": {
+        "type": "string",
+        "description": "A unique identifier for the algorithm."
+      },
+      "version": {
+        "type": "string",
+        "description": "The version number of the algorithm."
+      },
+      "parameters": {
+        "type": "object",
+        "description": "A object containing the parameters used by the algorithm."
+      }
+    },
+    "required": [
+      "metadata_type",
+      "algorithm_id",
+      "version",
+      "parameters"
+    ]
+  },
+  "metadata/crowd.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata/crowd.json",
+    "title": "Crowd-sourced Annotation Metadata",
+    "description": "Metadata for annotations created by crowdsourcing.",
+    "type": "object",
+    "properties": {
+      "metadata_type": {
+        "const": "crowd"
+      },
+      "platform": {
+        "type": "string",
+        "description": "The platform or service used for crowdsourcing the annotations."
+      },
+      "num_annotators": {
+        "type": "integer",
+        "description": "The number of annotators contributing to this annotation.",
+        "minimum": 1
+      },
+      "consensus": {
+        "type": "string",
+        "description": "The method used to reach consensus among annotators (e.g., majority vote, expert review)."
+      }
+    },
+    "required": [
+      "metadata_type",
+      "platform",
+      "num_annotators",
+      "consensus"
+    ]
+  },
+  "metadata/derived.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata/derived.json",
+    "title": "Derived Annotation Metadata",
+    "description": "Metadata for annotations derived from other annotations.",
+    "type": "object",
+    "properties": {
+      "metadata_type": {
+        "const": "derived"
+      },
+      "source_ids": {
+        "type": "array",
+        "description": "The ids of source annotations for this derived annotation.",
+        "items": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9]+:.*$"
+        },
+        "minItems": 1
+      }
+    },
+    "required": [
+      "metadata_type",
+      "source_ids"
+    ]
+  },
+  "metadata/human.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata/human.json",
+    "title": "Human Annotation Metadata",
+    "description": "Metadata for annotations created by human annotators.",
+    "type": "object",
+    "properties": {
+      "metadata_type": {
+        "const": "human"
+      },
+      "annotator_id": {
+        "type": "string",
+        "description": "A unique identifier for the human annotator."
+      },
+      "tool": {
+        "type": "string",
+        "description": "The tool or software used by the annotator."
+      }
+    },
+    "required": [
+      "metadata_type",
+      "annotator_id",
+      "tool"
+    ]
+  },
+  "metadata/other.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata/other.json",
+    "title": "Annotation Metadata [other]",
+    "description": "Metadata for annotations from unknown sources",
+    "type": "object",
+    "properties": {
+      "metadata_type": {
+        "const": "other"
+      },
+      "notes": {
+        "type": "string",
+        "description": "Notes or comments about the annotation."
+      }
+    },
+    "required": [
+      "metadata_type",
+      "notes"
+    ]
+  },
+  "metadata/sensor.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "metadata/sensor.json",
+    "title": "Sensor Annotation Metadata",
+    "description": "Metadata for annotations created by sensors or hardware.",
+    "type": "object",
+    "properties": {
+      "metadata_type": {
+        "const": "sensor"
+      },
+      "device": {
+        "type": "string",
+        "description": "A unique identifier for the sensor."
+      },
+      "settings": {
+        "type": "object",
+        "description": "A object containing the settings of the device."
+      }
+    },
+    "required": [
+      "metadata_type",
+      "device",
+      "settings"
+    ]
+  }
+}

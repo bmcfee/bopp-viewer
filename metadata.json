@@ -1,0 +1,6 @@
+{
+  "name": "Jupyter BOPP Visualizer",
+  "description": "JupyterLab plugin and interactive Vega-Lite visualizer for Bounded Observation Payload Protocol (BOPP) JSON and MessagePack annotations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

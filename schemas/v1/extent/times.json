@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "extents/times.json",
+  "title": "Times",
+  "type": "object",
+  "properties": {
+    "extent_type": {
+      "const": "time"
+    },
+    "time": {
+      "$ref": "../core.json#/$defs/Array",
+      "description": "An array of time values.",
+      "items": {
+        "type": "number"
+      }
+    }
+  },
+  "required": ["extent_type", "time"]
+}

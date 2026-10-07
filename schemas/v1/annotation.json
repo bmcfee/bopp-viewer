@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v1/annotation.json",
+  "title": "Annotation",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Unique identifier generated via UUIDv5 based on canonical annotation content",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-5[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "parents": {
+      "description": "List of parent annotation IDs from which this annotation was derived",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "media_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9]+:.*$"
+    },
+    "bopp_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$",
+      "description": "The Semantic Version of the BOPP schema (e.g., 1.0)"
+    },
+    "metadata": {
+        "description": "The metadata describing the annotation",
+        "$ref": "metadata.json"
+    },
+    "extent": { 
+      "description": "The parallel array of time/space boundaries (e.g., time_interval, point)",
+      "$ref": "extents.json" 
+    },
+    "payload": { 
+      "description": "The parallel array of values (e.g., beat, chord)",
+      "$ref": "payloads.json" 
+    },
+    "confidence": { 
+      "description": "Optional parallel array of likelihoods or votes",
+      "$ref": "confidences.json" 
+    },
+    "sandbox": {
+      "description": "Unstructured storage area for arbitrary user-defined data",
+      "type": "object"
+    }
+  },
+  "required": ["media_id", "payload", "bopp_version"]
+}

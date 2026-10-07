@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "v1/core.json",
+  "title": "BOPP Core Primitives",
+  "$defs": {
+    "Array": {
+      "type": "array",
+      "description": "A dense columnar array buffer."
+    },
+    "Fraction": {
+        "type": "array",
+        "description": "Rational number encoded as numerator and non-zero denominator",
+        "minLength": 2,
+        "maxLength": 2,
+        "items": [
+            {
+              "type": "integer",
+              "description": "Numerator, signed integer"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator. Strictly positive to prevent zero-division and negative bases."
+            }
+        ]
+    },
+    "FractionNonnegative": {
+        "type": "array",
+        "description": "Non-negative rational number",
+        "minLength": 2,
+        "maxLength": 2,
+        "items": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Numerator, non-negative integer"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Denominator. Strictly positive to prevent zero-division and negative bases."
+            }
+        ]
+    }
+
+  }
+}

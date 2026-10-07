@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "confidence/variance.json",
+  "title": "Variance Confidence",
+  "type": "object",
+  "properties": {
+    "confidence_type": {
+      "const": "variance"
+    },
+    "confidence": {
+      "$ref": "../core.json#/$defs/Array",
+      "description": "The variance of each observation",
+      "items": {
+        "type": "number",
+        "minimum": 0
+      }
+    }
+  },
+  "required": ["confidence_type", "confidence"]
+}
