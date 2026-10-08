@@ -135,8 +135,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       if (!el) return;
       const w = el.clientWidth;
       if (w && w > 280) {
-        // Leave 64px padding for the plot container margins and axis labels
-        const targetW = Math.max(300, Math.floor(w - 64));
+        // Leave 96px padding for the plot container margins and axis labels
+        const targetW = Math.max(300, Math.floor(w - 96));
         setContainerWidth(prev => (Math.abs(prev - targetW) >= 16 ? targetW : prev));
       }
     };
@@ -777,7 +777,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             ref={plotCardRef}
             className="w-full flex-1 bg-white dark:bg-neutral-950 rounded-lg border border-slate-300 dark:border-neutral-800 p-4 flex flex-col justify-start overflow-x-auto min-h-[420px] shadow-2xs relative"
           >
-            <div className="relative inline-block mx-auto max-w-full">
+            <div className="relative inline-block mx-auto min-w-full">
               {/* Underlying Spectrogram Overlay / Placeholder (positioned directly behind the plot marks) */}
               {isTimeFrequency && showSpectrogram && plotBounds && (
                 <div
@@ -844,7 +844,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               <div
                 ref={chartContainerRef}
                 style={{ position: 'relative', zIndex: 10 }}
-                className="flex items-center justify-center"
+                className="w-full flex items-center justify-start md:justify-center overflow-visible"
               />
             </div>
           </div>

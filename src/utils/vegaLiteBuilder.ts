@@ -159,10 +159,10 @@ export function buildBoppVegaLiteSpec(
   const isTimeFrequencyPlot = extentType === 'time_frequency_box' || payloadType === 'pitch_contour';
   const baseConfig = {
     autosize: {
-      type: 'fit-x' as const,
-      contains: 'content' as const,
+      type: 'pad' as const,
+      contains: 'padding' as const,
     },
-    padding: { left: 24, right: 24, top: 14, bottom: 14 },
+    padding: { left: 28, right: 28, top: 16, bottom: 16 },
     background: isTimeFrequencyPlot ? 'transparent' : isDark ? '#0f172a' : '#ffffff',
     axis: {
       domainColor: axisColor,
@@ -995,6 +995,7 @@ export function buildBoppVegaLiteSpec(
               {
                 name: 'brush',
                 select: { type: 'interval', encodings: ['x'] },
+                value: { [xField]: [minX, maxX] },
               },
             ],
             encoding: {
@@ -1280,6 +1281,7 @@ export function buildBoppVegaLiteSpec(
               {
                 name: 'brush',
                 select: { type: 'interval', encodings: ['x'] },
+                value: { time: [minX, maxX] },
               },
             ],
             encoding: {
