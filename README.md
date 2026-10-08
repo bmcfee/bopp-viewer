@@ -57,10 +57,13 @@ In JupyterLab 4+, the legacy command `jupyter labextension develop` is deprecate
 # 1. Install frontend dependencies (provides @jupyter/builder and @jupyterlab/builder)
 jlpm install # or npm install
 
-# 2. Install package in editable mode (automatically builds extension assets via hatch-jupyter-builder)
+# 2. Build the extension bundle (populates jupyterlab_bopp/labextension)
+jlpm run build # or npm run build
+
+# 3. Install Python package in editable mode
 pip install -e .
 
-# 3. Symlink/develop extension in your JupyterLab environment using modern jupyter-builder:
+# 4. Symlink/develop extension in your JupyterLab environment:
 jupyter-builder develop . --overwrite
 
 # (Alternative if jupyter-builder CLI is not installed separately)

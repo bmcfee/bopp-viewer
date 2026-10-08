@@ -1,0 +1,12 @@
+{
+  "name": "jupyterlab-bopp",
+  "version": "1.0.0",
+  "description": "JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations",
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "labextension",
+    "_build": {
+      "load": "static/index.html"
+    }
+  }
+}
