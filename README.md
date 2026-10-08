@@ -54,10 +54,13 @@ pip install "jupyterlab>=4.0.0" build hatchling "hatch-jupyter-builder>=0.5"
 In JupyterLab 4+, the legacy command `jupyter labextension develop` is deprecated in favor of **`jupyter-builder develop`** or a direct editable pip install with `hatch-jupyter-builder`:
 
 ```bash
-# 1. Install package in editable mode (automatically builds extension assets via hatch-jupyter-builder)
+# 1. Install frontend dependencies (provides @jupyter/builder and @jupyterlab/builder)
+jlpm install # or npm install
+
+# 2. Install package in editable mode (automatically builds extension assets via hatch-jupyter-builder)
 pip install -e .
 
-# 2. Symlink/develop extension in your JupyterLab environment using modern jupyter-builder:
+# 3. Symlink/develop extension in your JupyterLab environment using modern jupyter-builder:
 jupyter-builder develop . --overwrite
 
 # (Alternative if jupyter-builder CLI is not installed separately)
