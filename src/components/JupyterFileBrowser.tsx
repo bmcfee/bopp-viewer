@@ -38,6 +38,7 @@ export const JupyterFileBrowser: React.FC<JupyterFileBrowserProps> = ({
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     benchmarks: true,
     annotations: true,
+    comparisons: true,
     uploaded: true,
   });
 
@@ -52,7 +53,8 @@ export const JupyterFileBrowser: React.FC<JupyterFileBrowserProps> = ({
   );
 
   const benchmarkFiles = filteredFiles.filter(f => f.filename.startsWith('benchmarks/'));
-  const annotationFiles = filteredFiles.filter(f => !f.filename.startsWith('benchmarks/'));
+  const comparisonFiles = filteredFiles.filter(f => f.filename.startsWith('comparisons/'));
+  const annotationFiles = filteredFiles.filter(f => !f.filename.startsWith('benchmarks/') && !f.filename.startsWith('comparisons/'));
 
   return (
     <aside className="w-72 flex-shrink-0 flex flex-col border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-900/60 select-none text-xs">
@@ -212,6 +214,60 @@ export const JupyterFileBrowser: React.FC<JupyterFileBrowserProps> = ({
             </div>
           )}
         </div>
+
+        {/* Comparisons Folder (Illustrates comparisons across extents/confidences on same underlying audio) */}
+        {comparisonFiles.length > 0 && (
+          <div className="pt-1">
+            <button
+              onClick={() => toggleFolder('comparisons')}
+              className="w-full flex items-center gap-1.5 px-2 py-1 text-left font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200/60 dark:hover:bg-neutral-800/60 rounded"
+            >
+              {expandedFolders.comparisons ? (
+                <FolderOpen className="w-3.5 h-3.5 text-purple-500" />
+              ) : (
+                <Folder className="w-3.5 h-3.5 text-purple-500" />
+              )}
+              <span>comparisons/</span>
+              <span className="ml-auto text-[10px] text-neutral-400">{comparisonFiles.length}</span>
+            </button>
+
+            {expandedFolders.comparisons && (
+              <div className="pl-3.5 mt-0.5 space-y-0.5 border-l border-neutral-200 dark:border-neutral-800 ml-3">
+                {comparisonFiles.map(file => {
+                  const isSelected = file.id === selectedFileId;
+                  return (
+                    <button
+                      key={file.id}
+                      onClick={() => onSelectFile(file)}
+                      className={`w-full flex flex-col text-left px-2 py-1.5 rounded transition-all group ${
+                        isSelected
+                          ? 'bg-purple-50 dark:bg-purple-950/70 border border-purple-200 dark:border-purple-800 text-purple-950 dark:text-purple-100 shadow-xs'
+                          : 'hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <File className={`w-3.5 h-3.5 ${isSelected ? 'text-purple-600 dark:text-purple-400' : 'text-neutral-400'}`} />
+                        <span className="font-mono truncate">{file.filename.replace('comparisons/', '')}</span>
+                        {isSelected && <CheckCircle2 className="w-3 h-3 text-purple-600 dark:text-purple-400 ml-auto flex-shrink-0" />}
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-neutral-500 dark:text-neutral-400 mt-0.5 font-mono">
+                        <span>{file.extentType}</span>
+                        <span>·</span>
+                        <span className="text-purple-600 dark:text-purple-400 font-semibold">{file.payloadType}</span>
+                        {file.confidenceType && (
+                          <>
+                            <span>·</span>
+                            <span>{file.confidenceType}</span>
+                          </>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Drag & Drop Upload Footer */}

@@ -11,25 +11,24 @@
   "types": "src/extension/index.ts",
   "type": "module",
   "scripts": {
-    "generate:types": "tsx scripts/generate_types.ts",
-    "predev": "tsx scripts/generate_types.ts",
-    "prebuild": "tsx scripts/generate_types.ts",
-    "build": "tsx scripts/generate_types.ts && vite build && tsx scripts/build_extension.ts",
-    "build:prod": "tsx scripts/generate_types.ts && vite build && tsx scripts/build_extension.ts",
-    "install:extension": "tsx scripts/generate_types.ts && vite build && tsx scripts/build_extension.ts",
-    "postinstall": "tsx scripts/build_extension.ts",
+    "generate:types": "node scripts/generate_types.mjs",
+    "predev": "node scripts/generate_types.mjs",
+    "prebuild": "node scripts/generate_types.mjs",
+    "build": "node scripts/generate_types.mjs && vite build && node scripts/build_extension.mjs",
+    "build:prod": "node scripts/generate_types.mjs && vite build && node scripts/build_extension.mjs",
+    "install:extension": "node scripts/generate_types.mjs && vite build && node scripts/build_extension.mjs",
     "watch": "vite build --watch",
-    "prelint": "tsx scripts/generate_types.ts",
+    "prelint": "node scripts/generate_types.mjs",
     "dev": "vite --port=3000 --host=0.0.0.0",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js jupyterlab_bopp/labextension",
-    "lint": "tsx scripts/generate_types.ts && tsc --noEmit"
+    "clean": "rm -rf dist server.js jupyterlab_bopp/labextension lib .core-meta",
+    "lint": "node scripts/generate_types.mjs && tsc --noEmit"
   },
   "jupyterlab": {
     "extension": true,
     "outputDir": "jupyterlab_bopp/labextension",
     "_build": {
-      "load": "static/remoteEntry.241482acefcf6f0cd493.js",
+      "load": "static/remoteEntry.110d2bf60b225c9fe272.js",
       "extension": "./extension"
     }
   },

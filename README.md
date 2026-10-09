@@ -51,10 +51,10 @@ pip install "jupyterlab>=4.0.0" build hatchling "hatch-jupyter-builder>=0.5"
 
 ### Step A: Modern Local Development Installation (Editable)
 
-In JupyterLab 4+, the legacy command `jupyter labextension develop` is deprecated in favor of **`jupyter-builder develop`** or a direct editable pip install with `hatch-jupyter-builder`:
+The extension build script executes via Node natively (`scripts/build_extension.mjs` and `scripts/generate_types.mjs`), ensuring compatibility across `jlpm`, `yarn`, and `npm` without relying on PATH binaries or external TypeScript loaders.
 
 ```bash
-# 1. Install frontend dependencies (provides @jupyter/builder and @jupyterlab/builder)
+# 1. Install frontend dependencies
 jlpm install # or npm install
 
 # 2. Build the extension bundle (populates jupyterlab_bopp/labextension)
@@ -63,17 +63,10 @@ jlpm run build # or npm run build
 # 3. Install Python package in editable mode
 pip install -e .
 
-# 4. Symlink/develop extension in your JupyterLab environment:
-jupyter-builder develop . --overwrite
-
-# (Alternative if jupyter-builder CLI is not installed separately)
-# pip install -e . automatically links labextension assets into share/jupyter/labextensions
-```
-
-Verify that the extension is detected and enabled:
-```bash
+# 4. Confirm extension status in JupyterLab:
 jupyter labextension list
 ```
+
 You should see:
 ```text
 jupyterlab-bopp v1.0.0 enabled OK (python, jupyterlab_bopp)
@@ -83,6 +76,9 @@ Launch JupyterLab:
 ```bash
 jupyter lab
 ```
+
+> **Note on JupyterLab Extension Manager log warnings:**
+> If you observe an `UnboundLocalError: cannot access local variable 'data'` from `jupyterlab/extensions/pypi.py` in your terminal logs when opening JupyterLab's Extension Manager panel, this is an upstream JupyterLab 4 bug triggered when PyPI API queries fail or are throttled in offline/restricted network environments. It does **not** affect local prebuilt extensions like `jupyterlab-bopp`.
 
 ---
 
@@ -155,9 +151,11 @@ pip uninstall jupyterlab_bopp
 | :--- | :--- | :--- | :--- |
 | `time_interval` | `chord` | Mir_eval Circle-of-Fifths timeline | Synthesized root triads / 7ths |
 | `time` / `interval` | `key_mode` | 24-tonic pitch axis (C at bottom) | Circle-of-fifths colormaps |
-| `none` (global) | `key_mode` | Radial Circle-of-Fifths clock (C at 12 o'clock) | Tonal center inspection |
+| `none` (global) | `key_mode` | Two concentric donut plots (Outer: Major, Inner: Minor) | Harmonic mode inspection |
 | `none` (global) | `tempo` | KPI callout gauge with reference track | Metronome pulse click |
-| `none` (global) | `tag_open` | Ranked horizontal frequency bar chart | Metadata analysis |
+| `none` (global) | `tag_open` | Clear labeled bars with in-plot annotation labels | Metadata analysis |
+| `none` (global) | `mood_thayer` | Russell-Thayer 2D circumplex: 2D Gaussian density heatmap with 1σ/2σ uncertainty bounds (variance) or scatter plot (discrete) | Affective inspection |
+| `time` | `mood_thayer` | Dynamic 2D circumplex trajectory & V/A timeline | Continuous affect tracking |
 | `time` | `beat` | Metric downbeat / upbeat bar chart | Audio click synthesizer |
 | `time` / `midi_interval`| `note_midi` | Opaque piano roll with mir_eval pitch class | Polyphonic synth notes |
 | `time` | `pitch_contour` | Continuous F0 trajectory with voiced state | Pure sine F0 synth (voiced only) |

@@ -633,6 +633,102 @@ const BACH_MIDI_TICKS_DATA: BoppAnnotation = {
   }
 };
 
+// 11. MOOD_THAYER: Static Mood Without Time Dynamics (Ungrounded Media Appraisal)
+const MOOD_STATIC_DATA: BoppAnnotation = {
+  media_id: "audio:ambient_meditation_piece",
+  bopp_version: "1.0",
+  metadata: {
+    curator: "Audio Affect Laboratory",
+    description: "Global affective appraisal of the entire musical piece without time dynamics (Russell-Thayer 2D circumplex with Gaussian variance confidence)",
+  },
+  payload: {
+    payload_type: "mood_thayer",
+    valence: [0.65],
+    arousal: [-0.45],
+  },
+  confidence: {
+    confidence_type: "variance",
+    confidence: [0.035],
+  },
+};
+
+// 11B. MOOD_THAYER: Static Mood Multi-Rater Scatter Plot (Discrete Ratings / Likelihood Confidence)
+const MOOD_STATIC_RATINGS_DATA: BoppAnnotation = {
+  media_id: "audio:ambient_meditation_piece",
+  bopp_version: "1.0",
+  metadata: {
+    curator: "Audio Affect Laboratory",
+    description: "Discrete listener affect ratings for the same meditation piece without time dynamics (rendered as 2D circumplex scatter plot)",
+  },
+  payload: {
+    payload_type: "mood_thayer",
+    valence: [0.65, 0.72, 0.58, 0.80, 0.61, 0.50, 0.75, 0.68],
+    arousal: [-0.45, -0.40, -0.55, -0.35, -0.60, -0.30, -0.50, -0.42],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.95, 0.88, 0.90, 0.75, 0.82, 0.70, 0.92, 0.85],
+  },
+};
+
+// 12. COMPARATIVE PAIRS ON SAME UNDERLYING AUDIO (Drive: mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d)
+// Variant A: Discrete Time Points with Chord (chord onsets instead of time_interval)
+const DRIVE_TIME_POINTS_DATA: BoppAnnotation = {
+  media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
+  bopp_version: "1.0",
+  metadata: {
+    ...DRIVE_DATA.metadata,
+    description: "Same Drive audio: Discrete onset time points (extent: time) comparing with duration intervals",
+  },
+  extent: {
+    extent_type: "time",
+    time: (DRIVE_DATA.extent as { time: number[] }).time,
+  },
+  payload: DRIVE_DATA.payload,
+  confidence: DRIVE_DATA.confidence,
+};
+
+// Variant B: Agreement Confidence comparison on the same chord intervals
+const DRIVE_AGREEMENT_CONF_DATA: BoppAnnotation = {
+  media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
+  bopp_version: "1.0",
+  metadata: {
+    ...DRIVE_DATA.metadata,
+    description: "Same Drive audio: Multi-annotator agreement votes (extent: time_interval, conf: agreement)",
+  },
+  extent: DRIVE_DATA.extent,
+  payload: DRIVE_DATA.payload,
+  confidence: {
+    confidence_type: "agreement",
+    confidence: [
+      0.9, 0.6, 0.7, 1.0, 0.8, 0.7, 1.0, 1.0,
+      0.9, 1.0, 1.0, 0.9, 1.0, 0.9, 1.0, 1.0,
+      0.8, 0.9, 1.0, 1.0, 0.8, 1.0, 1.0, 0.9,
+      1.0, 1.0, 1.0, 1.0, 0.9, 1.0, 0.9, 1.0,
+      1.0, 0.8, 0.9, 1.0, 1.0, 0.8, 1.0, 1.0,
+      0.9, 1.0, 1.0, 1.0, 1.0, 0.9, 1.0, 0.9,
+      1.0, 1.0, 0.8, 0.9, 1.0, 1.0, 0.8
+    ],
+  },
+};
+
+// Variant C: Same Drive audio translated to musical Score Quarters
+const DRIVE_SCORE_QUARTERS_DATA: BoppAnnotation = {
+  media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
+  bopp_version: "1.0",
+  metadata: {
+    ...DRIVE_DATA.metadata,
+    description: "Same Drive audio: Transcribed into Score Interval quarter beats [num, denom] for score comparison",
+  },
+  extent: {
+    extent_type: "score_interval",
+    quarter: (DRIVE_DATA.extent as { time: number[] }).time.map((t, idx) => [idx * 4, 1]),
+    duration: (DRIVE_DATA.extent as { duration: number[] }).duration.map(() => [4, 1]),
+  },
+  payload: DRIVE_DATA.payload,
+  confidence: DRIVE_DATA.confidence,
+};
+
 export const SAMPLE_DATASETS: SampleFileInfo[] = [
   {
     id: "drive_bopp",
@@ -903,5 +999,65 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     extentType: "midi_interval",
     payloadType: "note_midi",
     data: BACH_MIDI_TICKS_DATA,
+  },
+  {
+    id: "mood_static_piece",
+    filename: "annotations/mood_static_gaussian.bopp",
+    title: "Static Global Mood: Gaussian Density (Variance Conf)",
+    category: "emotion",
+    format: "json",
+    description: "Demonstrates mood_thayer payload with NO extent at all: rendered as 2D bivariate Gaussian density heatmap with 1σ and 2σ uncertainty contour bounds assuming Gaussianity from variance confidence.",
+    extentType: "none",
+    payloadType: "mood_thayer",
+    confidenceType: "variance",
+    data: MOOD_STATIC_DATA,
+  },
+  {
+    id: "mood_static_ratings",
+    filename: "comparisons/mood_static_scatter.bopp",
+    title: "Static Global Mood: Multi-Rater Scatter (Likelihood Conf)",
+    category: "emotion",
+    format: "json",
+    description: "Comparative visual: Same ambient meditation piece evaluated with discrete listener ratings, rendered as a 2D circumplex scatter plot without connecting time lines.",
+    extentType: "none",
+    payloadType: "mood_thayer",
+    confidenceType: "likelihood",
+    data: MOOD_STATIC_RATINGS_DATA,
+  },
+  {
+    id: "drive_time_points",
+    filename: "comparisons/drive_time_points.bopp",
+    title: "Drive: Chord Onsets (Extent: time points)",
+    category: "benchmark",
+    format: "json",
+    description: "Comparative visual: Same Drive chords represented as discrete timestamp points instead of duration intervals.",
+    extentType: "time",
+    payloadType: "chord",
+    confidenceType: "likelihood",
+    data: DRIVE_TIME_POINTS_DATA,
+  },
+  {
+    id: "drive_agreement_conf",
+    filename: "comparisons/drive_agreement_conf.bopp",
+    title: "Drive: Agreement Confidence (Conf: agreement)",
+    category: "benchmark",
+    format: "json",
+    description: "Comparative visual: Same Drive chords evaluated with inter-annotator agreement consensus votes instead of likelihoods.",
+    extentType: "time_interval",
+    payloadType: "chord",
+    confidenceType: "agreement",
+    data: DRIVE_AGREEMENT_CONF_DATA,
+  },
+  {
+    id: "drive_score_quarters",
+    filename: "comparisons/drive_score_quarters.bopp",
+    title: "Drive: Score Quarters (Extent: score_interval)",
+    category: "benchmark",
+    format: "json",
+    description: "Comparative visual: Same Drive chords mapped into symbolic score quarter beat intervals [num, denom].",
+    extentType: "score_interval",
+    payloadType: "chord",
+    confidenceType: "likelihood",
+    data: DRIVE_SCORE_QUARTERS_DATA,
   }
 ];

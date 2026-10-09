@@ -27,6 +27,7 @@ async function prepareLabExtension() {
   const libOutput = path.resolve(libDir, 'index.js');
 
   // Use esbuild programmatic API directly so PATH and .bin inconsistencies across jlpm/yarn/npm never fail
+  let bundled = false;
   try {
     const esbuild = await import('esbuild');
     await esbuild.build({
@@ -37,11 +38,26 @@ async function prepareLabExtension() {
       external: ['@jupyterlab/*', '@lumino/*'],
       outfile: libOutput,
     });
+    bundled = true;
   } catch (err) {
-    console.warn('[JupyterLab Bundler] esbuild API error, attempting fallback via node_modules/.bin/esbuild:', err);
-    const esbuildBin = path.resolve(rootDir, 'node_modules/.bin/esbuild');
-    const esbuildCmd = `"${esbuildBin}" "${extensionEntry}" --bundle --platform=browser --format=esm --external:@jupyterlab/* --external:@lumino/* --outfile="${libOutput}"`;
-    execSync(esbuildCmd, { stdio: 'inherit', cwd: rootDir });
+    console.warn('[JupyterLab Bundler] Programmatic esbuild failed, trying module-resolved binary:', err?.message || err);
+  }
+
+  if (!bundled) {
+    // Attempt resolving esbuild executable through node module resolution
+    const req = createRequire(path.resolve(rootDir, 'package.json'));
+    try {
+      const esbuildPkg = req.resolve('esbuild/package.json');
+      const esbuildDir = path.dirname(esbuildPkg);
+      const esbuildBin = path.join(esbuildDir, 'bin/esbuild');
+      const binToUse = fs.existsSync(esbuildBin) ? esbuildBin : path.resolve(rootDir, 'node_modules/.bin/esbuild');
+      const esbuildCmd = `"${binToUse}" "${extensionEntry}" --bundle --platform=browser --format=esm --external:@jupyterlab/* --external:@lumino/* --outfile="${libOutput}"`;
+      execSync(esbuildCmd, { stdio: 'inherit', cwd: rootDir });
+      bundled = true;
+    } catch (fallbackErr) {
+      console.error('[JupyterLab Bundler] Fatal: Could not bundle extension via esbuild:', fallbackErr);
+      throw fallbackErr;
+    }
   }
 
   console.log('[JupyterLab Bundler] 2. Preparing core-meta configuration...');
@@ -52,20 +68,24 @@ async function prepareLabExtension() {
   }
 
   console.log('[JupyterLab Bundler] 3. Running build-labextension webpack compiler...');
-  // Resolve build-labextension using createRequire so it works seamlessly under yarn/jlpm/npm
   const req = createRequire(path.resolve(rootDir, 'package.json'));
-  let buildLabExtScript: string;
+  let buildLabExtScript;
   try {
     buildLabExtScript = req.resolve('@jupyterlab/builder/lib/build-labextension.js');
   } catch {
     buildLabExtScript = path.resolve(rootDir, 'node_modules/@jupyterlab/builder/lib/build-labextension.js');
   }
 
-  // Execute using process.execPath (Node) directly for bulletproof cross-platform/virtualenv execution
-  const webpackCmd = `"${process.execPath}" "${buildLabExtScript}" --core-path "${coreMetaDir}" "${rootDir}"`;
-  execSync(webpackCmd, { stdio: 'inherit', cwd: rootDir });
+  if (fs.existsSync(buildLabExtScript)) {
+    const webpackCmd = `"${process.execPath}" "${buildLabExtScript}" --core-path "${coreMetaDir}" "${rootDir}"`;
+    execSync(webpackCmd, { stdio: 'inherit', cwd: rootDir });
+  } else {
+    console.warn(`[JupyterLab Bundler] Warning: build-labextension.js not found at ${buildLabExtScript}, trying npx build-labextension`);
+    execSync(`npx build-labextension --core-path "${coreMetaDir}" "${rootDir}"`, { stdio: 'inherit', cwd: rootDir });
+  }
 
   console.log('[JupyterLab Bundler] 4. Writing install.json and Python package metadata...');
+  fs.mkdirSync(labextDir, { recursive: true });
   const installJson = {
     packageManager: 'python',
     packageName: 'jupyterlab_bopp',
@@ -82,7 +102,6 @@ async function prepareLabExtension() {
     'utf-8'
   );
 
-  // Write jupyterlab_bopp/package.json with @jupyter/builder devDependency
   const pyPkgPackageJson = {
     name: 'jupyterlab-bopp',
     version: '1.0.0',
