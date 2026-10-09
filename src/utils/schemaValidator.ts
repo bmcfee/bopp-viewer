@@ -98,6 +98,108 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
     }
   }
 
+  // 3b. parents check
+  if (ann.parents !== undefined) {
+    if (!Array.isArray(ann.parents)) {
+      issues.push({ severity: 'error', path: 'parents', message: '"parents" must be an array of UUIDv5 strings.' });
+    } else {
+      let invalidParentCount = 0;
+      for (let i = 0; i < ann.parents.length; i++) {
+        const p = ann.parents[i];
+        if (typeof p !== 'string' || !UUID_V5_REGEX.test(p)) {
+          invalidParentCount++;
+        }
+      }
+      if (invalidParentCount > 0) {
+        issues.push({
+          severity: 'warning',
+          path: 'parents',
+          message: `${invalidParentCount} parent annotation ID(s) do not match RFC 4122 UUIDv5 format.`,
+        });
+      } else {
+        passedCount++;
+      }
+    }
+  }
+
+  // 3c. metadata check (Discriminated union based on metadata_type)
+  if (ann.metadata !== undefined) {
+    if (typeof ann.metadata !== 'object' || ann.metadata === null || Array.isArray(ann.metadata)) {
+      issues.push({ severity: 'error', path: 'metadata', message: '"metadata" must be an object.' });
+    } else {
+      const meta = ann.metadata as Record<string, unknown>;
+      const validMetaTypes = ['human', 'algorithm', 'crowd', 'sensor', 'derived', 'other'];
+      if (!meta.metadata_type || typeof meta.metadata_type !== 'string') {
+        issues.push({
+          severity: 'error',
+          path: 'metadata.metadata_type',
+          message: 'Missing discriminator "metadata_type". Must be one of: human, algorithm, crowd, sensor, derived, other.',
+        });
+      } else if (!validMetaTypes.includes(meta.metadata_type)) {
+        issues.push({
+          severity: 'error',
+          path: 'metadata.metadata_type',
+          message: `Unknown metadata_type "${meta.metadata_type}". Must be one of: ${validMetaTypes.join(', ')}.`,
+        });
+      } else {
+        passedCount++;
+        const mType = meta.metadata_type;
+        if (mType === 'human') {
+          if (!meta.annotator_id || typeof meta.annotator_id !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.annotator_id', message: 'Human metadata requires string "annotator_id".' });
+          } else passedCount++;
+          if (!meta.tool || typeof meta.tool !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.tool', message: 'Human metadata requires string "tool".' });
+          } else passedCount++;
+        } else if (mType === 'algorithm') {
+          if (!meta.algorithm_id || typeof meta.algorithm_id !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.algorithm_id', message: 'Algorithm metadata requires string "algorithm_id".' });
+          } else passedCount++;
+          if (!meta.version || typeof meta.version !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.version', message: 'Algorithm metadata requires string "version".' });
+          } else passedCount++;
+          if (!meta.parameters || typeof meta.parameters !== 'object') {
+            issues.push({ severity: 'error', path: 'metadata.parameters', message: 'Algorithm metadata requires object "parameters".' });
+          } else passedCount++;
+        } else if (mType === 'crowd') {
+          if (!meta.platform || typeof meta.platform !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.platform', message: 'Crowd metadata requires string "platform".' });
+          } else passedCount++;
+          if (typeof meta.num_annotators !== 'number' || meta.num_annotators < 1) {
+            issues.push({ severity: 'error', path: 'metadata.num_annotators', message: 'Crowd metadata requires positive integer "num_annotators".' });
+          } else passedCount++;
+          if (!meta.consensus || typeof meta.consensus !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.consensus', message: 'Crowd metadata requires string "consensus".' });
+          } else passedCount++;
+        } else if (mType === 'sensor') {
+          if (!meta.device || typeof meta.device !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.device', message: 'Sensor metadata requires string "device".' });
+          } else passedCount++;
+          if (!meta.settings || typeof meta.settings !== 'object') {
+            issues.push({ severity: 'error', path: 'metadata.settings', message: 'Sensor metadata requires object "settings".' });
+          } else passedCount++;
+        } else if (mType === 'derived') {
+          if (!meta.transform || typeof meta.transform !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.transform', message: 'Derived metadata requires string "transform".' });
+          } else passedCount++;
+        } else if (mType === 'other') {
+          if (!meta.notes || typeof meta.notes !== 'string') {
+            issues.push({ severity: 'error', path: 'metadata.notes', message: 'Other metadata requires string "notes".' });
+          } else passedCount++;
+        }
+      }
+    }
+  }
+
+  // 3d. sandbox check
+  if (ann.sandbox !== undefined) {
+    if (typeof ann.sandbox !== 'object' || ann.sandbox === null || Array.isArray(ann.sandbox)) {
+      issues.push({ severity: 'error', path: 'sandbox', message: '"sandbox" must be a JSON object containing arbitrary user-defined fields.' });
+    } else {
+      passedCount++;
+    }
+  }
+
   // 4. payload check
   let payloadLength = 0;
   if (!ann.payload) {

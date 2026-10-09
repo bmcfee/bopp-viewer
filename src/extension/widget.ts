@@ -17,6 +17,7 @@ import {
 } from '../utils/boppParser';
 import { buildBoppVegaLiteSpec } from '../utils/vegaLiteBuilder';
 import { validateBoppAnnotation } from '../utils/schemaValidator';
+import { createAnnotationMetadataCardDOM } from './metadataCard';
 import type { BoppAnnotation } from '../types/bopp';
 
 export class BOPPWidget extends DocumentWidget<Widget> {
@@ -229,6 +230,10 @@ export class BOPPWidget extends DocumentWidget<Widget> {
     tabular: Array<Record<string, unknown>>,
     isDark: boolean
   ): void {
+    // Meaningful, expandable Annotation Metadata & Sandbox Box matching demo site
+    const metadataCard = createAnnotationMetadataCardDOM(annotation, isDark, { defaultExpanded: false });
+    container.appendChild(metadataCard);
+
     const chartDiv = document.createElement('div');
     chartDiv.style.width = '100%';
     chartDiv.style.minHeight = '480px';

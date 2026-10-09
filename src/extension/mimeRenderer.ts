@@ -19,6 +19,7 @@ import {
 } from '../utils/boppParser';
 import { buildBoppVegaLiteSpec } from '../utils/vegaLiteBuilder';
 import { validateBoppAnnotation } from '../utils/schemaValidator';
+import { createAnnotationMetadataCardDOM } from './metadataCard';
 import type { BoppAnnotation } from '../types/bopp';
 
 export const BOPP_MIME_TYPES = [
@@ -281,6 +282,10 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
     this._containerNode.appendChild(bodyContainer);
 
     if (this._activeTab === 'visualizer') {
+      // Meaningful, expandable Annotation Metadata & Sandbox Box matching demo site
+      const metadataCard = createAnnotationMetadataCardDOM(annotation, isDark, { defaultExpanded: false, compact: true });
+      bodyContainer.appendChild(metadataCard);
+
       const vizTarget = document.createElement('div');
       vizTarget.style.width = '100%';
       vizTarget.style.minHeight = '280px';
@@ -399,7 +404,7 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
     footer.style.fontSize = '10px';
     footer.style.color = badgeFg;
 
-    const desc = annotation.metadata?.description || '';
+    const desc = (annotation.metadata as any)?.description || (annotation.sandbox as any)?.description || '';
     footer.innerHTML = `
       <span style="font-family: monospace;">${tabular.length} observations · BOPP v${annotation.bopp_version || '1.0'}</span>
       <span style="truncate; max-width: 60%;" title="${desc}">${desc ? desc : 'Interactive BOPP Visualization'}</span>

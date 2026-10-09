@@ -196,7 +196,8 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs">
                   {Object.entries(metadata).map(([key, value]) => {
-                    if (value === null || value === undefined || typeof value === 'object') return null;
+                    if (value === null || value === undefined) return null;
+                    const isObj = typeof value === 'object';
                     return (
                       <div
                         key={key}
@@ -205,8 +206,8 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
                         <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-0.5 truncate" title={key}>
                           {key.replace(/_/g, ' ')}
                         </span>
-                        <span className="font-semibold text-slate-900 dark:text-slate-100 truncate" title={String(value)}>
-                          {key.includes('time') || key.includes('date') || key.includes('created') ? formatDate(value) : String(value)}
+                        <span className={`font-semibold text-slate-900 dark:text-slate-100 truncate ${isObj ? 'font-mono text-[10px]' : ''}`} title={isObj ? JSON.stringify(value) : String(value)}>
+                          {isObj ? JSON.stringify(value) : (key.includes('time') || key.includes('date') || key.includes('created') ? formatDate(value as string | number) : String(value))}
                         </span>
                       </div>
                     );
@@ -214,13 +215,13 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
                 </div>
               )}
 
-              {/* Long Description or Annotation Rules text if available */}
-              {(metadata.description || metadata.annotation_rules) && !showJson && (
+              {/* Long Description or Annotation Rules text if available (from metadata or sandbox) */}
+              {((metadata.description || (annotation.sandbox as any)?.description) || metadata.annotation_rules) && !showJson && (
                 <div className="mt-2.5 p-3 rounded bg-slate-50 dark:bg-neutral-800 border border-slate-300 dark:border-neutral-700 text-xs text-slate-800 dark:text-slate-200">
-                  {metadata.description && (
+                  {(metadata.description || (annotation.sandbox as any)?.description) && (
                     <p className="mb-1 leading-relaxed">
                       <strong className="text-slate-900 dark:text-white font-bold">Description: </strong>
-                      {metadata.description}
+                      {metadata.description || (annotation.sandbox as any)?.description}
                     </p>
                   )}
                   {metadata.annotation_rules && (

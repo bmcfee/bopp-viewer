@@ -29,7 +29,7 @@
     "outputDir": "jupyterlab_bopp/labextension",
     "webpackConfig": "webpack.config.cjs",
     "_build": {
-      "load": "static/remoteEntry.7343fe1dc29661bc409e.js",
+      "load": "static/remoteEntry.7a0d30e918a99baa511d.js",
       "extension": "./extension"
     }
   },

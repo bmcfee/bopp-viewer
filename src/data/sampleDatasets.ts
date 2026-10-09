@@ -26,15 +26,18 @@ const DRIVE_DATA: BoppAnnotation = {
   media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
   bopp_version: "1.0",
   metadata: {
-    curator: "Brian McFee / LabROSA",
+    metadata_type: "human",
     annotator_id: "Isophonics / MIREX",
+    tool: "Sonic Visualiser / mir_eval"
+  },
+  sandbox: {
+    curator: "Brian McFee / LabROSA",
+    dataset: "Isophonics Reference Corpus",
+    description: "Harmonic chord annotations for R.E.M. - Drive from the Isophonics reference corpus",
     annotation_type: "chord",
     version: "1.0",
-    description: "Harmonic chord annotations for R.E.M. - Drive from the Isophonics reference corpus",
-    dataset: "Isophonics Reference Corpus",
-    annotation_tools: "Sonic Visualiser / mir_eval",
     license: "CC-BY-4.0",
-    created: "2024-01-15T12:00:00Z",
+    created: "2024-01-15T12:00:00Z"
   },
   extent: {
     extent_type: "time_interval",
@@ -87,6 +90,16 @@ const DRIVE_DATA: BoppAnnotation = {
 const LONGBEATS_DATA: BoppAnnotation = {
   media_id: "audio:longbeats_reference_track",
   bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "madmom_beat_tracker",
+    version: "0.16.1",
+    parameters: { fps: 100 }
+  },
+  sandbox: {
+    description: "Reference rhythmic beat markers with instantaneous beat time points",
+    source: "MIREX Beat Tracking Evaluation Dataset"
+  },
   extent: {
     extent_type: "time",
     time: Array.from({ length: 80 }, (_, i) => +(i * 0.52).toFixed(3))
@@ -153,7 +166,10 @@ const MOZART_DATA: BoppAnnotation = {
   metadata: {
     metadata_type: "human",
     annotator_id: "musicologist_01",
-    tool: "midi_score_transcriber",
+    tool: "midi_score_transcriber"
+  },
+  sandbox: {
+    piece: "Mozart Piano Sonata No. 16 in C major, K. 545",
     description: "Mozart Piano Sonata No. 16 in C major, K. 545 (Allegro opening theme) with Time Interval extent in seconds"
   },
   extent: {
@@ -178,8 +194,11 @@ const MOZART_MIDI_DATA: BoppAnnotation = {
   metadata: {
     metadata_type: "human",
     annotator_id: "musicologist_01",
-    tool: "standard_midi_file_converter",
-    description: "Mozart Piano Sonata No. 16 in C major, K. 545 with MIDI Interval extent (PPQ=480, BPM=120 standard ticks)",
+    tool: "standard_midi_file_converter"
+  },
+  sandbox: {
+    piece: "Mozart Piano Sonata No. 16 in C major, K. 545",
+    description: "Mozart Piano Sonata No. 16 in C major, K. 545 with MIDI Interval extent (PPQ=480, BPM=120 standard ticks)"
   },
   extent: {
     extent_type: "midi_interval",
@@ -203,8 +222,11 @@ const MOZART_SCORE_DATA: BoppAnnotation = {
   metadata: {
     metadata_type: "human",
     annotator_id: "musicologist_01",
-    tool: "musicxml_score_transcriber",
-    description: "Mozart Piano Sonata No. 16 in C major, K. 545 with Score Interval extent (quarter note rational fractions [num, denom])",
+    tool: "musicxml_score_transcriber"
+  },
+  sandbox: {
+    piece: "Mozart Piano Sonata No. 16 in C major, K. 545",
+    description: "Mozart Piano Sonata No. 16 in C major, K. 545 with Score Interval extent (quarter note rational fractions [num, denom])"
   },
   extent: {
     extent_type: "score_interval",
@@ -247,8 +269,13 @@ const STRUCTURE_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     metadata_type: "crowd",
-    description: "Multi-level hierarchical musical form analysis with inter-annotator agreement",
-    tool: "SalienceFormAnnotator"
+    platform: "Amazon Mechanical Turk",
+    num_annotators: 5,
+    consensus: "majority_vote"
+  },
+  sandbox: {
+    tool: "SalienceFormAnnotator",
+    description: "Multi-level hierarchical musical form analysis with inter-annotator agreement"
   },
   extent: {
     extent_type: "time_interval",
@@ -284,8 +311,12 @@ const TF_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     metadata_type: "sensor",
-    description: "Automated bioacoustic event detection in temperate forest habitat",
-    tool: "BirdNET_Spectrogram_Detector"
+    device: "AudioMoth v1.2",
+    settings: { sample_rate: 48000, gain: "medium" }
+  },
+  sandbox: {
+    tool: "BirdNET_Spectrogram_Detector",
+    description: "Automated bioacoustic event detection in temperate forest habitat"
   },
   extent: {
     extent_type: "time_frequency_box",
@@ -323,6 +354,11 @@ const PITCH_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     metadata_type: "algorithm",
+    algorithm_id: "CREPE",
+    version: "0.0.12",
+    parameters: { step_size_ms: 50, viterbi: true }
+  },
+  sandbox: {
     tool: "CREPE_Pitch_Tracker",
     description: "Fundamental frequency contour (F0 in Hz) with pitch vibrato and voicing"
   },
@@ -352,8 +388,11 @@ const MOOD_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     metadata_type: "human",
-    description: "Continuous dynamic affective appraisal on Russell-Thayer Circumplex space",
-    annotator_id: "affect_evaluator_group"
+    annotator_id: "affect_evaluator_group",
+    tool: "AffectiveSlider_v2"
+  },
+  sandbox: {
+    description: "Continuous dynamic affective appraisal on Russell-Thayer Circumplex space"
   },
   extent: {
     extent_type: "time",
@@ -374,6 +413,15 @@ const MOOD_DATA: BoppAnnotation = {
 const SCORE_DATA: BoppAnnotation = {
   media_id: "score:chopin_prelude_cm",
   bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "music_theorist_02",
+    tool: "MuseScore_Analysis_Plugin"
+  },
+  sandbox: {
+    piece: "Chopin Prelude in C minor Op. 28 No. 20",
+    description: "Harmonic analysis over score intervals (quarter notes)"
+  },
   extent: {
     extent_type: "score_interval",
     quarter: [[0, 1], [1, 2], [1, 1], [2, 1], [9, 4], [3, 1]],
@@ -395,6 +443,11 @@ const PIXEL_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     metadata_type: "algorithm",
+    algorithm_id: "Calvo_OMR_Neural_Segmenter",
+    version: "1.4.0",
+    parameters: { threshold: 0.85, iou: 0.5 }
+  },
+  sandbox: {
     tool: "Calvo_OMR_Neural_Segmenter",
     description: "Optical Music Recognition (OMR) bounding boxes on scanned score page"
   },
@@ -428,9 +481,14 @@ const KEY_GLOBAL_DATA: BoppAnnotation = {
   media_id: "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "musicologist_key_annotator",
+    tool: "key_profile_evaluator"
+  },
+  sandbox: {
     curator: "Brian McFee",
-    description: "Global musical key and mode distribution across the entire media object with multiple candidate annotations (75% C Major, 25% A Minor)",
     dataset: "Harmonic Reference Benchmarks",
+    description: "Global musical key and mode distribution across the entire media object with multiple candidate annotations (75% C Major, 25% A Minor)",
   },
   payload: {
     payload_type: "key_mode",
@@ -447,6 +505,11 @@ const KEY_MODULATION_DATA: BoppAnnotation = {
   media_id: "audio:beethoven_symphony_5_mvt1",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "musicologist_key_annotator",
+    tool: "tonal_pitch_space_mapper"
+  },
+  sandbox: {
     curator: "Brian McFee",
     description: "Key mode modulations with time_interval extent in seconds",
   },
@@ -470,6 +533,11 @@ const KEY_SCORE_DATA: BoppAnnotation = {
   media_id: "score:bach_fugue_bwv846",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "musicologist_key_annotator",
+    tool: "score_analyzer"
+  },
+  sandbox: {
     description: "Key modulations defined over musical score quarter intervals [numerator, denominator]",
   },
   extent: {
@@ -492,7 +560,12 @@ const TEMPO_GLOBAL_DATA: BoppAnnotation = {
   media_id: "audio:funk_drum_loop_master",
   bopp_version: "1.0",
   metadata: {
-    annotator_id: "bpm_detector_01",
+    metadata_type: "algorithm",
+    algorithm_id: "bpm_detector_01",
+    version: "2.1.0",
+    parameters: { method: "autocorrelation" }
+  },
+  sandbox: {
     description: "Global tempo of the entire audio recording (118.0 BPM without extent bounds)",
   },
   payload: {
@@ -510,6 +583,11 @@ const TEMPO_RUBATO_DATA: BoppAnnotation = {
   media_id: "audio:chopin_nocturne_op9_no2",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "performance_analyst",
+    tool: "tempo_tracker_gui"
+  },
+  sandbox: {
     description: "Dynamic rubato tempo variation over time_interval bounds",
   },
   extent: {
@@ -532,6 +610,12 @@ const TEMPO_METRIC_DATA: BoppAnnotation = {
   media_id: "audio:live_jazz_performance",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "instantaneous_tempo_extractor",
+    version: "1.0.0",
+    parameters: { window_beats: 2 }
+  },
+  sandbox: {
     description: "Instantaneous tempo estimates at discrete beat time points",
   },
   extent: {
@@ -549,6 +633,12 @@ const TAGS_GLOBAL_DATA: BoppAnnotation = {
   media_id: "spotify:track:17d5wZz4Z2n1rKq7XWzR2F",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "crowd",
+    platform: "MusicBrainz / AcousticBrainz",
+    num_annotators: 12,
+    consensus: "tag_threshold_0.8"
+  },
+  sandbox: {
     curator: "MusicBrainz / AcousticBrainz",
     description: "Global genre, instrumentation, and mood tags describing the entire media object",
   },
@@ -567,6 +657,11 @@ const TAGS_TIME_INTERVAL_DATA: BoppAnnotation = {
   media_id: "audio:orchestra_arrangement",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "orchestral_curator",
+    tool: "sonic_annotator"
+  },
+  sandbox: {
     description: "Active instrument section presence over time_interval bounds",
   },
   extent: {
@@ -585,6 +680,11 @@ const CHORDS_MIDI_TICKS_DATA: BoppAnnotation = {
   media_id: "midi:standard_type_0_progression",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "midi_theorist",
+    tool: "midi_progression_labeler"
+  },
+  sandbox: {
     description: "Harmonic chords mapped across MIDI tick intervals (480 PPQ)",
   },
   extent: {
@@ -620,6 +720,11 @@ const BACH_MIDI_TICKS_DATA: BoppAnnotation = {
   media_id: "midi:bach_invention_no1",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "derived",
+    transform: "midi_track_extraction",
+    parameters: { track: 1, channel: 0 }
+  },
+  sandbox: {
     description: "Bach Two-Part Invention No. 1 motif with MIDI Interval tick bounds (480 PPQ)",
   },
   extent: {
@@ -638,6 +743,11 @@ const MOOD_STATIC_DATA: BoppAnnotation = {
   media_id: "audio:ambient_meditation_piece",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "human",
+    annotator_id: "affect_lab_expert",
+    tool: "AffectiveSlider_Static"
+  },
+  sandbox: {
     curator: "Audio Affect Laboratory",
     description: "Global affective appraisal of the entire musical piece without time dynamics (Russell-Thayer 2D circumplex with Gaussian variance confidence)",
   },
@@ -657,6 +767,12 @@ const MOOD_STATIC_RATINGS_DATA: BoppAnnotation = {
   media_id: "audio:ambient_meditation_piece",
   bopp_version: "1.0",
   metadata: {
+    metadata_type: "crowd",
+    platform: "Audio Affect Subject Study",
+    num_annotators: 8,
+    consensus: "raw_ratings"
+  },
+  sandbox: {
     curator: "Audio Affect Laboratory",
     description: "Discrete listener affect ratings for the same meditation piece without time dynamics (rendered as 2D circumplex scatter plot)",
   },
@@ -676,8 +792,9 @@ const MOOD_STATIC_RATINGS_DATA: BoppAnnotation = {
 const DRIVE_TIME_POINTS_DATA: BoppAnnotation = {
   media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
   bopp_version: "1.0",
-  metadata: {
-    ...DRIVE_DATA.metadata,
+  metadata: DRIVE_DATA.metadata,
+  sandbox: {
+    ...DRIVE_DATA.sandbox,
     description: "Same Drive audio: Discrete onset time points (extent: time) comparing with duration intervals",
   },
   extent: {
@@ -692,8 +809,9 @@ const DRIVE_TIME_POINTS_DATA: BoppAnnotation = {
 const DRIVE_AGREEMENT_CONF_DATA: BoppAnnotation = {
   media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
   bopp_version: "1.0",
-  metadata: {
-    ...DRIVE_DATA.metadata,
+  metadata: DRIVE_DATA.metadata,
+  sandbox: {
+    ...DRIVE_DATA.sandbox,
     description: "Same Drive audio: Multi-annotator agreement votes (extent: time_interval, conf: agreement)",
   },
   extent: DRIVE_DATA.extent,
@@ -716,8 +834,9 @@ const DRIVE_AGREEMENT_CONF_DATA: BoppAnnotation = {
 const DRIVE_SCORE_QUARTERS_DATA: BoppAnnotation = {
   media_id: "mbid:c8b417c8-04fb-4972-aeaf-161b4742a08d",
   bopp_version: "1.0",
-  metadata: {
-    ...DRIVE_DATA.metadata,
+  metadata: DRIVE_DATA.metadata,
+  sandbox: {
+    ...DRIVE_DATA.sandbox,
     description: "Same Drive audio: Transcribed into Score Interval quarter beats [num, denom] for score comparison",
   },
   extent: {
