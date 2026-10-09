@@ -10,17 +10,23 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 import { IThemeManager } from '@jupyterlab/apputils';
+import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
 import { BOPPWidgetFactory } from './widget';
+import { createBOPPRendererFactory, BOPP_MIME_TYPES } from './mimeRenderer';
 
 const plugin: JupyterFrontEndPlugin<void> = {
   id: 'jupyterlab-bopp:plugin',
-  description: 'Interactive Vega-Lite visualizer for BOPP JSON & MessagePack files',
+  description: 'Interactive Vega-Lite visualizer and MIME renderer for BOPP JSON & MessagePack files',
   autoStart: true,
-  optional: [IThemeManager],
-  activate: (app: JupyterFrontEnd, themeManager: IThemeManager | null) => {
-    console.log('[jupyterlab-bopp] Extension activated! Registering BOPP file types and widget factory...');
+  optional: [IThemeManager, IRenderMimeRegistry],
+  activate: (
+    app: JupyterFrontEnd,
+    themeManager: IThemeManager | null,
+    rendermime: IRenderMimeRegistry | null
+  ) => {
+    console.log('[jupyterlab-bopp] Extension activated! Registering BOPP file types, widget factory, and MIME renderers...');
 
-    // Register .bopp and .bopp.json file types first
+    // 1. Register .bopp and .bopp.json file types
     app.docRegistry.addFileType({
       name: 'bopp',
       displayName: 'BOPP Annotation',
@@ -30,7 +36,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       iconClass: 'jp-MaterialIcon jp-AnalyticsIcon'
     });
 
-    // Register .bopp.msgpack and .msgpack file types
+    // 2. Register .bopp.msgpack and .msgpack file types
     app.docRegistry.addFileType({
       name: 'bopp-msgpack',
       displayName: 'BOPP MessagePack',
@@ -40,6 +46,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
       iconClass: 'jp-MaterialIcon jp-FileIcon'
     });
 
+    // 3. Document Widget Factory (for opening standalone files from file browser)
     const factory = new BOPPWidgetFactory({
       name: 'BOPP Visualizer',
       fileTypes: ['bopp', 'bopp-msgpack'],
@@ -49,7 +56,15 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     app.docRegistry.addWidgetFactory(factory);
+
+    // 4. MIME Renderer Factory for Notebook cell outputs (_repr_mimebundle_)
+    if (rendermime) {
+      console.log('[jupyterlab-bopp] Registering MIME renderer factory for:', BOPP_MIME_TYPES.join(', '));
+      const mimeFactory = createBOPPRendererFactory(themeManager);
+      rendermime.addFactory(mimeFactory, 0);
+    }
   }
 };
 
 export default plugin;
+export { createBOPPRendererFactory, BOPP_MIME_TYPES } from './mimeRenderer';

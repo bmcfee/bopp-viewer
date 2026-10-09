@@ -8,7 +8,6 @@
  * 
  * Generator: json-schema-to-typescript (TypeScript counterpart of datamodel-code-generator)
  * Source: https://github.com/bmcfee/bopp schemas/v1/annotation.json
- * Generated At: 2026-10-09T15:42:12.274Z
  */
 
 /**

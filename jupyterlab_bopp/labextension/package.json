@@ -29,7 +29,7 @@
     "outputDir": "jupyterlab_bopp/labextension",
     "webpackConfig": "webpack.config.cjs",
     "_build": {
-      "load": "static/remoteEntry.e52177b5dda336a22037.js",
+      "load": "static/remoteEntry.7343fe1dc29661bc409e.js",
       "extension": "./extension"
     }
   },
@@ -38,6 +38,8 @@
     "@jupyterlab/application": "^4.5.11",
     "@jupyterlab/apputils": "^4.6.11",
     "@jupyterlab/docregistry": "^4.5.11",
+    "@jupyterlab/rendermime": "^4.5.11",
+    "@jupyterlab/rendermime-interfaces": "^3.13.11",
     "@lumino/widgets": "^2.10.0",
     "@msgpack/msgpack": "^3.1.3",
     "@tailwindcss/vite": "^4.3.3",

@@ -9,10 +9,108 @@ import React, { useState } from 'react';
 import { Copy, Check, Terminal, FileCode2, Package, Layers, ExternalLink } from 'lucide-react';
 
 export const JupyterLabExtensionCode: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'index' | 'widget' | 'package' | 'readme'>('index');
+  const [activeTab, setActiveTab] = useState<'python' | 'index' | 'widget' | 'package' | 'readme'>('python');
   const [copied, setCopied] = useState<boolean>(false);
 
   const files = {
+    python: {
+      filename: 'bopp_repr.py',
+      desc: 'Python _repr_mimebundle_() implementation for BOPP objects to render interactively in JupyterLab notebooks.',
+      code: `"""
+Python implementation of _repr_mimebundle_ for BOPP objects.
+Allows BOPP objects returned in notebook cells to automatically render
+as interactive Vega-Lite visualizations via jupyterlab-bopp.
+"""
+
+import json
+import base64
+from typing import Dict, Any, Optional
+
+try:
+    import msgpack
+    HAS_MSGPACK = True
+except ImportError:
+    HAS_MSGPACK = False
+
+
+class BoppAnnotation:
+    """
+    Example BOPP object supporting JupyterLab MIME rendering.
+    """
+    def __init__(
+        self,
+        media_id: str,
+        payload: Dict[str, Any],
+        extent: Optional[Dict[str, Any]] = None,
+        confidence: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        bopp_version: str = "1.0",
+    ):
+        self.media_id = media_id
+        self.payload = payload
+        self.extent = extent
+        self.confidence = confidence
+        self.metadata = metadata or {}
+        self.bopp_version = bopp_version
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert BOPP annotation to a dictionary conforming to BOPP v1.0 schema."""
+        d = {
+            "media_id": self.media_id,
+            "bopp_version": self.bopp_version,
+            "payload": self.payload,
+        }
+        if self.extent is not None:
+            d["extent"] = self.extent
+        if self.confidence is not None:
+            d["confidence"] = self.confidence
+        if self.metadata:
+            d["metadata"] = self.metadata
+        return d
+
+    def to_msgpack(self) -> bytes:
+        """Serialize annotation to MessagePack binary format."""
+        if not HAS_MSGPACK:
+            raise ImportError("msgpack is required for binary serialization")
+        return msgpack.packb(self.to_dict(), use_bin_type=True)
+
+    def _repr_mimebundle_(
+        self,
+        include: Optional[list] = None,
+        exclude: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        """
+        Jupyter display protocol hook.
+        
+        Returns a dictionary mapping MIME types to data representations.
+        JupyterLab routes 'application/vnd.bopp+json' and 'application/vnd.bopp+msgpack'
+        directly to the jupyterlab-bopp interactive visualizer plugin.
+        """
+        data: Dict[str, Any] = {}
+        data_dict = self.to_dict()
+
+        # 1. Canonical JSON representation (Jupyter transmits as JSON object)
+        # Recommended: provides immediate zero-overhead rendering without msgpack dependency
+        data["application/vnd.bopp+json"] = data_dict
+
+        # 2. Optional binary MessagePack representation (base64-encoded string)
+        # Highly compact for large annotations (dense audio pitch tracks, spectrograms)
+        if HAS_MSGPACK:
+            packed_bytes = msgpack.packb(data_dict, use_bin_type=True)
+            data["application/vnd.bopp+msgpack"] = base64.b64encode(packed_bytes).decode("ascii")
+
+        # 3. Text fallback for terminals, Jupyter console, and export formats
+        obs_count = len(self.payload.get("value") or self.payload.get("valence") or [])
+        data["text/plain"] = (
+            f"<BOPP Annotation v{self.bopp_version} | media_id='{self.media_id}' | "
+            f"payload='{self.payload.get('payload_type')}' | "
+            f"extent='{self.extent.get('extent_type') if self.extent else 'none'}' | "
+            f"{obs_count} observations>"
+        )
+
+        return data
+`,
+    },
     index: {
       filename: 'src/index.ts',
       desc: 'JupyterLab extension entry point registering the custom Document Widget Factory for .bopp and .msgpack files.',
@@ -348,7 +446,7 @@ Double-click any \`.bopp\` or \`.bopp.msgpack\` file to launch the interactive v
         {/* Tab selection */}
         <div className="flex items-center justify-between px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border-b border-neutral-200 dark:border-neutral-700">
           <div className="flex items-center gap-1 overflow-x-auto">
-            {(['index', 'widget', 'package', 'readme'] as const).map(tab => (
+            {(['python', 'index', 'widget', 'package', 'readme'] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
