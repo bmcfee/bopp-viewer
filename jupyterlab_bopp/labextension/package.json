@@ -27,6 +27,7 @@
   "jupyterlab": {
     "extension": true,
     "outputDir": "jupyterlab_bopp/labextension",
+    "webpackConfig": "webpack.config.cjs",
     "_build": {
       "load": "static/remoteEntry.110d2bf60b225c9fe272.js",
       "extension": "./extension"
@@ -45,6 +46,8 @@
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "path-browserify": "^1.0.1",
+    "process": "^0.11.10",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vega": "^6.4.0",

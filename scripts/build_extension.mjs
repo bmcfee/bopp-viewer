@@ -36,6 +36,9 @@ async function prepareLabExtension() {
       platform: 'browser',
       format: 'esm',
       external: ['@jupyterlab/*', '@lumino/*'],
+      define: {
+        'process.env.NODE_ENV': '"production"',
+      },
       outfile: libOutput,
     });
     bundled = true;
@@ -51,7 +54,7 @@ async function prepareLabExtension() {
       const esbuildDir = path.dirname(esbuildPkg);
       const esbuildBin = path.join(esbuildDir, 'bin/esbuild');
       const binToUse = fs.existsSync(esbuildBin) ? esbuildBin : path.resolve(rootDir, 'node_modules/.bin/esbuild');
-      const esbuildCmd = `"${binToUse}" "${extensionEntry}" --bundle --platform=browser --format=esm --external:@jupyterlab/* --external:@lumino/* --outfile="${libOutput}"`;
+      const esbuildCmd = `"${binToUse}" "${extensionEntry}" --bundle --platform=browser --format=esm --define:process.env.NODE_ENV=\\"production\\" --external:@jupyterlab/* --external:@lumino/* --outfile="${libOutput}"`;
       execSync(esbuildCmd, { stdio: 'inherit', cwd: rootDir });
       bundled = true;
     } catch (fallbackErr) {
@@ -108,6 +111,10 @@ async function prepareLabExtension() {
     description: 'JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations',
     keywords: ['jupyter', 'jupyterlab', 'jupyterlab-extension'],
     main: 'lib/index.js',
+    dependencies: {
+      'process': '^0.11.10',
+      'path-browserify': '^1.0.1'
+    },
     devDependencies: {
       '@jupyter/builder': '^1.2.3',
       '@jupyterlab/builder': '^4.5.11',
@@ -115,6 +122,7 @@ async function prepareLabExtension() {
     jupyterlab: {
       extension: true,
       outputDir: 'labextension',
+      webpackConfig: 'webpack.config.cjs'
     },
   };
   fs.writeFileSync(
