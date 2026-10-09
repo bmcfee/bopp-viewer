@@ -29,7 +29,7 @@
     "extension": true,
     "outputDir": "jupyterlab_bopp/labextension",
     "_build": {
-      "load": "static/remoteEntry.550621c54f1f63fceffd.js",
+      "load": "static/remoteEntry.241482acefcf6f0cd493.js",
       "extension": "./extension"
     }
   },

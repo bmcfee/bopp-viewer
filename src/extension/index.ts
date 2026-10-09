@@ -20,21 +20,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
   activate: (app: JupyterFrontEnd, themeManager: IThemeManager | null) => {
     console.log('[jupyterlab-bopp] Extension activated! Registering BOPP file types and widget factory...');
 
-    const factory = new BOPPWidgetFactory({
-      name: 'BOPP Visualizer',
-      fileTypes: ['bopp', 'bopp-msgpack'],
-      defaultFor: ['bopp', 'bopp-msgpack'],
-      themeManager
-    });
-
-    app.docRegistry.addWidgetFactory(factory);
-
-    // Register .bopp and .bopp.json file types
+    // Register .bopp and .bopp.json file types first
     app.docRegistry.addFileType({
       name: 'bopp',
       displayName: 'BOPP Annotation',
       extensions: ['.bopp', '.bopp.json'],
       mimeTypes: ['application/vnd.bopp+json', 'application/json'],
+      fileFormat: 'text',
       iconClass: 'jp-MaterialIcon jp-AnalyticsIcon'
     });
 
@@ -47,6 +39,16 @@ const plugin: JupyterFrontEndPlugin<void> = {
       fileFormat: 'base64',
       iconClass: 'jp-MaterialIcon jp-FileIcon'
     });
+
+    const factory = new BOPPWidgetFactory({
+      name: 'BOPP Visualizer',
+      fileTypes: ['bopp', 'bopp-msgpack'],
+      defaultFor: ['bopp', 'bopp-msgpack'],
+      defaultRendered: ['bopp', 'bopp-msgpack'],
+      themeManager
+    });
+
+    app.docRegistry.addWidgetFactory(factory);
   }
 };
 
