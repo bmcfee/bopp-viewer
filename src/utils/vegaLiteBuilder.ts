@@ -859,7 +859,9 @@ export function buildBoppVegaLiteSpec(
     }
 
     // 0C. GLOBAL GENRES & TAGS DISPLAY (Full horizontal quantitative axis with visible bars)
-    const colorScale = resolveColorScale(colorScheme, payloadType);
+    // Note: mood_thayer static affect is processed in section 8 below (Russell Circumplex)
+    if (payloadType !== 'mood_thayer') {
+      const colorScale = resolveColorScale(colorScheme, payloadType);
     const tagHeight = Math.max(180, Math.min(420, data.length * 44 + 80));
     const sortedData = [...data].sort(
       (a, b) => (typeof b.confidence === 'number' ? b.confidence : 1) - (typeof a.confidence === 'number' ? a.confidence : 1)
@@ -1000,6 +1002,7 @@ export function buildBoppVegaLiteSpec(
         },
       ],
     };
+    }
   }
 
   // =========================================================================
@@ -1889,25 +1892,25 @@ export function buildBoppVegaLiteSpec(
              (typeof d.confidence_std === 'number' && d.confidence_std > 0)
       ) || annotation.confidence?.confidence_type === 'variance';
 
-      // Circumplex Quadrant Background Lines & Quadrant Labels
+      // Circumplex Quadrant Background Lines & Quadrant Labels (Matching right-hand circumplex subplot)
       const quadrantAxes = [
         {
           data: { values: [{ x: 0 }] },
           mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
-          encoding: { x: { field: 'x', type: 'quantitative', scale: { domain: [-1.15, 1.15] } } },
+          encoding: { x: { field: 'x', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
         },
         {
           data: { values: [{ y: 0 }] },
           mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
-          encoding: { y: { field: 'y', type: 'quantitative', scale: { domain: [-1.15, 1.15] } } },
+          encoding: { y: { field: 'y', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
         },
         {
           data: {
             values: [
-              { x: 0.72, y: 0.82, label: 'Happy / Excited (+V, +A)' },
-              { x: -0.72, y: 0.82, label: 'Angry / Tense (-V, +A)' },
-              { x: -0.72, y: -0.82, label: 'Sad / Depressed (-V, -A)' },
-              { x: 0.72, y: -0.82, label: 'Calm / Relaxed (+V, -A)' },
+              { x: 0.7, y: 0.8, label: 'Happy / Excited' },
+              { x: -0.7, y: 0.8, label: 'Angry / Tense' },
+              { x: -0.7, y: -0.8, label: 'Sad / Depressed' },
+              { x: 0.7, y: -0.8, label: 'Calm / Relaxed' },
             ],
           },
           mark: { type: 'text', fontSize: 10, fill: axisColor, fontWeight: 'bold' },
@@ -1931,13 +1934,13 @@ export function buildBoppVegaLiteSpec(
           return { muV, muA, variance, sigma };
         });
 
-        // 2D Gaussian Density Grid over [-1.14, 1.14]
-        const step = 0.06;
+        // 2D Gaussian Density Grid over [-1.1, 1.1] with explicit bounding cells
+        const step = 0.05;
         let maxDensity = 0;
-        const rawGrid: Array<{ v: number; a: number; d: number }> = [];
+        const rawGrid: Array<{ x1: number; x2: number; y1: number; y2: number; d: number }> = [];
 
-        for (let v = -1.14; v <= 1.14; v += step) {
-          for (let a = -1.14; a <= 1.14; a += step) {
+        for (let v = -1.1; v <= 1.1; v += step) {
+          for (let a = -1.1; a <= 1.1; a += step) {
             let sumD = 0;
             for (const pt of points) {
               const dv = v - pt.muV;
@@ -1946,33 +1949,44 @@ export function buildBoppVegaLiteSpec(
               sumD += g;
             }
             if (sumD > maxDensity) maxDensity = sumD;
-            rawGrid.push({ v: Math.round(v * 100) / 100, a: Math.round(a * 100) / 100, d: sumD });
+            rawGrid.push({
+              x1: Math.round((v - step / 2) * 1000) / 1000,
+              x2: Math.round((v + step / 2) * 1000) / 1000,
+              y1: Math.round((a - step / 2) * 1000) / 1000,
+              y2: Math.round((a + step / 2) * 1000) / 1000,
+              d: sumD,
+            });
           }
         }
 
         const densityGrid = maxDensity > 0
           ? rawGrid
-              .map(cell => ({ v: cell.v, a: cell.a, density: cell.d / maxDensity }))
-              .filter(cell => cell.density >= 0.025)
+              .map(cell => ({ x1: cell.x1, x2: cell.x2, y1: cell.y1, y2: cell.y2, density: cell.d / maxDensity }))
+              .filter(cell => cell.density >= 0.02)
           : [];
 
         // Generate 1σ and 2σ contour lines around each center
         const contourPoints: Array<{ x: number; y: number; contour: string; order: number }> = [];
         points.forEach((pt, pIdx) => {
-          const nSteps = 36;
+          const nSteps = 48;
+          // First circle: 1σ contour
           for (let s = 0; s <= nSteps; s++) {
             const angle = (s / nSteps) * 2 * Math.PI;
             contourPoints.push({
               x: pt.muV + pt.sigma * Math.cos(angle),
               y: pt.muA + pt.sigma * Math.sin(angle),
               contour: '1σ (68% Conf)',
-              order: pIdx * 100 + s,
+              order: pIdx * 200 + s,
             });
+          }
+          // Second circle: 2σ contour
+          for (let s = 0; s <= nSteps; s++) {
+            const angle = (s / nSteps) * 2 * Math.PI;
             contourPoints.push({
               x: pt.muV + 1.96 * pt.sigma * Math.cos(angle),
               y: pt.muA + 1.96 * pt.sigma * Math.sin(angle),
               contour: '2σ (95% Conf)',
-              order: pIdx * 100 + 50 + s,
+              order: pIdx * 200 + 100 + s,
             });
           }
         });
@@ -1990,31 +2004,36 @@ export function buildBoppVegaLiteSpec(
           config: baseConfig,
           layer: [
             ...quadrantAxes,
-            // 2D Gaussian Density Heatmap Cells
+            // 2D Gaussian Density Heatmap Cells with bounded tile coordinates
             {
               data: { values: densityGrid },
-              mark: { type: 'rect', opacity: 0.82 },
+              mark: { type: 'rect', opacity: 0.85 },
               encoding: {
                 x: {
-                  field: 'v',
+                  field: 'x1',
                   type: 'quantitative',
-                  title: 'Valence (Pleasure: Negative ↔ Positive)',
-                  scale: { domain: [-1.15, 1.15] },
+                  title: 'Valence (Pleasure)',
+                  scale: { domain: [-1.1, 1.1] },
                   axis: { titleColor: textColor, labelColor: axisColor, grid: true, tickCount: 5 },
                 },
+                x2: { field: 'x2' },
                 y: {
-                  field: 'a',
+                  field: 'y1',
                   type: 'quantitative',
-                  title: 'Arousal (Energy: Low ↔ High)',
-                  scale: { domain: [-1.15, 1.15] },
+                  title: 'Arousal (Energy)',
+                  scale: { domain: [-1.1, 1.1] },
                   axis: { titleColor: textColor, labelColor: axisColor, grid: true, tickCount: 5 },
                 },
+                y2: { field: 'y2' },
                 color: {
                   field: 'density',
                   type: 'quantitative',
                   scale: { scheme: 'viridis' },
-                  title: 'Gaussian Density',
+                  title: 'Density',
                 },
+                tooltip: [
+                  { field: 'density', type: 'quantitative', format: '.2%', title: 'Gaussian Density' },
+                ],
               },
             },
             // Uncertainty Boundary Contours (1σ and 2σ)
@@ -2039,10 +2058,10 @@ export function buildBoppVegaLiteSpec(
               data: { values: data },
               mark: {
                 type: 'circle',
-                size: 220,
+                size: 160,
                 fill: '#ef4444',
                 stroke: '#ffffff',
-                strokeWidth: 2.5,
+                strokeWidth: 2,
               },
               encoding: {
                 x: { field: 'valence', type: 'quantitative' },
@@ -2068,7 +2087,7 @@ export function buildBoppVegaLiteSpec(
                 type: 'text',
                 align: 'left',
                 baseline: 'bottom',
-                dx: 12,
+                dx: 10,
                 dy: -8,
                 fontSize: 11,
                 fontWeight: 'bold',
@@ -2084,14 +2103,14 @@ export function buildBoppVegaLiteSpec(
         };
       }
 
-      // Discrete Scatter Plot without Connecting Line (for Likelihood / Agreement / Ratings)
+      // Discrete Scatter Plot without Connecting Line (Matching trajectory right-hand subplot without connecting line)
       return {
         $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
         width: circumplexSize,
         height: circumplexSize,
         title: {
           text: `Static Global Mood (Russell Circumplex): ${annotation.media_id}`,
-          subtitle: 'Static Valence-Arousal coordinates without time dynamics',
+          subtitle: 'Static Valence-Arousal coordinates without connecting time lines',
           color: textColor,
           subtitleColor: axisColor,
         },
@@ -2100,41 +2119,41 @@ export function buildBoppVegaLiteSpec(
         config: baseConfig,
         layer: [
           ...quadrantAxes,
-          // Prominent Scatter Points
+          // Prominent Scatter Points (No connecting line!)
           {
             mark: {
               type: 'circle',
-              size: 200,
+              size: 140,
               stroke: '#ffffff',
-              strokeWidth: 2,
+              strokeWidth: 1.5,
               opacity: 0.9,
             },
             encoding: {
               x: {
                 field: 'valence',
                 type: 'quantitative',
-                title: 'Valence (Pleasure: Negative ↔ Positive)',
-                scale: { domain: [-1.15, 1.15] },
+                title: 'Valence (Pleasure)',
+                scale: { domain: [-1.1, 1.1] },
                 axis: { titleColor: textColor, labelColor: axisColor, grid: true, tickCount: 5 },
               },
               y: {
                 field: 'arousal',
                 type: 'quantitative',
-                title: 'Arousal (Energy: Low ↔ High)',
-                scale: { domain: [-1.15, 1.15] },
+                title: 'Arousal (Energy)',
+                scale: { domain: [-1.1, 1.1] },
                 axis: { titleColor: textColor, labelColor: axisColor, grid: true, tickCount: 5 },
               },
               color: hasConfidence
-                ? { field: 'confidence', type: 'quantitative', scale: { scheme: 'plasma' }, title: 'Confidence' }
-                : { value: '#3b82f6' },
+                ? { field: 'confidence', type: 'quantitative', scale: { scheme: 'viridis' }, title: 'Confidence' }
+                : { value: '#6366f1' },
               tooltip: [
                 { field: 'valence', type: 'quantitative', format: '.3f', title: 'Valence' },
                 { field: 'arousal', type: 'quantitative', format: '.3f', title: 'Arousal' },
-                ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
+                ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' }] : []),
               ],
             },
           },
-          // Coordinate labels
+          // Coordinate labels beside points
           {
             transform: [
               {
@@ -2146,9 +2165,9 @@ export function buildBoppVegaLiteSpec(
               type: 'text',
               align: 'left',
               baseline: 'bottom',
-              dx: 10,
-              dy: -8,
-              fontSize: 11,
+              dx: 8,
+              dy: -6,
+              fontSize: 10,
               fontWeight: 'bold',
               fill: textColor,
             },

@@ -46,15 +46,23 @@ export const JupyterFileBrowser: React.FC<JupyterFileBrowserProps> = ({
     setExpandedFolders(prev => ({ ...prev, [folder]: !prev[folder] }));
   };
 
-  const filteredFiles = files.filter(f =>
-    f.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    f.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    f.payloadType.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredFiles = files
+    .filter(f =>
+      f.filename.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      f.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      f.payloadType.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
 
-  const benchmarkFiles = filteredFiles.filter(f => f.filename.startsWith('benchmarks/'));
-  const comparisonFiles = filteredFiles.filter(f => f.filename.startsWith('comparisons/'));
-  const annotationFiles = filteredFiles.filter(f => !f.filename.startsWith('benchmarks/') && !f.filename.startsWith('comparisons/'));
+  const benchmarkFiles = filteredFiles
+    .filter(f => f.filename.startsWith('benchmarks/'))
+    .sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
+  const comparisonFiles = filteredFiles
+    .filter(f => f.filename.startsWith('comparisons/'))
+    .sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
+  const annotationFiles = filteredFiles
+    .filter(f => !f.filename.startsWith('benchmarks/') && !f.filename.startsWith('comparisons/'))
+    .sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' }));
 
   return (
     <aside className="w-72 flex-shrink-0 flex flex-col border-r border-neutral-200 dark:border-neutral-800 bg-neutral-50/70 dark:bg-neutral-900/60 select-none text-xs">

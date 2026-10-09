@@ -63,9 +63,14 @@ export default function App() {
     setTheme(t => (t === 'dark' ? 'light' : 'dark'));
   };
 
-  const [files, setFiles] = useState<SampleFileInfo[]>(SAMPLE_DATASETS);
-  const [selectedFileId, setSelectedFileId] = useState<string>(SAMPLE_DATASETS[0].id);
-  const [currentAnnotation, setCurrentAnnotation] = useState<BoppAnnotation>(SAMPLE_DATASETS[0].data);
+  const sortedDatasets = useMemo(
+    () => [...SAMPLE_DATASETS].sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true, sensitivity: 'base' })),
+    []
+  );
+
+  const [files, setFiles] = useState<SampleFileInfo[]>(sortedDatasets);
+  const [selectedFileId, setSelectedFileId] = useState<string>(sortedDatasets[0].id);
+  const [currentAnnotation, setCurrentAnnotation] = useState<BoppAnnotation>(sortedDatasets[0].data);
   const [activeView, setActiveView] = useState<'visualizer' | 'vegaspec' | 'table' | 'raw' | 'validation' | 'extension'>('visualizer');
   const [uploadNotification, setUploadNotification] = useState<string | null>(null);
 
