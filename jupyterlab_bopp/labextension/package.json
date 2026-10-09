@@ -2,11 +2,70 @@
   "name": "jupyterlab-bopp",
   "version": "1.0.0",
   "description": "JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations",
+  "keywords": [
+    "jupyter",
+    "jupyterlab",
+    "jupyterlab-extension"
+  ],
+  "main": "lib/index.js",
+  "types": "src/extension/index.ts",
+  "type": "module",
+  "scripts": {
+    "generate:types": "tsx scripts/generate_types.ts",
+    "predev": "tsx scripts/generate_types.ts",
+    "prebuild": "tsx scripts/generate_types.ts",
+    "build": "tsx scripts/generate_types.ts && vite build && tsx scripts/build_extension.ts",
+    "build:prod": "tsx scripts/generate_types.ts && vite build && tsx scripts/build_extension.ts",
+    "install:extension": "tsx scripts/generate_types.ts && vite build && tsx scripts/build_extension.ts",
+    "postinstall": "tsx scripts/build_extension.ts",
+    "watch": "vite build --watch",
+    "prelint": "tsx scripts/generate_types.ts",
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "preview": "vite preview",
+    "clean": "rm -rf dist server.js jupyterlab_bopp/labextension",
+    "lint": "tsx scripts/generate_types.ts && tsc --noEmit"
+  },
   "jupyterlab": {
     "extension": true,
-    "outputDir": "labextension",
+    "outputDir": "jupyterlab_bopp/labextension",
     "_build": {
-      "load": "static/index.html"
+      "load": "static/remoteEntry.550621c54f1f63fceffd.js",
+      "extension": "./extension"
     }
+  },
+  "dependencies": {
+    "@google/genai": "^2.4.0",
+    "@jupyterlab/application": "^4.5.11",
+    "@jupyterlab/apputils": "^4.6.11",
+    "@jupyterlab/docregistry": "^4.5.11",
+    "@lumino/widgets": "^2.10.0",
+    "@msgpack/msgpack": "^3.1.3",
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vega": "^6.4.0",
+    "vega-embed": "^7.3.0",
+    "vega-lite": "^6.4.3",
+    "vite": "^8.3.0"
+  },
+  "devDependencies": {
+    "@jupyter/builder": "^1.2.3",
+    "@jupyterlab/builder": "^4.5.11",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.28.0",
+    "json-schema-to-typescript": "^16.0.0",
+    "postcss": "^8.5.29",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.21.0",
+    "typescript": "^7.0.2"
   }
 }

@@ -47,7 +47,6 @@ build-function = "hatch_jupyter_builder.npm_builder"
 ensured-targets = [
     "jupyterlab_bopp/labextension/package.json",
 ]
-skip-if-exists = ["jupyterlab_bopp/labextension/package.json"]
 
 [tool.hatch.build.hooks.jupyter-builder.build-kwargs]
 build_cmd = "build:prod"

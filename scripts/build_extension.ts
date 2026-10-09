@@ -3,86 +3,46 @@
  * SPDX-License-Identifier: Apache-2.0
  * 
  * JupyterLab Extension Bundler Script
- * Prepares jupyterlab_bopp/labextension assets and manifests
- * for `pip install -e .` and `jupyter-builder develop .`
+ * 1. Bundles TypeScript extension into lib/index.js with esbuild
+ * 2. Compiles Webpack Module Federation bundle into jupyterlab_bopp/labextension
+ * 3. Generates install.json and Python package manifests
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { execSync } from 'node:child_process';
 
 function prepareLabExtension() {
   const rootDir = process.cwd();
-  const distDir = path.resolve(rootDir, 'dist');
   const pyPkgDir = path.resolve(rootDir, 'jupyterlab_bopp');
   const labextDir = path.resolve(pyPkgDir, 'labextension');
-  const staticDir = path.resolve(labextDir, 'static');
+  const libDir = path.resolve(rootDir, 'lib');
+  const coreMetaDir = path.resolve(rootDir, '.core-meta');
 
-  console.log('[JupyterLab Bundler] Setting up jupyterlab_bopp/labextension...');
+  console.log('[JupyterLab Bundler] 1. Bundling TypeScript extension to lib/index.js...');
+  fs.mkdirSync(libDir, { recursive: true });
 
-  fs.mkdirSync(staticDir, { recursive: true });
+  // Use local esbuild binary
+  const esbuildBin = path.resolve(rootDir, 'node_modules/.bin/esbuild');
+  const extensionEntry = path.resolve(rootDir, 'src/extension/index.ts');
+  const libOutput = path.resolve(libDir, 'index.js');
 
-  // 1. Copy built dist assets into labextension/static if dist exists
-  if (fs.existsSync(distDir)) {
-    const copyRecursive = (src: string, dest: string) => {
-      for (const item of fs.readdirSync(src)) {
-        const srcPath = path.join(src, item);
-        const destPath = path.join(dest, item);
-        const stat = fs.statSync(srcPath);
-        if (stat.isDirectory()) {
-          fs.mkdirSync(destPath, { recursive: true });
-          copyRecursive(srcPath, destPath);
-        } else {
-          fs.copyFileSync(srcPath, destPath);
-        }
-      }
-    };
-    copyRecursive(distDir, staticDir);
-    console.log('[JupyterLab Bundler] Copied compiled bundle assets to labextension/static/');
+  const esbuildCmd = `"${esbuildBin}" "${extensionEntry}" --bundle --platform=browser --format=esm --external:@jupyterlab/* --external:@lumino/* --outfile="${libOutput}"`;
+  execSync(esbuildCmd, { stdio: 'inherit', cwd: rootDir });
+
+  console.log('[JupyterLab Bundler] 2. Preparing core-meta configuration...');
+  fs.mkdirSync(coreMetaDir, { recursive: true });
+  const corePkgJson = path.resolve(rootDir, 'node_modules/@jupyterlab/core-meta/core.package.json');
+  if (fs.existsSync(corePkgJson)) {
+    fs.copyFileSync(corePkgJson, path.join(coreMetaDir, 'package.json'));
   }
 
-  // 2. Create jupyterlab_bopp/package.json with @jupyter/builder devDependency
-  // This ensures that if jupyter-builder inspects the Python package directory directly,
-  // it finds the declared @jupyter/builder devDependency and never raises ValueError.
-  const pyPkgPackageJson = {
-    name: 'jupyterlab-bopp',
-    version: '1.0.0',
-    description: 'JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations',
-    keywords: ['jupyter', 'jupyterlab', 'jupyterlab-extension'],
-    devDependencies: {
-      '@jupyter/builder': '^1.2.3',
-      '@jupyterlab/builder': '^4.5.11',
-    },
-    jupyterlab: {
-      extension: true,
-      outputDir: 'labextension',
-    },
-  };
-  fs.writeFileSync(
-    path.join(pyPkgDir, 'package.json'),
-    JSON.stringify(pyPkgPackageJson, null, 2) + '\n',
-    'utf-8'
-  );
+  console.log('[JupyterLab Bundler] 3. Running build-labextension webpack compiler...');
+  const buildLabExtBin = path.resolve(rootDir, 'node_modules/.bin/build-labextension');
+  const webpackCmd = `"${buildLabExtBin}" --core-path "${coreMetaDir}" "${rootDir}"`;
+  execSync(webpackCmd, { stdio: 'inherit', cwd: rootDir });
 
-  // 3. Create jupyterlab_bopp/labextension/package.json
-  const labextPackageJson = {
-    name: 'jupyterlab-bopp',
-    version: '1.0.0',
-    description: 'JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations',
-    jupyterlab: {
-      extension: true,
-      outputDir: 'labextension',
-      _build: {
-        load: 'static/index.html',
-      },
-    },
-  };
-  fs.writeFileSync(
-    path.join(labextDir, 'package.json'),
-    JSON.stringify(labextPackageJson, null, 2) + '\n',
-    'utf-8'
-  );
-
-  // 4. Create jupyterlab_bopp/labextension/install.json
+  console.log('[JupyterLab Bundler] 4. Writing install.json and Python package metadata...');
   const installJson = {
     packageManager: 'python',
     packageName: 'jupyterlab_bopp',
@@ -99,7 +59,29 @@ function prepareLabExtension() {
     'utf-8'
   );
 
-  console.log('[JupyterLab Bundler] Successfully generated jupyterlab_bopp/labextension manifests.');
+  // Write jupyterlab_bopp/package.json with @jupyter/builder devDependency
+  const pyPkgPackageJson = {
+    name: 'jupyterlab-bopp',
+    version: '1.0.0',
+    description: 'JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations',
+    keywords: ['jupyter', 'jupyterlab', 'jupyterlab-extension'],
+    main: 'lib/index.js',
+    devDependencies: {
+      '@jupyter/builder': '^1.2.3',
+      '@jupyterlab/builder': '^4.5.11',
+    },
+    jupyterlab: {
+      extension: true,
+      outputDir: 'labextension',
+    },
+  };
+  fs.writeFileSync(
+    path.join(pyPkgDir, 'package.json'),
+    JSON.stringify(pyPkgPackageJson, null, 2) + '\n',
+    'utf-8'
+  );
+
+  console.log('[JupyterLab Bundler] Build complete! Extension ready in jupyterlab_bopp/labextension');
 }
 
 prepareLabExtension();

@@ -7,6 +7,8 @@
     "jupyterlab",
     "jupyterlab-extension"
   ],
+  "main": "lib/index.js",
+  "types": "src/extension/index.ts",
   "type": "module",
   "scripts": {
     "generate:types": "tsx scripts/generate_types.ts",
@@ -29,6 +31,10 @@
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@jupyterlab/application": "^4.5.11",
+    "@jupyterlab/apputils": "^4.6.11",
+    "@jupyterlab/docregistry": "^4.5.11",
+    "@lumino/widgets": "^2.10.0",
     "@msgpack/msgpack": "^3.1.3",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
