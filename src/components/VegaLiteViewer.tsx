@@ -9,6 +9,7 @@
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import vegaEmbed, { Result as VegaEmbedResult } from 'vega-embed';
+import * as vega from 'vega';
 import {
   Play,
   Pause,
@@ -25,6 +26,11 @@ import {
   Layers,
   X,
   Upload,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import { buildBoppVegaLiteSpec, VegaLiteBuilderOptions } from '../utils/vegaLiteBuilder';
@@ -224,19 +230,67 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   };
 
   const handleResetZoom = () => {
-    if (vegaResultRef.current?.view) {
-      try {
-        const view = vegaResultRef.current.view;
-        if (typeof view.signal === 'function') {
-          try {
-            view.signal('grid', {});
-          } catch {}
-          try {
-            view.signal('brush', {});
-          } catch {}
-          view.runAsync();
-        }
-      } catch {}
+    handleZoomPreset('all');
+  };
+
+  const handleZoomPreset = (mode: 'all' | 'in' | 'out' | 'left' | 'right') => {
+    if (!vegaResultRef.current?.view) return;
+    const view = vegaResultRef.current.view;
+    try {
+      if (typeof view.signal === 'function') {
+        try { view.signal('grid', {}); } catch {}
+      }
+
+      const brushStore = view.data('brush_store');
+      const minX = 0;
+      const maxX = duration || 100;
+      let cStart = minX;
+      let cEnd = maxX;
+
+      if (brushStore && brushStore.length && brushStore[0]?.values?.[0]) {
+        const val = brushStore[0].values[0];
+        if (typeof val[0] === 'number') cStart = val[0];
+        if (typeof val[1] === 'number') cEnd = val[1];
+      }
+
+      const span = Math.max(0.5, cEnd - cStart);
+      const mid = (cStart + cEnd) / 2;
+
+      let nextStart = cStart;
+      let nextEnd = cEnd;
+
+      if (mode === 'all') {
+        nextStart = minX;
+        nextEnd = maxX;
+      } else if (mode === 'in') {
+        const nextSpan = Math.max(1.0, span / 2);
+        nextStart = Math.max(minX, mid - nextSpan / 2);
+        nextEnd = Math.min(maxX, mid + nextSpan / 2);
+      } else if (mode === 'out') {
+        const nextSpan = Math.min(maxX - minX, span * 2);
+        nextStart = Math.max(minX, mid - nextSpan / 2);
+        nextEnd = Math.min(maxX, mid + nextSpan / 2);
+      } else if (mode === 'left') {
+        const shift = span * 0.35;
+        nextStart = Math.max(minX, cStart - shift);
+        nextEnd = Math.min(maxX, nextStart + span);
+      } else if (mode === 'right') {
+        const shift = span * 0.35;
+        nextEnd = Math.min(maxX, cEnd + shift);
+        nextStart = Math.max(minX, nextEnd - span);
+      }
+
+      const unit = brushStore?.[0]?.unit || 'concat_1';
+      const fields = brushStore?.[0]?.fields || [{ field: 'time', channel: 'x', type: 'R' }];
+      const cs = vega.changeset().remove(() => true).insert([{
+        unit,
+        fields,
+        values: [[nextStart, nextEnd]],
+      }]);
+      view.change('brush_store', cs);
+      view.runAsync();
+    } catch (e) {
+      console.warn('Zoom preset error:', e);
     }
   };
 
@@ -323,6 +377,11 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
         // Listen for clicks anywhere on the display to seek playhead
         res.view.addEventListener('click', (event: any, item: any) => {
+          // If clicked within overview navigator or brush window, ignore seek so brush dragging is uninterrupted!
+          if (item?.mark?.name?.includes('concat_1') || item?.mark?.name?.includes('brush')) {
+            return;
+          }
+
           if (item && item.datum) {
             setActiveItem(item.datum as TabularRecord);
             let itemSec: number | null = null;
@@ -338,13 +397,21 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               return;
             }
           }
-          // Also calculate time if clicked anywhere on empty canvas
+
+          // Also calculate time if clicked anywhere on empty canvas in detail view
           try {
+            const viewAny = res.view as any;
+            if (typeof viewAny.mouse === 'function') {
+              const [, my] = viewAny.mouse(event);
+              // Detail view height is typically <= 240px; if click is in bottom overview navigator, skip seek!
+              if (my > 230 && (vegaSpec as any)?.vconcat?.length) {
+                return;
+              }
+            }
             const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
             const candidate = ['x', 'concat_0_x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
             if (candidate) {
               const sc = res.view.scale(candidate);
-              const viewAny = res.view as any;
               if (sc && typeof sc.invert === 'function' && typeof viewAny.mouse === 'function') {
                 const [mx] = viewAny.mouse(event);
                 const origin = typeof viewAny.origin === 'function' ? viewAny.origin() : [0, 0];
@@ -628,7 +695,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             <>
               <span className="text-slate-300 dark:text-neutral-700">·</span>
               <span>conf:</span>
-              <span className="text-emerald-700 dark:text-emerald-400 font-semibold">{stats.confidenceType}</span>
+              <span className="text-slate-900 dark:text-slate-100 font-bold">{stats.confidenceType}</span>
             </>
           )}
           {duration !== null && (
@@ -1042,7 +1109,51 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 <span>Pan & Zoom</span>
               </label>
 
-              {(enableZoomPan || enableOverviewBrush) && (
+              {enableOverviewBrush && (
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-slate-300 dark:border-neutral-700 shadow-2xs">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mr-0.5">Timeline:</span>
+                  <button
+                    onClick={() => handleZoomPreset('all')}
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                    title="Zoom out to show entire piece (100%)"
+                  >
+                    <Maximize2 className="w-2.5 h-2.5" />
+                    <span>All</span>
+                  </button>
+                  <button
+                    onClick={() => handleZoomPreset('in')}
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                    title="Zoom in 2x"
+                  >
+                    <ZoomIn className="w-2.5 h-2.5" />
+                    <span>In</span>
+                  </button>
+                  <button
+                    onClick={() => handleZoomPreset('out')}
+                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                    title="Zoom out 2x"
+                  >
+                    <ZoomOut className="w-2.5 h-2.5" />
+                    <span>Out</span>
+                  </button>
+                  <button
+                    onClick={() => handleZoomPreset('left')}
+                    className="p-0.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                    title="Pan window left"
+                  >
+                    <ChevronLeft className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => handleZoomPreset('right')}
+                    className="p-0.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                    title="Pan window right"
+                  >
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {enableZoomPan && !enableOverviewBrush && (
                 <button
                   onClick={handleResetZoom}
                   className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded border border-slate-300 dark:border-neutral-700 transition-colors shadow-2xs"

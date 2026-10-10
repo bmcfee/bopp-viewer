@@ -369,6 +369,104 @@ const PITCH_DATA: BoppAnnotation = {
   payload: {
     payload_type: "pitch_contour",
     value: pitchContourPoints.map(p => ({ frequency: p.frequency, voicing: p.voicing }))
+  },
+  confidence: {
+    confidence_type: "variance",
+    confidence: pitchContourPoints.map(p => {
+      // Voiced tones have tight tracking variance (12-25 Hz^2, std ~3.5-5.0 Hz, 95% CI ±7-10 Hz)
+      // Unvoiced breath pauses have higher uncertainty (e.g. 95.0 Hz^2)
+      return p.voicing === 1
+        ? +(14.0 + 9.0 * Math.sin(p.t * 4.0) ** 2).toFixed(2)
+        : 95.0;
+    })
+  }
+};
+
+// Expressive Vocal Aria Melody (Puccini - F0 with Variance Error Bars)
+const vocalAriaPoints = Array.from({ length: 45 }, (_, i) => {
+  const t = +(i * 0.08).toFixed(3);
+  // High lyric soprano phrase centered around 660 Hz (E5) curving to 784 Hz (G5) with rich vibrato
+  const centerF0 = 660 + 124 / (1 + Math.exp(-3.0 * (t - 1.8)));
+  const vibratoDepth = t > 0.4 && t < 3.2 ? 18.5 * Math.sin(2 * Math.PI * 5.6 * t) : 0;
+  const isVoiced = t >= 0.16 && t <= 3.25;
+  return {
+    t,
+    frequency: +(centerF0 + vibratoDepth).toFixed(2),
+    voicing: isVoiced ? 1 : 0
+  };
+});
+
+const VOCAL_ARIA_DATA: BoppAnnotation = {
+  media_id: "audio:puccini_aria_soprano_stem",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "pYIN_Pitch_Tracker",
+    version: "1.2.0",
+    parameters: { frame_length_ms: 46.4, hop_length_ms: 80, threshold: 0.15 }
+  },
+  sandbox: {
+    piece: "O Mio Babbino Caro",
+    composer: "Giacomo Puccini",
+    voice_type: "Lyric Soprano",
+    feature: "Vocal Vibrato & Pitch Stability with Error Bars (±1.96σ 95% CI)"
+  },
+  extent: {
+    extent_type: "time",
+    time: vocalAriaPoints.map(p => p.t)
+  },
+  payload: {
+    payload_type: "pitch_contour",
+    value: vocalAriaPoints.map(p => ({ frequency: p.frequency, voicing: p.voicing }))
+  },
+  confidence: {
+    confidence_type: "variance",
+    confidence: vocalAriaPoints.map(p => {
+      // Voiced notes have steady tracking with variance 8-22 Hz^2 (std 2.8-4.7 Hz)
+      // Unvoiced/breathing regions have higher uncertainty (75.0 Hz^2)
+      return p.voicing === 1
+        ? +(11.0 + 8.5 * Math.sin(p.t * 3.5) ** 2).toFixed(2)
+        : 75.0;
+    })
+  }
+};
+
+// 25-Annotator Crowd Consensus on Song Structure
+const CROWD_AGREEMENT_DATA: BoppAnnotation = {
+  media_id: "audio:pop_anthem_master",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "mturk_crowd_pool_25",
+    tool: "crowd_audio_annotator",
+    description: "Crowdsourced consensus annotation of musical form across 25 independent listeners",
+    parameters: {
+      pool_size: 25,
+      agreement_metric: "fleiss_kappa",
+      consensus_rule: "majority_vote"
+    }
+  },
+  sandbox: {
+    study: "Crowdsourced Music Form Consensus Benchmark",
+    platform: "Amazon Mechanical Turk",
+    qualification: "Ear-training & form identification qualification passed",
+    workers_total: 25
+  },
+  extent: {
+    extent_type: "time_interval",
+    time: [0.0, 12.5, 36.0, 48.0, 72.0, 88.0, 112.0],
+    duration: [12.5, 23.5, 12.0, 24.0, 16.0, 24.0, 16.0]
+  },
+  payload: {
+    payload_type: "multi_segment",
+    label: ["Intro", "Verse 1", "Pre-Chorus", "Chorus 1", "Bridge", "Chorus 2", "Outro"],
+    level: [0, 0, 0, 0, 0, 0, 0]
+  },
+  confidence: {
+    confidence_type: "agreement",
+    n_annotators_common: 25,
+    n_annotators: [25, 25, 24, 25, 23, 25, 25],
+    confidence: [0.96, 0.88, 0.68, 0.92, 0.72, 0.96, 0.84]
   }
 };
 
@@ -946,13 +1044,38 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
   {
     id: "vocal_f0_contour",
     filename: "annotations/vocal_melody_f0.bopp",
-    title: "Vocal Melody Pitch Contour (F0)",
+    title: "Vocal Melody Pitch Contour (F0 with Error Bars)",
     category: "music",
     format: "json",
-    description: "Continuous vocal pitch contour in Hertz with voicing state over time.",
+    description: "Continuous vocal melody pitch contour in Hertz tracked by CREPE with pitch estimation variance error bars (±1.96σ 95% CI) and voicing state over time.",
     extentType: "time",
     payloadType: "pitch_contour",
+    confidenceType: "variance",
     data: PITCH_DATA,
+  },
+  {
+    id: "vocal_aria_error_bars",
+    filename: "annotations/vocal_aria_puccini_f0.bopp",
+    title: "Puccini Vocal Aria (F0 Vibrato & Error Bars)",
+    category: "music",
+    format: "json",
+    description: "Expressive lyric soprano melody with vibrato oscillations, voicing, and confidence ratings rendered as statistical error whiskers (±1.96σ) and shaded 95% confidence bands.",
+    extentType: "time",
+    payloadType: "pitch_contour",
+    confidenceType: "variance",
+    data: VOCAL_ARIA_DATA,
+  },
+  {
+    id: "crowd_agreement_structure",
+    filename: "annotations/crowd_agreement_structure.bopp",
+    title: "Crowd Agreement: Song Structure (25 Annotators)",
+    category: "music",
+    format: "json",
+    description: "Demonstrates inter-annotator crowd agreement confidence across 25 independent listeners on Amazon Mechanical Turk consensus for structural section boundaries.",
+    extentType: "time_interval",
+    payloadType: "multi_segment",
+    confidenceType: "agreement",
+    data: CROWD_AGREEMENT_DATA,
   },
   {
     id: "bioacoustic_birds",
@@ -1053,10 +1176,10 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
   {
     id: "tempo_rubato_time",
     filename: "annotations/tempo_rubato_timeline.bopp",
-    title: "Rubato Tempo Curve (Time Interval)",
+    title: "Rubato Tempo Timeline (Continuous Shelves)",
     category: "music",
     format: "json",
-    description: "Demonstrates tempo payload with time_interval extent (expressive rubato changes in seconds).",
+    description: "Demonstrates tempo payload with time_interval extent: rendered as horizontal rubato tempo shelves, step transitions, and top confidence meters.",
     extentType: "time_interval",
     payloadType: "tempo",
     confidenceType: "likelihood",

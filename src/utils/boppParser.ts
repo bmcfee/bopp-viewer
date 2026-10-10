@@ -257,7 +257,7 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
             const filledBlocks = Math.max(0, Math.min(10, Math.round(conf * 10)));
             record.confidence_meter = '█'.repeat(filledBlocks) + '░'.repeat(10 - filledBlocks);
             record.confidence_grade = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medium' : 'low';
-            record.confidence_color = conf >= 0.85 ? '#10b981' : conf >= 0.65 ? '#f59e0b' : '#f43f5e';
+            record.confidence_color = conf >= 0.85 ? '#ffffff' : conf >= 0.65 ? '#cbd5e1' : '#64748b';
             if (typeof record.duration === 'number') {
               record.confidence_duration = +(record.duration * conf).toFixed(4);
             }
@@ -277,10 +277,15 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
               const nAgree = Math.round(conf * nTotal);
               record.n_agree = nAgree;
               record.agreement_ratio_str = `${nAgree}/${nTotal}`;
-              record.agreement_text = `${nAgree} of ${nTotal} agreed (${pct}%)`;
-              const maxIcons = Math.min(nTotal, 10);
-              const agreeIcons = Math.min(maxIcons, Math.round(conf * maxIcons));
-              record.agreement_icons = '👤'.repeat(agreeIcons) + '▫'.repeat(maxIcons - agreeIcons);
+              if (nTotal >= 10) {
+                record.agreement_text = `${nAgree} of ${nTotal} crowd annotators agreed (${pct}%)`;
+                record.agreement_icons = `👥 ${nAgree}/${nTotal}`;
+              } else {
+                record.agreement_text = `${nAgree} of ${nTotal} agreed (${pct}%)`;
+                const maxIcons = Math.min(nTotal, 10);
+                const agreeIcons = Math.min(maxIcons, Math.round(conf * maxIcons));
+                record.agreement_icons = '👤'.repeat(agreeIcons) + '▫'.repeat(maxIcons - agreeIcons);
+              }
             } else {
               const agree5 = Math.max(0, Math.min(5, Math.round(conf * 5)));
               record.n_agree = agree5;
@@ -290,7 +295,7 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
               record.agreement_icons = '👤'.repeat(agree5) + '▫'.repeat(5 - agree5);
             }
             record.confidence_grade = conf >= 0.8 ? 'high' : conf >= 0.6 ? 'medium' : 'low';
-            record.confidence_color = conf >= 0.8 ? '#10b981' : conf >= 0.6 ? '#f59e0b' : '#f43f5e';
+            record.confidence_color = conf >= 0.8 ? '#ffffff' : conf >= 0.6 ? '#cbd5e1' : '#64748b';
             if (typeof record.duration === 'number') {
               record.confidence_duration = +(record.duration * conf).toFixed(4);
             }
@@ -308,6 +313,10 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
             if (typeof record.value === 'number') {
               record.value_ci_lower = +(record.value - margin).toFixed(3);
               record.value_ci_upper = +(record.value + margin).toFixed(3);
+            }
+            if (typeof record.frequency === 'number') {
+              record.frequency_ci_lower = +(record.frequency - margin).toFixed(3);
+              record.frequency_ci_upper = +(record.frequency + margin).toFixed(3);
             }
             if (typeof record.valence === 'number') {
               record.valence_ci_lower = +(record.valence - margin).toFixed(3);

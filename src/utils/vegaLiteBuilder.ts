@@ -1045,6 +1045,8 @@ export function buildBoppVegaLiteSpec(
 
     const isInstantaneous = !isScore && !isMidi && extentType === 'time' && data.every(d => d.duration === undefined || d.duration === null || d.duration === 0);
 
+    const mainPlotHeight = (enableOverviewBrush && data.length > 20) ? chartHeight - 80 : chartHeight - 40;
+
     const rectEncoding: Record<string, unknown> = {
       x: {
         field: xField,
@@ -1054,7 +1056,7 @@ export function buildBoppVegaLiteSpec(
       },
       x2: { field: '_calc_end' },
       y: { value: 0 },
-      y2: { value: chartHeight - 60 },
+      y2: { value: mainPlotHeight },
       color: {
         field: 'value',
         type: 'nominal',
@@ -1093,7 +1095,7 @@ export function buildBoppVegaLiteSpec(
         encoding: {
           x: { field: xField, type: 'quantitative', title: xTitle, scale: { domain: [minX, maxX] } },
           y: { value: 0 },
-          y2: { value: chartHeight - 60 },
+          y2: { value: mainPlotHeight },
           color: { field: 'value', type: 'nominal', title: colorLegendTitle, scale: chordColorScale },
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Chord' },
@@ -1111,6 +1113,7 @@ export function buildBoppVegaLiteSpec(
           isDark,
           confidenceType: confidenceType as any,
           channelMode: confidenceChannel,
+          yBaseline: mainPlotHeight,
         }));
       }
 
@@ -1156,9 +1159,9 @@ export function buildBoppVegaLiteSpec(
           isDark,
           confidenceType: confidenceType as any,
           channelMode: confidenceChannel,
-          yTop: 0,
-          yBottom: chartHeight - 60,
-          meterHeight: 6,
+          yTop: 8,
+          yBottom: mainPlotHeight,
+          meterHeight: 14,
         }));
       }
 
@@ -1178,11 +1181,10 @@ export function buildBoppVegaLiteSpec(
             fontSize: 11,
             font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             clip: true,
-            limit: { expr: `max(0, scale('x', datum._calc_end) - scale('x', datum.${xField}) - 4)` },
           },
           encoding: {
             x: { field: 'x_mid', type: 'quantitative' },
-            y: { value: (chartHeight - 60) / 2 + 4 },
+            y: { value: mainPlotHeight / 2 + 10 },
             text: { field: 'value', type: 'nominal' },
           },
         });
@@ -1196,6 +1198,31 @@ export function buildBoppVegaLiteSpec(
     // If overview brush is enabled and dataset has > 20 items, make an interactive overview + detail spec
     if (enableOverviewBrush && data.length > 20) {
       const vconcatWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : undefined;
+      const detailHeight = chartHeight - 80;
+
+      // Strip conflicting grid zoom/pan params on detail when overview brush is active
+      const detailLayers = layers.map(layer => {
+        const { params: _p, ...cleanLayer } = layer as Record<string, any>;
+        const enc = (cleanLayer.encoding as Record<string, any>) || {};
+        if (enc.x && typeof enc.x === 'object') {
+          return {
+            ...cleanLayer,
+            encoding: {
+              ...enc,
+              x: {
+                ...enc.x,
+                scale: { domain: { param: 'brush' } },
+              },
+            },
+          };
+        }
+        return cleanLayer;
+      });
+
+      // Initial visible window: cover first ~35% of piece (or 30s) so brush is immediately visible & draggable
+      const initialSpan = Math.min(30, (maxX - minX) * 0.35);
+      const initialEnd = minX + (initialSpan > 0 ? initialSpan : (maxX - minX));
+
       return {
         $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
         data: { values: data },
@@ -1204,70 +1231,59 @@ export function buildBoppVegaLiteSpec(
         vconcat: [
           {
             width: vconcatWidth,
-            height: chartHeight - 80,
+            height: detailHeight,
             title: { text: `BOPP Chords: ${annotation.media_id}`, color: textColor },
-            layer: [
-              {
-                mark: {
-                  type: 'rect',
-                  stroke: isDark ? '#0f172a' : '#334155',
-                  strokeWidth: 1,
-                  cornerRadius: 2,
-                },
-                encoding: {
-                  ...rectEncoding,
-                  x: {
-                    field: xField,
-                    type: 'quantitative',
-                    title: xTitle,
-                    scale: { domain: { param: 'brush' } },
-                  },
-                },
-              },
-              ...(showLabels
-                ? [
-                    {
-                      transform: [
-                        { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
-                        { filter: `datum.duration == null || datum.duration >= 0.2` },
-                      ],
-                      mark: {
-                        type: 'text',
-                        align: 'center',
-                        baseline: 'middle',
-                        fill: textFill,
-                        fontWeight: 'bold',
-                        fontSize: 11,
-                        clip: true,
-                        limit: { expr: `max(0, scale('x', datum._calc_end) - scale('x', datum.${xField}) - 4)` },
-                      },
-                      encoding: {
-                        x: { field: 'x_mid', type: 'quantitative', scale: { domain: { param: 'brush' } } },
-                        y: { value: (chartHeight - 80) / 2 },
-                        text: { field: 'value', type: 'nominal' },
-                      },
-                    },
-                  ]
-                : []),
-              ...(cursor ? [cursor] : []),
-            ],
+            layer: detailLayers,
           },
+          // Direct Overview Unit (official Vega-Lite interactive overview + detail pattern)
           {
             width: vconcatWidth,
-            height: 50,
-            title: { text: 'Overview (Drag brush to zoom & pan)', color: axisColor, fontSize: 10 },
-            mark: { type: 'rect', opacity: 1.0 },
+            height: 64,
+            title: {
+              text: '🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window',
+              color: axisColor,
+              fontSize: 10.5,
+              fontWeight: 'bold',
+            },
+            mark: {
+              type: 'rect',
+              opacity: 0.50,
+              cornerRadius: 2,
+            },
             params: [
               {
                 name: 'brush',
-                select: { type: 'interval', encodings: ['x'] },
-                value: { [xField]: [minX, maxX] },
+                select: {
+                  type: 'interval',
+                  encodings: ['x'],
+                  mark: {
+                    fill: isDark ? '#38bdf8' : '#0284c7',
+                    fillOpacity: isDark ? 0.38 : 0.28,
+                    stroke: isDark ? '#38bdf8' : '#0284c7',
+                    strokeWidth: 3,
+                  },
+                  zoom: true,
+                  clear: false,
+                },
+                value: { [xField]: [minX, initialEnd] },
               },
             ],
             encoding: {
-              x: { field: xField, type: 'quantitative', title: null, scale: { domain: [minX, maxX] } },
+              x: {
+                field: xField,
+                type: 'quantitative',
+                title: xTitle,
+                scale: { domain: [minX, maxX] },
+              },
               x2: { field: '_calc_end' },
-              color: { field: 'value', type: 'nominal', legend: null, scale: chordColorScale },
+              y: { value: 2 },
+              y2: { value: 60 },
+              color: {
+                field: 'value',
+                type: 'nominal',
+                legend: null,
+                scale: chordColorScale,
+              },
             },
           },
         ],
@@ -1697,7 +1713,12 @@ export function buildBoppVegaLiteSpec(
             color: {
               field: 'confidence',
               type: 'quantitative',
-              scale: { domain: [0, 0.65, 0.85, 1.0], range: ['#ef4444', '#f59e0b', '#10b981', '#10b981'] },
+              scale: {
+                domain: [0, 0.65, 0.85, 1.0],
+                range: isDark
+                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
+                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
+              },
               legend: null,
             },
           },
@@ -1835,7 +1856,12 @@ export function buildBoppVegaLiteSpec(
             color: {
               field: 'confidence',
               type: 'quantitative',
-              scale: { domain: [0, 0.65, 0.85, 1.0], range: ['#ef4444', '#f59e0b', '#10b981', '#10b981'] },
+              scale: {
+                domain: [0, 0.65, 0.85, 1.0],
+                range: isDark
+                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
+                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
+              },
               legend: null,
             },
           },
@@ -1969,7 +1995,12 @@ export function buildBoppVegaLiteSpec(
             color: {
               field: 'confidence',
               type: 'quantitative',
-              scale: { domain: [0, 0.65, 0.85, 1.0], range: ['#ef4444', '#f59e0b', '#10b981', '#10b981'] },
+              scale: {
+                domain: [0, 0.65, 0.85, 1.0],
+                range: isDark
+                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
+                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
+              },
               legend: null,
             },
           },
@@ -2063,49 +2094,168 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   // 7. TIME + PITCH_CONTOUR (Continuous F0 vocal/instrument melody)
   // =========================================================================
-  if (extentType === 'time' && payloadType === 'pitch_contour') {
-    const layers: Record<string, unknown>[] = [
-      // Trajectory guide line
-      {
-        mark: { type: 'line', strokeWidth: 1.5, stroke: isDark ? '#475569' : '#cbd5e1', strokeDash: [4, 4] },
-        encoding: {
-          x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
-          y: { field: 'frequency', type: 'quantitative', scale: { zero: false } },
+  if (extentType === 'time' && (payloadType === 'pitch_contour' || (payloadType as string) === 'note_hz')) {
+    const layers: Record<string, unknown>[] = [];
+
+    // If variance confidence is present, add shaded 95% Confidence Interval error ribbon (±1.96σ)
+    if (hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none') {
+      layers.push({
+        transform: [
+          { filter: 'datum.frequency_ci_lower != null && datum.frequency_ci_upper != null' },
+        ],
+        mark: {
+          type: 'area',
+          opacity: isDark ? 0.16 : 0.10,
+          color: isDark ? '#ffffff' : '#000000',
         },
-      },
-      // Distinct sample points colored by voiced state
-      {
-        mark: { type: 'point', filled: true, size: 50 },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
           x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-          y: { field: 'frequency', type: 'quantitative', title: 'Frequency (Hz)', scale: { zero: false } },
-          color: {
-            field: 'voicing',
-            type: 'nominal',
-            scale: { domain: [0, 1], range: ['#94a3b8', '#0284c7'] },
-            legend: {
-              title: 'Voicing',
-              labelExpr: "datum.value == 1 ? 'Voiced' : 'Unvoiced'",
-            },
-          },
-          tooltip: [
-            { field: 'time', type: 'quantitative', format: '.3f', title: 'Time (s)' },
-            { field: 'frequency', type: 'quantitative', format: '.2f', title: 'Pitch (Hz)' },
-            { field: 'voicing', type: 'nominal', title: 'Voiced (1=yes, 0=no)' },
-          ],
+          y: { field: 'frequency_ci_lower', type: 'quantitative', title: 'Pitch F0 (Hz)', scale: { zero: false } },
+          y2: { field: 'frequency_ci_upper' },
         },
+      });
+
+      // Whiskers and horizontal caps (Achromatic: white in dark mode, dark charcoal in light mode)
+      layers.push(...buildVarianceErrorBarLayers({
+        xField: 'time',
+        yField: 'frequency',
+        lowerField: 'frequency_ci_lower',
+        upperField: 'frequency_ci_upper',
+        isDark,
+        capWidth: 8,
+        whiskerColor: isDark ? '#ffffff' : '#0f172a',
+      }));
+    }
+
+    // Trajectory smooth guide line
+    layers.push({
+      mark: {
+        type: 'line',
+        strokeWidth: 2,
+        stroke: isDark ? '#38bdf8' : '#0284c7',
+        interpolate: 'monotone',
       },
-    ];
+      encoding: {
+        x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
+        y: { field: 'frequency', type: 'quantitative', scale: { zero: false } },
+      },
+    });
+
+    // Sample points colored by voiced state
+    layers.push({
+      mark: { type: 'point', filled: true, size: 55 },
+      ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+      encoding: {
+        x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+        y: { field: 'frequency', type: 'quantitative', title: 'Fundamental Frequency F0 (Hz)', scale: { zero: false } },
+        color: {
+          field: 'voicing',
+          type: 'nominal',
+          scale: { domain: [0, 1], range: ['#94a3b8', isDark ? '#38bdf8' : '#0284c7'] },
+          legend: {
+            title: 'Voicing',
+            labelExpr: "datum.value == 1 ? 'Voiced' : 'Unvoiced'",
+          },
+        },
+        tooltip: [
+          { field: 'time', type: 'quantitative', format: '.3f', title: 'Time (s)' },
+          { field: 'frequency', type: 'quantitative', format: '.2f', title: 'Pitch F0 (Hz)' },
+          { field: 'voicing', type: 'nominal', title: 'Voiced (1=yes, 0=no)' },
+          ...(hasConfidence ? [
+            { field: 'confidence_variance', type: 'quantitative', format: '.2f', title: 'Variance (σ²)' },
+            { field: 'confidence_std', type: 'quantitative', format: '.2f', title: 'Std Dev (σ Hz)' },
+            { field: 'frequency_ci_lower', type: 'quantitative', format: '.2f', title: '95% CI Lower (Hz)' },
+            { field: 'frequency_ci_upper', type: 'quantitative', format: '.2f', title: '95% CI Upper (Hz)' },
+          ] : []),
+        ],
+      },
+    });
 
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
+
+    if (enableOverviewBrush && data.length > 25) {
+      const vconcatWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : undefined;
+      const detailLayers = layers.map(layer => {
+        const { params: _p, ...cleanLayer } = layer as Record<string, any>;
+        const enc = (cleanLayer.encoding as Record<string, any>) || {};
+        if (enc.x && typeof enc.x === 'object') {
+          return {
+            ...cleanLayer,
+            encoding: {
+              ...enc,
+              x: {
+                ...enc.x,
+                scale: { domain: { param: 'brush' } },
+              },
+            },
+          };
+        }
+        return cleanLayer;
+      });
+
+      const initialSpan = Math.min(1.5, (maxX - minX) * 0.4);
+      const initialEnd = minX + (initialSpan > 0 ? initialSpan : (maxX - minX));
+
+      return {
+        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        data: { values: data },
+        transform: transforms,
+        config: baseConfig,
+        vconcat: [
+          {
+            width: vconcatWidth,
+            height: chartHeight - 80,
+            title: { text: `BOPP Vocal Melody & Pitch Contour (F0): ${annotation.media_id}`, color: textColor },
+            layer: detailLayers,
+          },
+          // Direct Overview Unit for Pitch Contour
+          {
+            width: vconcatWidth,
+            height: 60,
+            title: {
+              text: '🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window',
+              color: axisColor,
+              fontSize: 10.5,
+              fontWeight: 'bold',
+            },
+            mark: {
+              type: 'area',
+              color: isDark ? '#38bdf8' : '#0284c7',
+              opacity: 0.45,
+            },
+            params: [
+              {
+                name: 'brush',
+                select: {
+                  type: 'interval',
+                  encodings: ['x'],
+                  mark: {
+                    fill: isDark ? '#38bdf8' : '#0284c7',
+                    fillOpacity: isDark ? 0.38 : 0.28,
+                    stroke: isDark ? '#38bdf8' : '#0284c7',
+                    strokeWidth: 3,
+                  },
+                  zoom: true,
+                  clear: false,
+                },
+                value: { time: [minX, initialEnd] },
+              },
+            ],
+            encoding: {
+              x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] }, title: 'Time (seconds)' },
+              y: { field: 'frequency', type: 'quantitative', scale: { zero: false }, axis: null },
+            },
+          },
+        ],
+      };
+    }
 
     return {
       $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
       width: chartWidth,
       height: chartHeight,
-      title: { text: `BOPP Pitch Contour (F0): ${annotation.media_id}`, color: textColor },
+      title: { text: `BOPP Vocal Melody & Pitch Contour (F0): ${annotation.media_id}`, color: textColor },
       data: { values: data },
       transform: transforms,
       config: baseConfig,
@@ -2441,7 +2591,7 @@ export function buildBoppVegaLiteSpec(
                   // Valence error band (ribbon)
                   {
                     transform: [{ filter: 'datum.valence_ci_lower != null && datum.valence_ci_upper != null' }],
-                    mark: { type: 'area', opacity: 0.22, color: '#10b981' },
+                    mark: { type: 'area', opacity: 0.22, color: '#06b6d4' },
                     encoding: {
                       x: { field: xTimeField, type: 'quantitative' },
                       y: { field: 'valence_ci_lower', type: 'quantitative' },
@@ -2474,7 +2624,7 @@ export function buildBoppVegaLiteSpec(
                 color: {
                   field: 'dimension',
                   type: 'nominal',
-                  scale: { domain: ['valence', 'arousal'], range: ['#10b981', '#f59e0b'] },
+                  scale: { domain: ['valence', 'arousal'], range: ['#06b6d4', '#f59e0b'] },
                   title: 'Dimension',
                 },
                 tooltip: [
@@ -2548,7 +2698,7 @@ export function buildBoppVegaLiteSpec(
                   // Horizontal Valence error bar: [valence_ci_lower, valence_ci_upper] at y = arousal
                   {
                     transform: [{ filter: 'datum.valence_ci_lower != null && datum.valence_ci_upper != null' }],
-                    mark: { type: 'rule', stroke: '#10b981', strokeWidth: 1.5, opacity: 0.65 },
+                    mark: { type: 'rule', stroke: '#06b6d4', strokeWidth: 1.5, opacity: 0.65 },
                     encoding: {
                       x: { field: 'valence_ci_lower', type: 'quantitative', scale: { domain: [-1.1, 1.1] } },
                       x2: { field: 'valence_ci_upper' },
@@ -2664,17 +2814,21 @@ export function buildBoppVegaLiteSpec(
         as: '_calc_end',
       });
 
-      // Interval tempo blocks
+      // Horizontal Rubato Tempo Shelves (clean shelf line for each section)
       layers.push({
-        mark: { type: 'rect', fill: '#f59e0b', fillOpacity: 0.85, stroke: isDark ? '#1e293b' : '#ffffff', strokeWidth: 1, cornerRadius: 2 },
+        mark: {
+          type: 'rule',
+          strokeWidth: 4,
+          stroke: '#f59e0b',
+          strokeCap: 'round',
+        },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
           x: { field: xTime, type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
           x2: { field: '_calc_end' },
           y: { field: 'value', type: 'quantitative', title: 'Tempo (BPM)', scale: { zero: false } },
-          y2: { value: chartHeight - 60 },
           tooltip: [
-            { field: 'value', type: 'quantitative', format: '.1f', title: 'Tempo (BPM)' },
+            { field: 'value', type: 'quantitative', format: '.1f', title: 'Rubato Tempo (BPM)' },
             { field: xTime, type: 'quantitative', format: '.2f', title: 'Start (s)' },
             { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
@@ -2682,7 +2836,51 @@ export function buildBoppVegaLiteSpec(
         },
       });
 
-      // Top-edge confidence meter
+      // Step transition guide connecting tempo changes
+      layers.push({
+        mark: {
+          type: 'line',
+          interpolate: 'step-after',
+          strokeWidth: 1.5,
+          strokeDash: [4, 4],
+          stroke: isDark ? '#94a3b8' : '#64748b',
+        },
+        encoding: {
+          x: { field: xTime, type: 'quantitative', scale: { domain: [minX, maxX] } },
+          y: { field: 'value', type: 'quantitative', scale: { zero: false } },
+        },
+      });
+
+      // Section start circle and BPM label
+      layers.push(
+        {
+          mark: { type: 'circle', size: 65, color: '#f59e0b' },
+          encoding: {
+            x: { field: xTime, type: 'quantitative' },
+            y: { field: 'value', type: 'quantitative', scale: { zero: false } },
+          },
+        },
+        {
+          transform: [
+            { calculate: "datum.value + ' BPM'", as: '_bpm_label' },
+          ],
+          mark: {
+            type: 'text',
+            dy: -12,
+            fontSize: 10.5,
+            fontWeight: 'bold',
+            fill: textFill,
+            font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          },
+          encoding: {
+            x: { field: xTime, type: 'quantitative' },
+            y: { field: 'value', type: 'quantitative', scale: { zero: false } },
+            text: { field: '_bpm_label', type: 'nominal' },
+          },
+        }
+      );
+
+      // Top-edge confidence meter for each rubato interval
       if (hasConfidence && confidenceChannel !== 'none') {
         layers.push(...buildIntervalConfidenceLayers({
           xField: xTime,
@@ -2692,9 +2890,9 @@ export function buildBoppVegaLiteSpec(
           isDark,
           confidenceType: confidenceType as any,
           channelMode: confidenceChannel,
-          yTop: 0,
+          yTop: 10,
           yBottom: chartHeight - 60,
-          meterHeight: 6,
+          meterHeight: 12,
         }));
       }
     } else {

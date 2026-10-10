@@ -72,7 +72,7 @@ export function createAnnotationMetadataCardDOM(
     const originalText = button.innerHTML;
     const onSuccess = () => {
       button.innerHTML = '✓ Copied';
-      button.style.color = '#10b981';
+      button.style.color = '#06b6d4';
       setTimeout(() => {
         button.innerHTML = originalText;
         button.style.color = '';
@@ -240,6 +240,26 @@ export function createAnnotationMetadataCardDOM(
     const descId = (metadata.annotator_id || metadata.algorithm_id || metadata.platform || metadata.device || metadata.metadata_type) as string;
     metaTypeBadge.innerText = `${metadata.metadata_type}: ${String(descId).slice(0, 16)}`;
     rightSection.appendChild(metaTypeBadge);
+  }
+
+  // Confidence Badge (Achromatic / No Hue)
+  if (annotation.confidence?.confidence_type) {
+    const confBadge = document.createElement('span');
+    confBadge.style.fontSize = '10px';
+    confBadge.style.padding = '2px 6px';
+    confBadge.style.borderRadius = '999px';
+    confBadge.style.backgroundColor = isDark ? 'rgba(255, 255, 255, 0.12)' : '#f1f5f9';
+    confBadge.style.color = isDark ? '#ffffff' : '#0f172a';
+    confBadge.style.border = isDark ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid #cbd5e1';
+    const confRecord = annotation.confidence as unknown as Record<string, unknown>;
+    const nTotal = confRecord?.n_annotators_common;
+    const cType = annotation.confidence.confidence_type;
+    confBadge.innerText = cType === 'agreement'
+      ? (typeof nTotal === 'number' ? `👥 agreement (${nTotal})` : '👥 agreement')
+      : cType === 'variance'
+      ? '📊 variance (σ²)'
+      : '🎯 likelihood';
+    rightSection.appendChild(confBadge);
   }
 
   // Sandbox Badge (if present)
