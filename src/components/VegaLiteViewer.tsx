@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import { buildBoppVegaLiteSpec, VegaLiteBuilderOptions } from '../utils/vegaLiteBuilder';
+import { ConfidenceChannelMode } from '../utils/confidenceGrammar';
 import { BoppAudioPlayer, isSonifiablePayload } from '../utils/audioSynthesizer';
 import { computeSummaryStats } from '../utils/boppParser';
 import { AnnotationMetadataCard } from './AnnotationMetadataCard';
@@ -69,7 +70,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
   // Vega-Lite composition states
   const [colorScheme, setColorScheme] = useState<string>('mir_eval_fifths');
-  const [confidenceChannel, setConfidenceChannel] = useState<'opacity' | 'none'>('opacity');
+  const [confidenceChannel, setConfidenceChannel] = useState<ConfidenceChannelMode>('meter');
   const [minConfidenceFilter, setMinConfidenceFilter] = useState<number>(0);
   const [enableOverviewBrush, setEnableOverviewBrush] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
@@ -956,21 +957,37 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               </span>
             </div>
 
-            {/* Confidence Channel & Slider */}
+            {/* Grammar of Graphics: Confidence Rating Channel Selector */}
             {stats.confidenceType && (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 bg-slate-100 dark:bg-neutral-800/80 px-2 py-1 rounded-md border border-slate-200 dark:border-neutral-700">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-slate-700 dark:text-slate-300 font-medium">Confidence:</span>
-                  <button
-                    onClick={() => setConfidenceChannel(c => (c === 'opacity' ? 'none' : 'opacity'))}
-                    className={`px-2.5 py-1 rounded font-medium transition-colors ${
-                      confidenceChannel === 'opacity'
-                        ? 'bg-blue-600 text-white shadow-2xs'
-                        : 'bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-neutral-700'
-                    }`}
-                  >
-                    Opacity Binding
-                  </button>
+                  <span className="text-slate-700 dark:text-slate-300 font-semibold text-[11px] flex items-center gap-1">
+                    {stats.confidenceType === 'agreement' ? '👥 Agreement:' : stats.confidenceType === 'variance' ? '📊 Variance:' : '🎯 Confidence:'}
+                  </span>
+                  <div className="inline-flex rounded-md shadow-2xs">
+                    {(['meter', 'height', 'opacity', 'none'] as ConfidenceChannelMode[]).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setConfidenceChannel(mode)}
+                        className={`px-2 py-0.5 text-[11px] font-medium transition-colors first:rounded-l last:rounded-r border border-slate-300 dark:border-neutral-600 ${
+                          confidenceChannel === mode
+                            ? 'bg-blue-600 text-white font-bold border-blue-600'
+                            : 'bg-white dark:bg-neutral-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700'
+                        }`}
+                        title={
+                          mode === 'meter'
+                            ? 'Horizontal meter overlay on intervals/boxes, confidence pins on points, error bars on variance'
+                            : mode === 'height'
+                            ? 'Proportional vertical height fill'
+                            : mode === 'opacity'
+                            ? 'Opacity binding (0.35–1.0)'
+                            : 'Disable confidence overlays'
+                        }
+                      >
+                        {mode === 'meter' ? 'Meter' : mode === 'height' ? 'Height' : mode === 'opacity' ? 'Opacity' : 'Off'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Threshold filter */}
@@ -1084,7 +1101,30 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 {typeof activeItem.confidence === 'number' && (
                   <>
                     <span className="text-slate-400 dark:text-slate-600">·</span>
-                    <span>conf: <span className="tabular-nums font-semibold">{activeItem.confidence.toFixed(3)}</span></span>
+                    <span>
+                      {stats.confidenceType === 'agreement' ? 'agreement: ' : 'conf: '}
+                      <span className="tabular-nums font-semibold">
+                        {(activeItem.confidence * 100).toFixed(1)}%
+                      </span>
+                      {Boolean(activeItem.agreement_ratio_str) && (
+                        <span className="ml-1 text-slate-500 font-mono">
+                          (👥 {String(activeItem.agreement_ratio_str)})
+                        </span>
+                      )}
+                    </span>
+                  </>
+                )}
+                {typeof activeItem.confidence_variance === 'number' && (
+                  <>
+                    <span className="text-slate-400 dark:text-slate-600">·</span>
+                    <span>
+                      var σ²: <span className="tabular-nums font-semibold">{activeItem.confidence_variance.toFixed(4)}</span>
+                      {typeof activeItem.confidence_std === 'number' && (
+                        <span className="ml-1 text-slate-500 font-mono">
+                          (σ={activeItem.confidence_std.toFixed(3)})
+                        </span>
+                      )}
+                    </span>
                   </>
                 )}
               </div>

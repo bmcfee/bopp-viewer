@@ -245,20 +245,81 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
 
     // Confidence fields
     if (confidence) {
+      record.confidence_type = confidence.confidence_type;
       switch (confidence.confidence_type) {
-        case 'likelihood':
-          record.confidence = confidence.confidence?.[i];
-          break;
-        case 'agreement':
-          record.confidence = confidence.confidence?.[i];
-          record.n_annotators = confidence.n_annotators?.[i] ?? confidence.n_annotators_common;
-          break;
-        case 'variance':
-          record.confidence_variance = confidence.confidence?.[i];
-          if (typeof record.confidence_variance === 'number') {
-            record.confidence_std = Math.sqrt(record.confidence_variance);
+        case 'likelihood': {
+          const conf = confidence.confidence?.[i];
+          record.confidence = conf;
+          if (typeof conf === 'number') {
+            const pct = Math.round(conf * 100);
+            record.confidence_pct = pct;
+            record.confidence_label = `${pct}%`;
+            const filledBlocks = Math.max(0, Math.min(10, Math.round(conf * 10)));
+            record.confidence_meter = '█'.repeat(filledBlocks) + '░'.repeat(10 - filledBlocks);
+            record.confidence_grade = conf >= 0.85 ? 'high' : conf >= 0.65 ? 'medium' : 'low';
+            record.confidence_color = conf >= 0.85 ? '#10b981' : conf >= 0.65 ? '#f59e0b' : '#f43f5e';
+            if (typeof record.duration === 'number') {
+              record.confidence_duration = +(record.duration * conf).toFixed(4);
+            }
           }
           break;
+        }
+        case 'agreement': {
+          const conf = confidence.confidence?.[i];
+          record.confidence = conf;
+          const nTotal = confidence.n_annotators?.[i] ?? confidence.n_annotators_common;
+          record.n_annotators = nTotal;
+          if (typeof conf === 'number') {
+            const pct = Math.round(conf * 100);
+            record.confidence_pct = pct;
+            record.confidence_label = `${pct}% agreement`;
+            if (typeof nTotal === 'number' && nTotal > 0) {
+              const nAgree = Math.round(conf * nTotal);
+              record.n_agree = nAgree;
+              record.agreement_ratio_str = `${nAgree}/${nTotal}`;
+              record.agreement_text = `${nAgree} of ${nTotal} agreed (${pct}%)`;
+              const maxIcons = Math.min(nTotal, 10);
+              const agreeIcons = Math.min(maxIcons, Math.round(conf * maxIcons));
+              record.agreement_icons = '👤'.repeat(agreeIcons) + '▫'.repeat(maxIcons - agreeIcons);
+            } else {
+              const agree5 = Math.max(0, Math.min(5, Math.round(conf * 5)));
+              record.n_agree = agree5;
+              record.n_annotators = 5;
+              record.agreement_ratio_str = `${agree5}/5`;
+              record.agreement_text = `${pct}% consensus (${agree5}/5)`;
+              record.agreement_icons = '👤'.repeat(agree5) + '▫'.repeat(5 - agree5);
+            }
+            record.confidence_grade = conf >= 0.8 ? 'high' : conf >= 0.6 ? 'medium' : 'low';
+            record.confidence_color = conf >= 0.8 ? '#10b981' : conf >= 0.6 ? '#f59e0b' : '#f43f5e';
+            if (typeof record.duration === 'number') {
+              record.confidence_duration = +(record.duration * conf).toFixed(4);
+            }
+          }
+          break;
+        }
+        case 'variance': {
+          const variance = confidence.confidence?.[i];
+          record.confidence_variance = variance;
+          if (typeof variance === 'number') {
+            const std = Math.sqrt(Math.max(0, variance));
+            record.confidence_std = std;
+            const margin = +(1.96 * std).toFixed(3);
+            record.confidence_ci_margin = margin;
+            if (typeof record.value === 'number') {
+              record.value_ci_lower = +(record.value - margin).toFixed(3);
+              record.value_ci_upper = +(record.value + margin).toFixed(3);
+            }
+            if (typeof record.valence === 'number') {
+              record.valence_ci_lower = +(record.valence - margin).toFixed(3);
+              record.valence_ci_upper = +(record.valence + margin).toFixed(3);
+            }
+            if (typeof record.arousal === 'number') {
+              record.arousal_ci_lower = +(record.arousal - margin).toFixed(3);
+              record.arousal_ci_upper = +(record.arousal + margin).toFixed(3);
+            }
+          }
+          break;
+        }
       }
     }
 

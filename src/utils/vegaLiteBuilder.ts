@@ -21,6 +21,14 @@ import {
   MIR_EVAL_COLORMAPS,
   registerMirEvalSchemes,
 } from './mirEvalColors';
+import {
+  ConfidenceChannelMode,
+  buildIntervalConfidenceLayers,
+  buildInstantaneousConfidenceLayers,
+  buildVarianceErrorBarLayers,
+  getAgreementGlyph,
+  getConfidenceColor,
+} from './confidenceGrammar';
 
 // Ensure mir_eval schemes are registered with Vega
 registerMirEvalSchemes();
@@ -28,7 +36,7 @@ registerMirEvalSchemes();
 export interface VegaLiteBuilderOptions {
   theme?: 'light' | 'dark';
   colorScheme?: string;
-  confidenceChannel?: 'opacity' | 'height' | 'strip' | 'error_band' | 'none';
+  confidenceChannel?: ConfidenceChannelMode;
   minConfidenceFilter?: number;
   enableOverviewBrush?: boolean;
   enableZoomPan?: boolean;
@@ -133,7 +141,7 @@ export function buildBoppVegaLiteSpec(
   const {
     theme = 'dark',
     colorScheme = 'mir_eval_fifths',
-    confidenceChannel = 'opacity',
+    confidenceChannel = 'meter',
     minConfidenceFilter = 0,
     enableOverviewBrush = true,
     enableZoomPan = true,
@@ -1035,7 +1043,8 @@ export function buildBoppVegaLiteSpec(
       ? 'Chord (mir_eval Chromatic Pitch)'
       : 'Chord (Harte)';
 
-    // Main interval rect layer - solid high-contrast borders and opacity
+    const isInstantaneous = !isScore && !isMidi && extentType === 'time' && data.every(d => d.duration === undefined || d.duration === null || d.duration === 0);
+
     const rectEncoding: Record<string, unknown> = {
       x: {
         field: xField,
@@ -1056,7 +1065,8 @@ export function buildBoppVegaLiteSpec(
         { field: 'value', type: 'nominal', title: 'Chord' },
         { field: xField, type: 'quantitative', format: '.3f', title: 'Start' },
         { field: durField, type: 'quantitative', format: '.3f', title: 'Duration' },
-        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence' }] : []),
+        ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
       ],
     };
 
@@ -1064,48 +1074,119 @@ export function buildBoppVegaLiteSpec(
       rectEncoding.opacity = {
         field: 'confidence',
         type: 'quantitative',
-        scale: { domain: [0, 1], range: [0.75, 1.0] },
-        title: 'Confidence (Likelihood)',
+        scale: { domain: [0, 1], range: [0.35, 1.0] },
+        title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence',
       };
     } else {
       rectEncoding.opacity = { value: 1.0 };
     }
 
-    layers.push({
-      mark: {
-        type: 'rect',
-        stroke: isDark ? '#1e293b' : '#334155',
-        strokeWidth: 1,
-        cornerRadius: 2,
-      },
-      ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-      encoding: rectEncoding,
-    });
-
-    // Chord text label layer with high-contrast halo
-    if (showLabels) {
+    if (isInstantaneous) {
+      // Instantaneous point chords (e.g. drive_time_points): vertical rules + labels + confidence pins
       layers.push({
-        transform: [
-          { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
-          { filter: `datum.duration == null || datum.duration >= 0.2` },
-        ],
         mark: {
-          type: 'text',
-          align: 'center',
-          baseline: 'middle',
-          fill: textFill,
-          fontWeight: 'bold',
-          fontSize: 11,
-          font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-          clip: true,
-          limit: { expr: `max(0, scale('x', datum._calc_end) - scale('x', datum.${xField}) - 4)` },
+          type: 'rule',
+          strokeWidth: 2,
+          color: isDark ? '#38bdf8' : '#0284c7',
         },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
-          x: { field: 'x_mid', type: 'quantitative' },
-          y: { value: (chartHeight - 60) / 2 },
-          text: { field: 'value', type: 'nominal' },
+          x: { field: xField, type: 'quantitative', title: xTitle, scale: { domain: [minX, maxX] } },
+          y: { value: 0 },
+          y2: { value: chartHeight - 60 },
+          color: { field: 'value', type: 'nominal', title: colorLegendTitle, scale: chordColorScale },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Chord' },
+            { field: xField, type: 'quantitative', format: '.3f', title: 'Position' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+            ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
+          ],
         },
       });
+
+      if (hasConfidence && confidenceChannel !== 'none') {
+        layers.push(...buildInstantaneousConfidenceLayers({
+          xField,
+          chartHeight,
+          isDark,
+          confidenceType: confidenceType as any,
+          channelMode: confidenceChannel,
+        }));
+      }
+
+      if (showLabels) {
+        layers.push({
+          mark: {
+            type: 'text',
+            align: 'center',
+            baseline: 'top',
+            dy: 4,
+            fill: textFill,
+            fontWeight: 'bold',
+            fontSize: 11,
+            font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            y: { value: 4 },
+            text: { field: 'value', type: 'nominal' },
+          },
+        });
+      }
+    } else {
+      // Interval chords: rect blocks + confidence meter overlay on top edge
+      layers.push({
+        mark: {
+          type: 'rect',
+          stroke: isDark ? '#1e293b' : '#334155',
+          strokeWidth: 1,
+          cornerRadius: 2,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: rectEncoding,
+      });
+
+      // Overlay confidence meter along top edge
+      if (hasConfidence && confidenceChannel !== 'none') {
+        layers.push(...buildIntervalConfidenceLayers({
+          xField,
+          endField: '_calc_end',
+          durField,
+          chartHeight,
+          isDark,
+          confidenceType: confidenceType as any,
+          channelMode: confidenceChannel,
+          yTop: 0,
+          yBottom: chartHeight - 60,
+          meterHeight: 6,
+        }));
+      }
+
+      // Chord text label layer with high-contrast halo
+      if (showLabels) {
+        layers.push({
+          transform: [
+            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
+            { filter: `datum.duration == null || datum.duration >= 0.2` },
+          ],
+          mark: {
+            type: 'text',
+            align: 'center',
+            baseline: 'middle',
+            fill: textFill,
+            fontWeight: 'bold',
+            fontSize: 11,
+            font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            clip: true,
+            limit: { expr: `max(0, scale('x', datum._calc_end) - scale('x', datum.${xField}) - 4)` },
+          },
+          encoding: {
+            x: { field: 'x_mid', type: 'quantitative' },
+            y: { value: (chartHeight - 60) / 2 + 4 },
+            text: { field: 'value', type: 'nominal' },
+          },
+        });
+      }
     }
 
     // Cursor
@@ -1387,6 +1468,16 @@ export function buildBoppVegaLiteSpec(
       },
     ];
 
+    if (hasConfidence && confidenceChannel !== 'none') {
+      layers.push(...buildInstantaneousConfidenceLayers({
+        xField: 'time',
+        chartHeight,
+        isDark,
+        confidenceType: confidenceType as any,
+        channelMode: confidenceChannel,
+      }));
+    }
+
     if (showLabels) {
       layers.push({
         transform: [{ filter: isDownbeat }],
@@ -1566,6 +1657,54 @@ export function buildBoppVegaLiteSpec(
       },
     ];
 
+    // Overlay confidence meter along the top edge of each piano note
+    if (hasConfidence && confidenceChannel === 'meter') {
+      layers.push(
+        // Backing track
+        {
+          transform: [
+            { filter: 'datum.confidence != null' },
+            { calculate: 'datum.value + 0.3', as: '_note_meter_y1' },
+          ],
+          mark: {
+            type: 'rect',
+            fill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
+            cornerRadius: 1,
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: '_note_meter_y1', type: 'quantitative' },
+            y2: { field: 'y_max' },
+          },
+        },
+        // Active confidence fill
+        {
+          transform: [
+            { filter: 'datum.confidence != null && datum.confidence > 0' },
+            { calculate: 'datum.value + 0.3', as: '_note_meter_y1' },
+            {
+              calculate: `datum.${xField} + (datum.duration != null ? datum.duration * datum.confidence : 0.25 * datum.confidence)`,
+              as: '_note_conf_end',
+            },
+          ],
+          mark: { type: 'rect', cornerRadius: 1 },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_note_conf_end' },
+            y: { field: '_note_meter_y1', type: 'quantitative' },
+            y2: { field: 'y_max' },
+            color: {
+              field: 'confidence',
+              type: 'quantitative',
+              scale: { domain: [0, 0.65, 0.85, 1.0], range: ['#ef4444', '#f59e0b', '#10b981', '#10b981'] },
+              legend: null,
+            },
+          },
+        }
+      );
+    }
+
     if (showLabels) {
       layers.push({
         transform: [
@@ -1644,23 +1783,78 @@ export function buildBoppVegaLiteSpec(
           },
           color: { field: colorField, type: 'nominal', title: 'Segment', scale: colorScale },
           opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
             : { value: 1.0 },
           tooltip: [
             { field: colorField, type: 'nominal', title: 'Section' },
             ...(payloadType === 'multi_segment' ? [{ field: 'level', type: 'quantitative', title: 'Level' }] : []),
             { field: 'time', type: 'quantitative', format: '.2f', title: 'Start (s)' },
             { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Agreement' }] : []),
+            ...(hasConfidence ? [
+              { field: 'confidence', type: 'quantitative', format: '.1%', title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence' },
+              ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
+            ] : []),
           ],
         },
       },
     ];
 
+    // Overlay horizontal confidence / agreement meter strip along the top edge of each segment block
+    if (hasConfidence && confidenceChannel === 'meter') {
+      layers.push(
+        // Backing track
+        {
+          mark: {
+            type: 'rect',
+            yOffset: -12,
+            height: 3.5,
+            fill: isDark ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.25)',
+            cornerRadius: 1,
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: yField, type: yType },
+          },
+        },
+        // Active agreement fill
+        {
+          transform: [
+            { calculate: 'datum.time + (datum.duration != null ? datum.duration * (datum.confidence != null ? datum.confidence : 1.0) : 0)', as: '_seg_conf_end' },
+          ],
+          mark: {
+            type: 'rect',
+            yOffset: -12,
+            height: 3.5,
+            cornerRadius: 1,
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            x2: { field: '_seg_conf_end' },
+            y: { field: yField, type: yType },
+            color: {
+              field: 'confidence',
+              type: 'quantitative',
+              scale: { domain: [0, 0.65, 0.85, 1.0], range: ['#ef4444', '#f59e0b', '#10b981', '#10b981'] },
+              legend: null,
+            },
+          },
+        }
+      );
+    }
+
     if (showLabels) {
       layers.push({
         transform: [
           { calculate: 'datum.time + (datum.duration != null ? datum.duration / 2 : 0)', as: 'time_mid' },
+          {
+            calculate: hasConfidence && confidenceType === 'agreement' && Boolean(data.some(d => d.agreement_ratio_str))
+              ? "datum." + colorField + " + (datum.agreement_ratio_str != null ? ' · 👥 ' + datum.agreement_ratio_str : '')"
+              : hasConfidence
+              ? "datum." + colorField + " + (datum.confidence != null ? ' (' + round(datum.confidence * 100) + '%)' : '')"
+              : "datum." + colorField,
+            as: '_display_label',
+          },
         ],
         mark: {
           type: 'text',
@@ -1675,7 +1869,7 @@ export function buildBoppVegaLiteSpec(
         encoding: {
           x: { field: 'time_mid', type: 'quantitative' },
           y: { field: yField, type: yType },
-          text: { field: colorField, type: 'nominal' },
+          text: { field: '_display_label', type: 'nominal' },
         },
       });
     }
@@ -1744,8 +1938,53 @@ export function buildBoppVegaLiteSpec(
       },
     ];
 
+    // Top-edge confidence meter overlay for bounding boxes
+    if (hasConfidence && confidenceChannel === 'meter') {
+      layers.push(
+        // Backing track along the top border (freq_max)
+        {
+          transform: [
+            { calculate: 'datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)', as: '_tf_meter_bottom' },
+          ],
+          mark: { type: 'rect', fill: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.25)', cornerRadius: 1 },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: '_tf_meter_bottom', type: 'quantitative' },
+            y2: { field: 'freq_max' },
+          },
+        },
+        // Active confidence fill
+        {
+          transform: [
+            { calculate: 'datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)', as: '_tf_meter_bottom' },
+            { calculate: 'datum.time + (datum.duration != null ? datum.duration * (datum.confidence != null ? datum.confidence : 1.0) : 0)', as: '_tf_conf_end' },
+          ],
+          mark: { type: 'rect', cornerRadius: 1 },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            x2: { field: '_tf_conf_end' },
+            y: { field: '_tf_meter_bottom', type: 'quantitative' },
+            y2: { field: 'freq_max' },
+            color: {
+              field: 'confidence',
+              type: 'quantitative',
+              scale: { domain: [0, 0.65, 0.85, 1.0], range: ['#ef4444', '#f59e0b', '#10b981', '#10b981'] },
+              legend: null,
+            },
+          },
+        }
+      );
+    }
+
     if (showLabels) {
       layers.push({
+        transform: [
+          {
+            calculate: "datum.value + (datum.confidence != null ? ' (' + round(datum.confidence * 100) + '%)' : '')",
+            as: '_tf_label',
+          },
+        ],
         mark: {
           type: 'text',
           align: 'left',
@@ -1759,7 +1998,7 @@ export function buildBoppVegaLiteSpec(
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           y: { field: 'freq_max', type: 'quantitative' },
-          text: { field: 'value', type: 'nominal' },
+          text: { field: '_tf_label', type: 'nominal' },
         },
       });
     }
@@ -2190,12 +2429,37 @@ export function buildBoppVegaLiteSpec(
       transform: transforms,
       config: baseConfig,
       hconcat: [
-        // Time series track: Valence and Arousal lines over time
+        // Time series track: Valence and Arousal lines over time with optional variance confidence ribbons
         {
           width: 440,
           height: chartHeight,
           title: { text: 'Valence & Arousal Timeline', color: textColor },
           layer: [
+            // If variance confidence is present, add shaded 95% Confidence Interval error bands (±1.96σ)
+            ...(hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none'
+              ? [
+                  // Valence error band (ribbon)
+                  {
+                    transform: [{ filter: 'datum.valence_ci_lower != null && datum.valence_ci_upper != null' }],
+                    mark: { type: 'area', opacity: 0.22, color: '#10b981' },
+                    encoding: {
+                      x: { field: xTimeField, type: 'quantitative' },
+                      y: { field: 'valence_ci_lower', type: 'quantitative' },
+                      y2: { field: 'valence_ci_upper' },
+                    },
+                  },
+                  // Arousal error band (ribbon)
+                  {
+                    transform: [{ filter: 'datum.arousal_ci_lower != null && datum.arousal_ci_upper != null' }],
+                    mark: { type: 'area', opacity: 0.22, color: '#f59e0b' },
+                    encoding: {
+                      x: { field: xTimeField, type: 'quantitative' },
+                      y: { field: 'arousal_ci_lower', type: 'quantitative' },
+                      y2: { field: 'arousal_ci_upper' },
+                    },
+                  },
+                ]
+              : []),
             {
               transform: [
                 {
@@ -2217,6 +2481,10 @@ export function buildBoppVegaLiteSpec(
                   { field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' },
                   { field: 'dimension', type: 'nominal', title: 'Dimension' },
                   { field: 'score', type: 'quantitative', format: '.3f', title: 'Score' },
+                  ...(hasConfidence ? [
+                    { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
+                    { field: 'confidence_std', type: 'quantitative', format: '.3f', title: 'Std Dev (σ)' },
+                  ] : []),
                 ],
               },
             },
@@ -2231,7 +2499,7 @@ export function buildBoppVegaLiteSpec(
               : []),
           ],
         },
-        // 2D Circumplex Scatter Plot
+        // 2D Circumplex Scatter Plot with crosshair error bars
         {
           width: 320,
           height: chartHeight,
@@ -2267,16 +2535,41 @@ export function buildBoppVegaLiteSpec(
             },
             // Path trajectory
             {
-              mark: { type: 'line', color: '#6366f1', opacity: 0.6, strokeWidth: 2 },
+              mark: { type: 'line', color: '#6366f1', opacity: 0.5, strokeWidth: 1.75 },
               encoding: {
                 x: { field: 'valence', type: 'quantitative' },
                 y: { field: 'arousal', type: 'quantitative' },
                 order: { field: '__index' },
               },
             },
+            // Crosshair error bars when variance confidence is present
+            ...(hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none'
+              ? [
+                  // Horizontal Valence error bar: [valence_ci_lower, valence_ci_upper] at y = arousal
+                  {
+                    transform: [{ filter: 'datum.valence_ci_lower != null && datum.valence_ci_upper != null' }],
+                    mark: { type: 'rule', stroke: '#10b981', strokeWidth: 1.5, opacity: 0.65 },
+                    encoding: {
+                      x: { field: 'valence_ci_lower', type: 'quantitative', scale: { domain: [-1.1, 1.1] } },
+                      x2: { field: 'valence_ci_upper' },
+                      y: { field: 'arousal', type: 'quantitative', scale: { domain: [-1.1, 1.1] } },
+                    },
+                  },
+                  // Vertical Arousal error bar: [arousal_ci_lower, arousal_ci_upper] at x = valence
+                  {
+                    transform: [{ filter: 'datum.arousal_ci_lower != null && datum.arousal_ci_upper != null' }],
+                    mark: { type: 'rule', stroke: '#f59e0b', strokeWidth: 1.5, opacity: 0.65 },
+                    encoding: {
+                      x: { field: 'valence', type: 'quantitative', scale: { domain: [-1.1, 1.1] } },
+                      y: { field: 'arousal_ci_lower', type: 'quantitative', scale: { domain: [-1.1, 1.1] } },
+                      y2: { field: 'arousal_ci_upper' },
+                    },
+                  },
+                ]
+              : []),
             // Points colored by time progression
             {
-              mark: { type: 'circle', size: 80 },
+              mark: { type: 'circle', size: 90, stroke: isDark ? '#ffffff' : '#0f172a', strokeWidth: 1 },
               encoding: {
                 x: { field: 'valence', type: 'quantitative', title: 'Valence (Pleasure)', scale: { domain: [-1.1, 1.1] } },
                 y: { field: 'arousal', type: 'quantitative', title: 'Arousal (Energy)', scale: { domain: [-1.1, 1.1] } },
@@ -2290,6 +2583,10 @@ export function buildBoppVegaLiteSpec(
                   { field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' },
                   { field: 'valence', type: 'quantitative', format: '.3f', title: 'Valence' },
                   { field: 'arousal', type: 'quantitative', format: '.3f', title: 'Arousal' },
+                  ...(hasConfidence ? [
+                    { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
+                    { field: 'confidence_std', type: 'quantitative', format: '.3f', title: 'Std Dev (σ)' },
+                  ] : []),
                 ],
               },
             },
@@ -2358,15 +2655,65 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (payloadType === 'tempo') {
     const xTime = extentType?.includes('time') ? 'time' : '__index';
-    return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-      width: chartWidth,
-      height: chartHeight,
-      title: { text: `BOPP Tempo Curve (BPM): ${annotation.media_id}`, color: textColor },
-      data: { values: data },
-      transform: transforms,
-      config: baseConfig,
-      layer: [
+    const isInterval = extentType?.includes('interval');
+    const layers: Record<string, unknown>[] = [];
+
+    if (isInterval) {
+      transforms.push({
+        calculate: `datum.${xTime} + (datum.duration != null ? datum.duration : 0)`,
+        as: '_calc_end',
+      });
+
+      // Interval tempo blocks
+      layers.push({
+        mark: { type: 'rect', fill: '#f59e0b', fillOpacity: 0.85, stroke: isDark ? '#1e293b' : '#ffffff', strokeWidth: 1, cornerRadius: 2 },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: xTime, type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+          x2: { field: '_calc_end' },
+          y: { field: 'value', type: 'quantitative', title: 'Tempo (BPM)', scale: { zero: false } },
+          y2: { value: chartHeight - 60 },
+          tooltip: [
+            { field: 'value', type: 'quantitative', format: '.1f', title: 'Tempo (BPM)' },
+            { field: xTime, type: 'quantitative', format: '.2f', title: 'Start (s)' },
+            { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+          ],
+        },
+      });
+
+      // Top-edge confidence meter
+      if (hasConfidence && confidenceChannel !== 'none') {
+        layers.push(...buildIntervalConfidenceLayers({
+          xField: xTime,
+          endField: '_calc_end',
+          durField: 'duration',
+          chartHeight,
+          isDark,
+          confidenceType: confidenceType as any,
+          channelMode: confidenceChannel,
+          yTop: 0,
+          yBottom: chartHeight - 60,
+          meterHeight: 6,
+        }));
+      }
+    } else {
+      // Step line tempo trajectory
+      // If variance is present, add shaded 95% CI error band
+      if (hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none') {
+        layers.push({
+          transform: [{ filter: 'datum.value_ci_lower != null && datum.value_ci_upper != null' }],
+          mark: { type: 'area', opacity: 0.25, color: '#f59e0b' },
+          encoding: {
+            x: { field: xTime, type: 'quantitative', scale: { domain: [minX, maxX] } },
+            y: { field: 'value_ci_lower', type: 'quantitative', scale: { zero: false } },
+            y2: { field: 'value_ci_upper' },
+          },
+        });
+        layers.push(...buildVarianceErrorBarLayers({ xField: xTime, yField: 'value', isDark }));
+      }
+
+      layers.push(
         {
           mark: { type: 'line', interpolate: 'step-after', strokeWidth: 2.5, color: '#f59e0b' },
           ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
@@ -2376,6 +2723,10 @@ export function buildBoppVegaLiteSpec(
             tooltip: [
               { field: xTime, type: 'quantitative', format: '.2f', title: 'Time (s)' },
               { field: 'value', type: 'quantitative', format: '.1f', title: 'Tempo (BPM)' },
+              ...(hasConfidence ? [
+                { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' },
+                { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
+              ] : []),
             ],
           },
         },
@@ -2385,8 +2736,19 @@ export function buildBoppVegaLiteSpec(
             x: { field: xTime, type: 'quantitative' },
             y: { field: 'value', type: 'quantitative' },
           },
-        },
-      ],
+        }
+      );
+    }
+
+    return {
+      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+      width: chartWidth,
+      height: chartHeight,
+      title: { text: `BOPP Tempo (BPM): ${annotation.media_id}`, color: textColor },
+      data: { values: data },
+      transform: transforms,
+      config: baseConfig,
+      layer: layers,
     };
   }
 
