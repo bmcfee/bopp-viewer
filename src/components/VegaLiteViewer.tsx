@@ -37,6 +37,7 @@ import { buildBoppVegaLiteSpec, VegaLiteBuilderOptions } from '../utils/vegaLite
 import { ConfidenceChannelMode } from '../utils/confidenceGrammar';
 import { BoppAudioPlayer, isSonifiablePayload } from '../utils/audioSynthesizer';
 import { computeSummaryStats } from '../utils/boppParser';
+import { analyzeIntervalAnnotation } from '../utils/intervalOverlap';
 import { AnnotationMetadataCard } from './AnnotationMetadataCard';
 import {
   LinkedMedia,
@@ -131,6 +132,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
   // Summary stats for metric indicators
   const stats = useMemo(() => computeSummaryStats(annotation, tabularData), [annotation, tabularData]);
+  const intervalAnalysis = useMemo(() => analyzeIntervalAnnotation(annotation, tabularData), [annotation, tabularData]);
   const duration = linkedMedia?.duration || stats.duration || 10;
 
   // Measure container width dynamically from outer plot card with a deadband to eliminate loop warnings
@@ -294,6 +296,21 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     }
   };
 
+  const optimalChartHeight = useMemo(() => {
+    const pType = annotation.payload?.payload_type as string | undefined;
+    const eType = annotation.extent?.extent_type as string | undefined;
+    if (pType === 'key_mode') {
+      const isInterval = eType?.includes('interval');
+      return isInterval ? 220 : 540;
+    }
+    if (pType === 'note_midi' || pType === 'piano_roll') return 460;
+    if (pType === 'chord') return 360;
+    if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') return 240;
+    if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
+    if (!eType || eType === 'none') return 440;
+    return 340;
+  }, [annotation.payload?.payload_type, annotation.extent?.extent_type]);
+
   // Build the Vega-Lite specification
   const vegaSpec = useMemo(() => {
     const options: VegaLiteBuilderOptions = {
@@ -306,7 +323,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       showLabels,
       currentTime: isPlaying ? currentTime : null,
       chartWidth: containerWidth,
-      chartHeight: 300,
+      chartHeight: optimalChartHeight,
     };
     return buildBoppVegaLiteSpec(annotation, tabularData, options);
   }, [
@@ -322,6 +339,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     currentTime,
     isPlaying,
     containerWidth,
+    optimalChartHeight,
   ]);
 
   // Embed Vega-Lite into DOM
@@ -1108,6 +1126,31 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 />
                 <span>Pan & Zoom</span>
               </label>
+
+              {/* Interval Layout Continuity Badge */}
+              {intervalAnalysis.isIntervalExtent && (
+                <div
+                  className="flex items-center gap-1 px-2 py-0.5 rounded border border-slate-300 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800 text-[11px] shadow-2xs font-mono select-none"
+                  title={
+                    intervalAnalysis.isDisjoint
+                      ? 'Intervals are disjoint in time: rendered in a single consolidated row on the vertical axis'
+                      : `${intervalAnalysis.overlapCount} interval collisions detected: rendered across distinct vertical rows`
+                  }
+                >
+                  <span className="text-slate-500 dark:text-slate-400 font-semibold">axis:</span>
+                  {intervalAnalysis.isDisjoint ? (
+                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span>Single Row (Disjoint)</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span>Multi-Row ({intervalAnalysis.overlapCount} overlaps)</span>
+                    </span>
+                  )}
+                </div>
+              )}
 
               {enableOverviewBrush && (
                 <div className="flex items-center gap-1 bg-slate-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-slate-300 dark:border-neutral-700 shadow-2xs">

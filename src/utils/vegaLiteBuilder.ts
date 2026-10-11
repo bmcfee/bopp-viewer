@@ -12,6 +12,7 @@ import { annotationToTabular } from './boppParser';
 import {
   chordToMirEvalColor,
   keyToMirEvalColor,
+  getSplitKeyColors,
   getKeyTonicRank,
   normalizeKeyName,
   parseKeyMode,
@@ -29,6 +30,10 @@ import {
   getAgreementGlyph,
   getConfidenceColor,
 } from './confidenceGrammar';
+import {
+  isIntervalExtentType,
+  analyzeIntervalAnnotation,
+} from './intervalOverlap';
 
 // Ensure mir_eval schemes are registered with Vega
 registerMirEvalSchemes();
@@ -226,7 +231,7 @@ export function buildBoppVegaLiteSpec(
       .map(d => d.time ?? d.quarter ?? d.tick ?? 0)
       .filter(t => typeof t === 'number');
     if (startTimes.length > 0 && endTimes.length > 0) {
-      minX = Math.min(...startTimes);
+      minX = Math.min(0, ...startTimes);
       maxX = Math.max(...endTimes);
       if (maxX <= minX) maxX = minX + 1;
     }
@@ -395,6 +400,9 @@ export function buildBoppVegaLiteSpec(
           const rawKey = String(d.value ?? '');
           const p = parseKeyMode(rawKey);
           const conf = typeof d.confidence === 'number' ? d.confidence : null;
+          const split = getSplitKeyColors(rawKey, mode);
+          const isMode = p?.isMode ?? false;
+          const displayLabel = p?.isMode ? `${p.root} ${p.mode.charAt(0).toUpperCase() + p.mode.slice(1)}` : (p ? `${p.root} ${p.isMinor ? 'Minor' : 'Major'}` : rawKey);
           return {
             index: idx,
             rawKey,
@@ -402,10 +410,14 @@ export function buildBoppVegaLiteSpec(
             root: p?.root ?? 'C',
             semitone: p?.semitone ?? 0,
             isMinor: p?.isMinor ?? false,
+            isMode,
             confidence: conf,
-            label: p ? `${p.root} ${p.isMinor ? 'Minor' : 'Major'}` : rawKey,
-            fullKey: p ? `${p.root}:${p.isMinor ? 'min' : 'maj'}` : rawKey,
-            color: p ? keyToMirEvalColor(rawKey, mode) : MIR_EVAL_COLORMAPS.neutral_gray,
+            label: displayLabel,
+            fullKey: p?.canonicalKey ?? rawKey,
+            color: split.tonicColor,
+            tonicColor: split.tonicColor,
+            relMajColor: split.relativeMajorColor,
+            isSplit: split.isSplit,
           };
         })
         .filter(c => Boolean(c.rawKey && c.parsed));
@@ -420,10 +432,14 @@ export function buildBoppVegaLiteSpec(
               root: 'C',
               semitone: 0,
               isMinor: false,
+              isMode: false,
               confidence: null as number | null,
               label: 'C Major',
               fullKey: 'C:maj',
               color: keyToMirEvalColor('C:maj', mode),
+              tonicColor: keyToMirEvalColor('C:maj', mode),
+              relMajColor: keyToMirEvalColor('C:maj', mode),
+              isSplit: false,
             },
           ];
 
@@ -434,8 +450,11 @@ export function buildBoppVegaLiteSpec(
 
       // Concentric Donut Plots: Outer Donut = 12 Major Keys, Inner Donut = 12 Minor Keys
       // Both arranged clockwise in Circle of Fifths order starting from C at 12 o'clock
+      // Modes use two adjacent patches on the sector:
+      // - Outer adjacent patch (outer half of sector) colored to tonic
+      // - Inner adjacent patch (inner half of sector) colored to relative major tonic
 
-      // 1. Outer Ring: Major Keys
+      // 1. Outer Ring: Major Keys & Major Modes (Ionian, Lydian, Mixolydian)
       const outerRingValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
         const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
         const matchingCand = sortedCandidates.find(c => c.semitone === kSem && !c.isMinor);
@@ -446,8 +465,22 @@ export function buildBoppVegaLiteSpec(
           ? MIR_EVAL_COLORMAPS.pitch[kSem]
           : MIR_EVAL_COLORMAPS.fifths[kSem];
 
+        const isSplit = Boolean(isActive && matchingCand?.isMode);
+        const outerColor = isSplit && matchingCand ? matchingCand.tonicColor : sliceColor;
+        const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
+
         const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
         const badgeText = isActive && candConf !== null ? confPct : '';
+
+        // Arc meter geometry along outer rim of donut segment
+        const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
+        const theta1 = Math.PI / 12 + i * (Math.PI / 6);
+        const margin = 0.015;
+        const meterStart = theta0 + margin;
+        const meterTrackEnd = theta1 - margin;
+        const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
+        const meterFillEnd = meterStart + confVal * (meterTrackEnd - meterStart);
+        const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
 
         return {
           key: k,
@@ -456,6 +489,9 @@ export function buildBoppVegaLiteSpec(
           fifths: i,
           count: 1,
           color: sliceColor,
+          outerColor,
+          innerColor,
+          isSplit,
           active: isActive,
           activeOpacity: isActive ? 1.0 : 0.0,
           activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
@@ -466,20 +502,25 @@ export function buildBoppVegaLiteSpec(
             ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45))
             : (isDark ? 0.28 : 0.38),
           textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: `${k}:maj`,
-          label: `${k} Major`,
-          modeName: 'Major',
+          fullKey: matchingCand?.fullKey ?? `${k}:maj`,
+          label: matchingCand?.label ?? `${k} Major`,
+          modeName: matchingCand?.isMode ? matchingCand.parsed?.mode : 'Major',
           confidence: candConf,
           confPct,
           badge: badgeText,
           badgeOpacity: isActive && candConf !== null ? 1.0 : 0.0,
+          meterStart,
+          meterTrackEnd,
+          meterFillEnd,
+          hasMeter,
+          confVal,
           status: isActive
-            ? (candConf !== null ? `Major Candidate (${confPct})` : 'Detected Major Key')
+            ? (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`)
             : 'Major Sector',
         };
       });
 
-      // 2. Inner Ring: Minor Keys
+      // 2. Inner Ring: Minor Keys & Minor Modes (Aeolian, Dorian, Phrygian, Locrian)
       const innerRingValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
         const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
         const matchingCand = sortedCandidates.find(c => c.semitone === kSem && c.isMinor);
@@ -490,8 +531,22 @@ export function buildBoppVegaLiteSpec(
           ? MIR_EVAL_COLORMAPS.pitch_dark[kSem]
           : MIR_EVAL_COLORMAPS.fifths_dark[kSem];
 
+        const isSplit = Boolean(isActive && matchingCand?.isMode);
+        const outerColor = isSplit && matchingCand ? matchingCand.tonicColor : sliceColor;
+        const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
+
         const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
         const badgeText = isActive && candConf !== null ? confPct : '';
+
+        // Arc meter geometry along outer rim of inner donut segment
+        const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
+        const theta1 = Math.PI / 12 + i * (Math.PI / 6);
+        const margin = 0.015;
+        const meterStart = theta0 + margin;
+        const meterTrackEnd = theta1 - margin;
+        const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
+        const meterFillEnd = meterStart + confVal * (meterTrackEnd - meterStart);
+        const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
 
         return {
           key: k,
@@ -500,6 +555,9 @@ export function buildBoppVegaLiteSpec(
           fifths: i,
           count: 1,
           color: sliceColor,
+          outerColor,
+          innerColor,
+          isSplit,
           active: isActive,
           activeOpacity: isActive ? 1.0 : 0.0,
           activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
@@ -510,31 +568,38 @@ export function buildBoppVegaLiteSpec(
             ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45))
             : (isDark ? 0.25 : 0.35),
           textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: `${k}:min`,
-          label: `${k} Minor`,
-          modeName: 'Minor',
+          fullKey: matchingCand?.fullKey ?? `${k}:min`,
+          label: matchingCand?.label ?? `${k} Minor`,
+          modeName: matchingCand?.isMode ? matchingCand.parsed?.mode : 'Minor',
           confidence: candConf,
           confPct,
           badge: badgeText,
           badgeOpacity: isActive && candConf !== null ? 1.0 : 0.0,
+          meterStart,
+          meterTrackEnd,
+          meterFillEnd,
+          hasMeter,
+          confVal,
           status: isActive
-            ? (candConf !== null ? `Minor Candidate (${confPct})` : 'Detected Minor Key')
+            ? (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`)
             : 'Minor Sector',
         };
       });
 
-      const wheelSize = typeof chartWidth === 'number' ? Math.min(460, Math.max(340, chartWidth - 60)) : 380;
+      const wheelSize = typeof chartWidth === 'number' ? Math.min(480, Math.max(360, chartWidth - 60)) : 400;
 
       const centerData = [
         {
           title: primaryCandidate.label,
-          subtitle: hasMultipleCandidates
+          subtitle: primaryCandidate.isMode
+            ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}% · ` : ''}Rel Maj: ${primaryCandidate.parsed?.relativeMajorRoot} Maj`
+            : hasMultipleCandidates
             ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}%` : ''} (Primary)`
             : (primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 1000) / 10}% confidence` : 'Harmonic tonal center'),
           detail: hasMultipleCandidates
             ? sortedCandidates.slice(1).map(c => `${c.label} (${c.confidence !== null ? `${Math.round(c.confidence * 100)}%` : ''})`).join(' · ')
             : '',
-          legendInfo: 'Outer: Major · Inner: Minor',
+          legendInfo: 'Outer: Major · Inner: Minor · Rim Arcs: Confidence · Split: Modal',
           color: primaryCandidate.color,
         },
       ];
@@ -546,13 +611,13 @@ export function buildBoppVegaLiteSpec(
           text: hasMultipleCandidates
             ? `Global Key Candidates (Concentric Circle of Fifths)`
             : `Global Key: ${primaryCandidate.label} (Concentric Circle of Fifths)`,
-          subtitle: `Outer Donut: Major Keys · Inner Donut: Minor Keys · C at 12 o'clock · ${annotation.media_id}`,
+          subtitle: `Outer Donut: Major · Inner Donut: Minor · Outer Rim Arcs: Confidence Meters · ${annotation.media_id}`,
           color: textColor,
           subtitleColor: axisColor,
         },
         config: baseConfig,
         layer: [
-          // 1. OUTER DONUT: Major Key Arc Ring (Radius 104 - 148)
+          // 1A. OUTER DONUT: Outer Half of Sector (Radius 126 - 148, Colored to Tonic)
           {
             data: { values: outerRingValues },
             encoding: {
@@ -563,7 +628,7 @@ export function buildBoppVegaLiteSpec(
                 scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
               },
               order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'color', type: 'nominal', scale: null },
+              color: { field: 'outerColor', type: 'nominal', scale: null },
               opacity: { field: 'opacity', type: 'quantitative', scale: null },
               stroke: { field: 'stroke', type: 'nominal', scale: null },
               strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
@@ -575,7 +640,48 @@ export function buildBoppVegaLiteSpec(
                 { field: 'status', type: 'nominal', title: 'Status' },
               ],
             },
-            mark: { type: 'arc', innerRadius: 104, outerRadius: 148 },
+            mark: { type: 'arc', innerRadius: 126, outerRadius: 148 },
+          },
+          // 1B. OUTER DONUT: Inner Half of Sector (Radius 104 - 126, Colored to Relative Major for modes, Tonic for simple keys)
+          {
+            data: { values: outerRingValues },
+            encoding: {
+              theta: {
+                field: 'count',
+                type: 'quantitative',
+                stack: true,
+                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
+              },
+              order: { field: 'fifths', type: 'quantitative' },
+              color: { field: 'innerColor', type: 'nominal', scale: null },
+              opacity: { field: 'opacity', type: 'quantitative', scale: null },
+              stroke: { field: 'stroke', type: 'nominal', scale: null },
+              strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
+              tooltip: [
+                { field: 'ring', type: 'nominal', title: 'Ring' },
+                { field: 'key', type: 'nominal', title: 'Tonic Root' },
+                { field: 'modeName', type: 'nominal', title: 'Mode' },
+                { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
+                { field: 'status', type: 'nominal', title: 'Status' },
+              ],
+            },
+            mark: { type: 'arc', innerRadius: 104, outerRadius: 126 },
+          },
+          // 1C. OUTER DONUT: Hairline divider between the two adjacent patches when it is a mode
+          {
+            data: { values: outerRingValues },
+            transform: [{ filter: 'datum.isSplit === true' }],
+            mark: { type: 'arc', innerRadius: 125.5, outerRadius: 126.5 },
+            encoding: {
+              theta: {
+                field: 'count',
+                type: 'quantitative',
+                stack: true,
+                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
+              },
+              order: { field: 'fifths', type: 'quantitative' },
+              color: { value: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)' },
+            },
           },
           // 2. OUTER DONUT: Active Candidate Accent Highlight Ring
           {
@@ -617,7 +723,51 @@ export function buildBoppVegaLiteSpec(
               font: 'system-ui, -apple-system, sans-serif',
             },
           },
-          // 4. OUTER DONUT: Confidence Badges on Active Slices
+          // 4A. OUTER DONUT: Confidence Meter Track along Outer Rim (Radius 150 - 156)
+          {
+            data: { values: outerRingValues },
+            transform: [{ filter: 'datum.hasMeter === true' }],
+            mark: {
+              type: 'arc',
+              innerRadius: 150,
+              outerRadius: 156,
+              cornerRadius: 2,
+            },
+            encoding: {
+              theta: { field: 'meterStart', type: 'quantitative', scale: null },
+              theta2: { field: 'meterTrackEnd' },
+              color: { value: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.15)' },
+              stroke: { value: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(15,23,42,0.2)' },
+              strokeWidth: { value: 0.8 },
+              tooltip: [
+                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
+                { field: 'confPct', type: 'nominal', title: 'Confidence' },
+                { field: 'status', type: 'nominal', title: 'Status' },
+              ],
+            },
+          },
+          // 4B. OUTER DONUT: Confidence Meter Fill Arc along Outer Rim (Radius 150 - 156)
+          {
+            data: { values: outerRingValues },
+            transform: [{ filter: 'datum.hasMeter === true' }],
+            mark: {
+              type: 'arc',
+              innerRadius: 150,
+              outerRadius: 156,
+              cornerRadius: 2,
+            },
+            encoding: {
+              theta: { field: 'meterStart', type: 'quantitative', scale: null },
+              theta2: { field: 'meterFillEnd' },
+              color: { value: isDark ? '#ffffff' : '#0f172a' },
+              tooltip: [
+                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
+                { field: 'confPct', type: 'nominal', title: 'Confidence' },
+                { field: 'status', type: 'nominal', title: 'Status' },
+              ],
+            },
+          },
+          // 4C. OUTER DONUT: Confidence Badges on Active Slices
           {
             data: { values: outerRingValues },
             encoding: {
@@ -633,14 +783,14 @@ export function buildBoppVegaLiteSpec(
             },
             mark: {
               type: 'text',
-              radius: 140,
-              fontSize: 10,
+              radius: 139,
+              fontSize: 9.5,
               fontWeight: 'bold',
               fill: isDark ? '#ffffff' : '#0f172a',
             },
           },
 
-          // 5. INNER DONUT: Minor Key Arc Ring (Radius 58 - 98)
+          // 5A. INNER DONUT: Outer Half of Sector (Radius 78 - 98, Colored to Tonic)
           {
             data: { values: innerRingValues },
             encoding: {
@@ -651,7 +801,7 @@ export function buildBoppVegaLiteSpec(
                 scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
               },
               order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'color', type: 'nominal', scale: null },
+              color: { field: 'outerColor', type: 'nominal', scale: null },
               opacity: { field: 'opacity', type: 'quantitative', scale: null },
               stroke: { field: 'stroke', type: 'nominal', scale: null },
               strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
@@ -663,7 +813,48 @@ export function buildBoppVegaLiteSpec(
                 { field: 'status', type: 'nominal', title: 'Status' },
               ],
             },
-            mark: { type: 'arc', innerRadius: 58, outerRadius: 98 },
+            mark: { type: 'arc', innerRadius: 78, outerRadius: 98 },
+          },
+          // 5B. INNER DONUT: Inner Half of Sector (Radius 58 - 78, Colored to Relative Major for modes, Tonic for simple keys)
+          {
+            data: { values: innerRingValues },
+            encoding: {
+              theta: {
+                field: 'count',
+                type: 'quantitative',
+                stack: true,
+                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
+              },
+              order: { field: 'fifths', type: 'quantitative' },
+              color: { field: 'innerColor', type: 'nominal', scale: null },
+              opacity: { field: 'opacity', type: 'quantitative', scale: null },
+              stroke: { field: 'stroke', type: 'nominal', scale: null },
+              strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
+              tooltip: [
+                { field: 'ring', type: 'nominal', title: 'Ring' },
+                { field: 'key', type: 'nominal', title: 'Tonic Root' },
+                { field: 'modeName', type: 'nominal', title: 'Mode' },
+                { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
+                { field: 'status', type: 'nominal', title: 'Status' },
+              ],
+            },
+            mark: { type: 'arc', innerRadius: 58, outerRadius: 78 },
+          },
+          // 5C. INNER DONUT: Hairline divider between the two adjacent patches when it is a mode
+          {
+            data: { values: innerRingValues },
+            transform: [{ filter: 'datum.isSplit === true' }],
+            mark: { type: 'arc', innerRadius: 77.5, outerRadius: 78.5 },
+            encoding: {
+              theta: {
+                field: 'count',
+                type: 'quantitative',
+                stack: true,
+                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
+              },
+              order: { field: 'fifths', type: 'quantitative' },
+              color: { value: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)' },
+            },
           },
           // 6. INNER DONUT: Active Candidate Accent Highlight Ring
           {
@@ -705,7 +896,51 @@ export function buildBoppVegaLiteSpec(
               font: 'system-ui, -apple-system, sans-serif',
             },
           },
-          // 8. INNER DONUT: Confidence Badges on Active Minor Slices
+          // 8A. INNER DONUT: Confidence Meter Track along Outer Rim (Radius 99.5 - 103.5)
+          {
+            data: { values: innerRingValues },
+            transform: [{ filter: 'datum.hasMeter === true' }],
+            mark: {
+              type: 'arc',
+              innerRadius: 99.5,
+              outerRadius: 103.5,
+              cornerRadius: 1.5,
+            },
+            encoding: {
+              theta: { field: 'meterStart', type: 'quantitative', scale: null },
+              theta2: { field: 'meterTrackEnd' },
+              color: { value: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(15,23,42,0.15)' },
+              stroke: { value: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(15,23,42,0.2)' },
+              strokeWidth: { value: 0.8 },
+              tooltip: [
+                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
+                { field: 'confPct', type: 'nominal', title: 'Confidence' },
+                { field: 'status', type: 'nominal', title: 'Status' },
+              ],
+            },
+          },
+          // 8B. INNER DONUT: Confidence Meter Fill Arc along Outer Rim (Radius 99.5 - 103.5)
+          {
+            data: { values: innerRingValues },
+            transform: [{ filter: 'datum.hasMeter === true' }],
+            mark: {
+              type: 'arc',
+              innerRadius: 99.5,
+              outerRadius: 103.5,
+              cornerRadius: 1.5,
+            },
+            encoding: {
+              theta: { field: 'meterStart', type: 'quantitative', scale: null },
+              theta2: { field: 'meterFillEnd' },
+              color: { value: isDark ? '#ffffff' : '#0f172a' },
+              tooltip: [
+                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
+                { field: 'confPct', type: 'nominal', title: 'Confidence' },
+                { field: 'status', type: 'nominal', title: 'Status' },
+              ],
+            },
+          },
+          // 8C. INNER DONUT: Confidence Badges on Active Minor Slices
           {
             data: { values: innerRingValues },
             encoding: {
@@ -744,7 +979,7 @@ export function buildBoppVegaLiteSpec(
             },
             mark: {
               type: 'text',
-              radius: 165,
+              radius: 170,
               fontSize: 12,
               fontWeight: 'bold',
               font: 'system-ui, -apple-system, sans-serif',
@@ -802,66 +1037,9 @@ export function buildBoppVegaLiteSpec(
         ],
       };
 
-      // If multiple candidates are present, append a Candidate Likelihood bar chart breakdown
-      if (hasMultipleCandidates) {
-        const candidateBarData = sortedCandidates.map(c => ({
-          key: c.label,
-          confidence: c.confidence ?? 0,
-          confPct: c.confidence !== null ? `${Math.round(c.confidence * 100)}%` : '',
-          color: c.color,
-        }));
-
-        const barChartSpec = {
-          width: wheelSize,
-          height: Math.max(90, sortedCandidates.length * 28 + 40),
-          title: {
-            text: 'Key Likelihood Distribution',
-            fontSize: 12,
-            color: textColor,
-          },
-          data: { values: candidateBarData },
-          encoding: {
-            y: {
-              field: 'key',
-              type: 'nominal',
-              sort: candidateBarData.map(d => d.key),
-              title: null,
-              axis: { labelColor: textColor, labelFontWeight: 'bold' },
-            },
-            x: {
-              field: 'confidence',
-              type: 'quantitative',
-              title: 'Likelihood',
-              scale: { domain: [0, 1] },
-              axis: { format: '%', titleColor: textColor, labelColor: axisColor },
-            },
-          },
-          layer: [
-            {
-              mark: { type: 'bar', cornerRadius: 4, height: 16 },
-              encoding: {
-                color: { field: 'color', type: 'nominal', scale: null },
-              },
-            },
-            {
-              mark: { type: 'text', align: 'left', dx: 6, fontSize: 11, fontWeight: 'bold' },
-              encoding: {
-                text: { field: 'confPct', type: 'nominal' },
-                color: { value: textColor },
-              },
-            },
-          ],
-        };
-
-        return {
-          $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-          config: baseConfig,
-          vconcat: [radialChartSpec, barChartSpec],
-        };
-      }
-
       return {
         $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        config: baseConfig,
         ...radialChartSpec,
       };
     }
@@ -1219,10 +1397,7 @@ export function buildBoppVegaLiteSpec(
         return cleanLayer;
       });
 
-      // Initial visible window: cover first ~35% of piece (or 30s) so brush is immediately visible & draggable
-      const initialSpan = Math.min(30, (maxX - minX) * 0.35);
-      const initialEnd = minX + (initialSpan > 0 ? initialSpan : (maxX - minX));
-
+      // Default view is fully zoomed out across the entire piece upon open
       return {
         $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
         data: { values: data },
@@ -1265,7 +1440,7 @@ export function buildBoppVegaLiteSpec(
                   zoom: true,
                   clear: false,
                 },
-                value: { [xField]: [minX, initialEnd] },
+                value: { [xField]: [minX, maxX] },
               },
             ],
             encoding: {
@@ -1304,8 +1479,10 @@ export function buildBoppVegaLiteSpec(
 
   // =========================================================================
   // 1.5. KEY_MODE (Key & Mode Modulations)
-  // Pitch axis ordered consistently by tonic note (alternating Major and Minor)
-  // Colors matched to mir_eval circle of fifths!
+  // Supports standard keys (C:maj, A:min) and modal tonalities (dorian, phrygian, etc.)
+  // When disjoint in time: renders as a single row on the vertical axis!
+  // When overlapping: renders across multiple rows on the vertical axis.
+  // Modes use split coloring: top/outer colored to tonic, bottom/inner colored to relative major tonic.
   // =========================================================================
   if (payloadType === 'key_mode') {
     const isMidi = extentType?.includes('midi') || extentType?.includes('tick') || (data.length > 0 && typeof data[0].tick === 'number');
@@ -1324,13 +1501,34 @@ export function buildBoppVegaLiteSpec(
       });
     }
 
-    // Standard 24 musical keys in tonic order going UP from C at the bottom:
-    // In Vega-Lite ordinal y-scale, domain[0] is placed at the top and domain[last] is placed at the bottom.
-    // ALL_24_KEYS_TOP_TO_BOTTOM (ordered from B:min down to C:maj) ensures C:maj is at the bottom!
-    // Each tonic groups Major and Minor together consistently across all datasets.
+    const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
+    const useSingleRow = Boolean(isInterval && intervalAnalysis?.shouldUseSingleRow);
+
     const isPitchScheme = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
     const mode = isPitchScheme ? 'pitch' : 'fifths';
-    const keyDomain = [...ALL_24_KEYS_TOP_TO_BOTTOM];
+
+    // Enrich records with tonic and relative-major split colors
+    const enrichedData = data.map((d, idx) => {
+      const rawVal = String(d.value ?? '');
+      const parsed = parseKeyMode(rawVal);
+      const split = getSplitKeyColors(rawVal, mode);
+      const rowKey = parsed ? `${parsed.root}:${parsed.isMinor ? 'min' : 'maj'}` : rawVal;
+      return {
+        ...d,
+        __key_idx: idx,
+        _parsed_root: parsed?.root ?? 'C',
+        _row_key: rowKey,
+        _is_mode: parsed?.isMode ?? false,
+        _mode_name: parsed?.mode ?? 'maj',
+        _rel_maj_key: parsed?.relativeMajorKey ?? 'C:maj',
+        _color_tonic: split.tonicColor,
+        _color_rel: split.relativeMajorColor,
+        _is_split: split.isSplit,
+      };
+    });
+
+    const extraKeys = data.map(d => String(d.value ?? '')).filter(k => k && !ALL_24_KEYS_TOP_TO_BOTTOM.includes(k as any));
+    const keyDomain = [...ALL_24_KEYS_TOP_TO_BOTTOM, ...new Set(extraKeys)];
     const keyColors = keyDomain.map(k => keyToMirEvalColor(k, mode));
 
     const keyColorScale = {
@@ -1338,13 +1536,28 @@ export function buildBoppVegaLiteSpec(
       range: keyColors,
     };
 
-    const layers: Record<string, unknown>[] = [
-      {
+    const singleRowAxisTitle = intervalAnalysis?.singleRowLabel || 'Harmonic Key / Mode';
+    if (useSingleRow) {
+      transforms.push({
+        calculate: `'${singleRowAxisTitle}'`,
+        as: '_single_row',
+      });
+    }
+
+    const yField = useSingleRow ? '_single_row' : 'value';
+    const yType = 'nominal';
+    const yTitle = useSingleRow ? singleRowAxisTitle : 'Tonic Pitch (C at bottom)';
+
+    const layers: Record<string, unknown>[] = [];
+
+    if (!isInterval) {
+      // Instantaneous ticks
+      layers.push({
         mark: {
-          type: isInterval ? 'rect' : 'tick',
+          type: 'tick',
           stroke: isDark ? '#ffffff' : '#0f172a',
-          strokeWidth: 1.5,
-          cornerRadius: 3,
+          strokeWidth: 2,
+          size: 24,
         },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
@@ -1354,9 +1567,163 @@ export function buildBoppVegaLiteSpec(
             title: xTitle,
             scale: { domain: [minX, maxX] },
           },
-          ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
           y: {
-            field: 'value',
+            field: yField,
+            type: yType,
+            title: yTitle,
+            scale: { domain: keyDomain },
+            axis: {
+              labelFontWeight: 'bold',
+              labelFontSize: 11,
+              titlePadding: 14,
+              labelPadding: 8,
+              minExtent: 70,
+            },
+          },
+          color: {
+            field: '_color_tonic',
+            type: 'nominal',
+            scale: null,
+          },
+          opacity: hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+            : { value: 1.0 },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Key/Mode' },
+            { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
+            { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+          ],
+        },
+      });
+    } else if (useSingleRow) {
+      // DISJOINT: Single horizontal track with two adjacent patches for modal annotations
+      const trackHeight = 44;
+      const halfHeight = trackHeight / 2;
+
+      // Outer bounding container / border
+      layers.push({
+        mark: {
+          type: 'rect',
+          height: trackHeight,
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
+          cornerRadius: 4,
+          fill: 'transparent',
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: {
+            field: xField,
+            type: 'quantitative',
+            title: xTitle,
+            scale: { domain: [minX, maxX] },
+          },
+          x2: { field: '_calc_end' },
+          y: {
+            field: yField,
+            type: yType,
+            title: yTitle,
+            axis: {
+              labelFontWeight: 'bold',
+              labelFontSize: 11,
+              titlePadding: 14,
+              labelPadding: 8,
+              minExtent: 80,
+            },
+          },
+          opacity: hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+            : { value: 1.0 },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Key / Mode' },
+            { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
+            { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
+            { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+          ],
+        },
+      });
+
+      // Patch 1 (Top adjacent patch): colored to tonic
+      layers.push({
+        mark: {
+          type: 'rect',
+          height: halfHeight,
+          cornerRadiusTopLeft: 4,
+          cornerRadiusTopRight: 4,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: yField, type: yType },
+          yOffset: { value: -halfHeight / 2 },
+          color: { field: '_color_tonic', type: 'nominal', scale: null },
+        },
+      });
+
+      // Patch 2 (Bottom adjacent patch): colored to relative major tonic for modes, or tonic for simple keys
+      layers.push({
+        mark: {
+          type: 'rect',
+          height: halfHeight,
+          cornerRadiusBottomLeft: 4,
+          cornerRadiusBottomRight: 4,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: yField, type: yType },
+          yOffset: { value: halfHeight / 2 },
+          color: {
+            condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
+            field: '_color_tonic',
+            type: 'nominal',
+            scale: null,
+          },
+        },
+      });
+
+      // Distinct divider line between the two adjacent patches when it is a mode
+      layers.push({
+        transform: [{ filter: 'datum._is_mode === true' }],
+        mark: {
+          type: 'rule',
+          stroke: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.5)',
+          strokeWidth: 1.5,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: yField, type: yType },
+        },
+      });
+    } else {
+      // OVERLAPPING INTERVALS: Multi-row vertical axis with two adjacent patches per row
+      const rowHeight = 22;
+      const halfHeight = rowHeight / 2;
+
+      // Outer bounding container / border per row
+      layers.push({
+        mark: {
+          type: 'rect',
+          height: rowHeight,
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
+          cornerRadius: 3,
+          fill: 'transparent',
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: {
+            field: xField,
+            type: 'quantitative',
+            title: xTitle,
+            scale: { domain: [minX, maxX] },
+          },
+          x2: { field: '_calc_end' },
+          y: {
+            field: yField,
             type: 'nominal',
             title: 'Tonic Pitch (C at bottom)',
             scale: { domain: keyDomain },
@@ -1368,29 +1735,76 @@ export function buildBoppVegaLiteSpec(
               minExtent: 70,
             },
           },
-          color: {
-            field: 'value',
-            type: 'nominal',
-            title: isPitchScheme ? 'Key (Chromatic Pitch)' : 'Key (Circle of Fifths)',
-            scale: keyColorScale,
-            legend: {
-              orient: 'top',
-              titleFontWeight: 'bold',
-            },
-          },
           opacity: hasConfidence && confidenceChannel === 'opacity'
             ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
             : { value: 1.0 },
           tooltip: [
-            { field: 'value', type: 'nominal', title: 'Key' },
+            { field: 'value', type: 'nominal', title: 'Key / Mode' },
+            { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
+            { field: '_row_key', type: 'nominal', title: 'Tonic Row' },
             { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
-            ...(isInterval ? [{ field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' }] : []),
+            { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
           ],
         },
-      },
-    ];
+      });
 
+      // Patch 1 (Top adjacent patch)
+      layers.push({
+        mark: {
+          type: 'rect',
+          height: halfHeight,
+          cornerRadiusTopLeft: 3,
+          cornerRadiusTopRight: 3,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          yOffset: { value: -halfHeight / 2 },
+          color: { field: '_color_tonic', type: 'nominal', scale: null },
+        },
+      });
+
+      // Patch 2 (Bottom adjacent patch)
+      layers.push({
+        mark: {
+          type: 'rect',
+          height: halfHeight,
+          cornerRadiusBottomLeft: 3,
+          cornerRadiusBottomRight: 3,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          yOffset: { value: halfHeight / 2 },
+          color: {
+            condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
+            field: '_color_tonic',
+            type: 'nominal',
+            scale: null,
+          },
+        },
+      });
+
+      // Divider line between the two adjacent patches when it is a mode
+      layers.push({
+        transform: [{ filter: 'datum._is_mode === true' }],
+        mark: {
+          type: 'rule',
+          stroke: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.5)',
+          strokeWidth: 1,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+        },
+      });
+    }
+
+    // Text labels inside patches
     if (showLabels && isInterval) {
       layers.push({
         transform: [
@@ -1400,7 +1814,9 @@ export function buildBoppVegaLiteSpec(
           type: 'text',
           align: 'center',
           baseline: 'middle',
-          fill: textFill,
+          fill: '#ffffff',
+          stroke: 'rgba(0,0,0,0.8)',
+          strokeWidth: 2,
           fontWeight: 'bold',
           fontSize: 11,
           font: 'system-ui, -apple-system, sans-serif',
@@ -1409,7 +1825,7 @@ export function buildBoppVegaLiteSpec(
         },
         encoding: {
           x: { field: 'x_mid', type: 'quantitative' },
-          y: { field: 'value', type: 'nominal', scale: { domain: keyDomain } },
+          y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', scale: { domain: keyDomain } },
           text: { field: 'value', type: 'nominal' },
         },
       });
@@ -1419,18 +1835,21 @@ export function buildBoppVegaLiteSpec(
     if (cursor) layers.push(cursor);
 
     const keyPlotWidth = typeof chartWidth === 'number' ? Math.max(280, chartWidth - 120) : chartWidth;
+    const computedHeight = useSingleRow ? Math.max(160, Math.min(220, chartHeight ?? 180)) : Math.max(520, chartHeight ?? 480);
 
     return {
       $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
       width: keyPlotWidth,
-      height: Math.max(520, chartHeight ?? 480),
+      height: computedHeight,
       title: {
-        text: `BOPP Key Modulations: ${annotation.media_id}`,
-        subtitle: 'All 24 tonics (grouped Major/Minor, C at bottom) · mir_eval Circle of Fifths colors',
+        text: `BOPP Key & Mode: ${annotation.media_id}`,
+        subtitle: useSingleRow
+          ? 'Disjoint Interval Track (1 Row) · Modal Split Colors: Top = Tonic, Bottom = Relative Major Tonic'
+          : 'Overlapping Multi-Row Key Tracks · mir_eval Circle of Fifths colors with Modal Split Patches',
         color: textColor,
         subtitleColor: axisColor,
       },
-      data: { values: data },
+      data: { values: enrichedData },
       transform: transforms,
       config: baseConfig,
       layer: layers,
@@ -1769,9 +2188,21 @@ export function buildBoppVegaLiteSpec(
   // 4. TIME_INTERVAL + MULTI_SEGMENT / SEGMENT_OPEN (Structural Analysis)
   // =========================================================================
   if (extentType === 'time_interval' && (payloadType === 'multi_segment' || payloadType === 'segment_open')) {
-    const yField = payloadType === 'multi_segment' ? 'level' : 'value';
-    const yType = payloadType === 'multi_segment' ? 'ordinal' : 'nominal';
-    const colorField = payloadType === 'multi_segment' ? 'label' : 'value';
+    const isMulti = payloadType === 'multi_segment';
+    const intervalAnalysis = analyzeIntervalAnnotation(annotation, data);
+    const useSingleRow = !isMulti && intervalAnalysis.shouldUseSingleRow;
+
+    if (useSingleRow) {
+      transforms.push({
+        calculate: `'${intervalAnalysis.singleRowLabel}'`,
+        as: '_single_row',
+      });
+    }
+
+    const yField = isMulti ? 'level' : useSingleRow ? '_single_row' : 'value';
+    const yType = isMulti ? 'ordinal' : 'nominal';
+    const yTitle = isMulti ? 'Structural Level' : useSingleRow ? intervalAnalysis.singleRowLabel : 'Section';
+    const colorField = isMulti ? 'label' : 'value';
     const colorScale = resolveColorScale(colorScheme, payloadType);
 
     transforms.push({
@@ -1794,7 +2225,7 @@ export function buildBoppVegaLiteSpec(
           y: {
             field: yField,
             type: yType,
-            title: payloadType === 'multi_segment' ? 'Structural Level' : 'Section',
+            title: yTitle,
             axis: {
               titlePadding: 14,
               labelPadding: 8,
@@ -1819,6 +2250,30 @@ export function buildBoppVegaLiteSpec(
         },
       },
     ];
+
+    // Centered text labels for single row disjoint segments when enabled
+    if (useSingleRow && showLabels) {
+      transforms.push({
+        calculate: '(datum.time + (datum.time + (datum.duration != null ? datum.duration : 0))) / 2',
+        as: '_label_midpoint',
+      });
+      layers.push({
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'middle',
+          fill: textFill,
+          fontWeight: 'bold',
+          fontSize: 11,
+          limit: 120,
+        },
+        encoding: {
+          x: { field: '_label_midpoint', type: 'quantitative' },
+          y: { field: yField, type: yType },
+          text: { field: colorField, type: 'nominal' },
+        },
+      });
+    }
 
     // Overlay horizontal confidence / agreement meter strip along the top edge of each segment block
     if (hasConfidence && confidenceChannel === 'meter') {
@@ -2194,9 +2649,7 @@ export function buildBoppVegaLiteSpec(
         return cleanLayer;
       });
 
-      const initialSpan = Math.min(1.5, (maxX - minX) * 0.4);
-      const initialEnd = minX + (initialSpan > 0 ? initialSpan : (maxX - minX));
-
+      // Default view is fully zoomed out across the entire piece upon open
       return {
         $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
         data: { values: data },
@@ -2239,7 +2692,7 @@ export function buildBoppVegaLiteSpec(
                   zoom: true,
                   clear: false,
                 },
-                value: { time: [minX, initialEnd] },
+                value: { time: [minX, maxX] },
               },
             ],
             encoding: {
@@ -2751,6 +3204,9 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'score_interval' || extentType === 'score_quarter') {
     const isInterval = extentType === 'score_interval';
+    const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
+    const useSingleRow = Boolean(isInterval && intervalAnalysis?.shouldUseSingleRow);
+
     const markType = isInterval ? 'rect' : 'tick';
     const colorScale = resolveColorScale(colorScheme, payloadType);
 
@@ -2758,6 +3214,88 @@ export function buildBoppVegaLiteSpec(
       transforms.push({
         calculate: 'datum.quarter + (datum.duration != null ? datum.duration : 0)',
         as: '_calc_end',
+      });
+      if (useSingleRow && intervalAnalysis) {
+        transforms.push({
+          calculate: `'${intervalAnalysis.singleRowLabel}'`,
+          as: '_single_row',
+        });
+      }
+    }
+
+    const yEncoding = useSingleRow && intervalAnalysis
+      ? {
+          field: '_single_row',
+          type: 'nominal',
+          title: intervalAnalysis.singleRowLabel,
+          axis: {
+            titlePadding: 14,
+            labelPadding: 8,
+            labelFontWeight: 'bold',
+            minExtent: 70,
+          },
+        }
+      : {
+          field: 'value',
+          type: 'nominal',
+          title: 'Payload',
+          axis: {
+            titlePadding: 14,
+            labelPadding: 8,
+            labelFontWeight: 'bold',
+            minExtent: 70,
+          },
+        };
+
+    const layers: Record<string, unknown>[] = [
+      {
+        mark: {
+          type: markType,
+          cornerRadius: 2,
+          stroke: isDark ? '#1e293b' : '#334155',
+          strokeWidth: 1,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: {
+            field: 'quarter',
+            type: 'quantitative',
+            title: 'Musical Time (Fractional Quarter Notes)',
+            scale: { domain: [minX, maxX] },
+          },
+          ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
+          y: yEncoding,
+          color: { field: 'value', type: 'nominal', scale: colorScale },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Value' },
+            { field: 'quarter_str', type: 'nominal', title: 'Quarter Fraction' },
+            ...(isInterval ? [{ field: 'duration', type: 'quantitative', title: 'Duration' }] : []),
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
+          ],
+        },
+      },
+    ];
+
+    if (isInterval && useSingleRow && showLabels) {
+      transforms.push({
+        calculate: '(datum.quarter + (datum.quarter + (datum.duration != null ? datum.duration : 0))) / 2',
+        as: '_label_midpoint',
+      });
+      layers.push({
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'middle',
+          fill: textFill,
+          fontWeight: 'bold',
+          fontSize: 10,
+          limit: 120,
+        },
+        encoding: {
+          x: { field: '_label_midpoint', type: 'quantitative' },
+          y: yEncoding,
+          text: { field: 'value', type: 'nominal' },
+        },
       });
     }
 
@@ -2769,34 +3307,7 @@ export function buildBoppVegaLiteSpec(
       data: { values: data },
       transform: transforms,
       config: baseConfig,
-      layer: [
-        {
-          mark: {
-            type: markType,
-            cornerRadius: 2,
-            stroke: isDark ? '#1e293b' : '#334155',
-            strokeWidth: 1,
-          },
-          ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-          encoding: {
-            x: {
-              field: 'quarter',
-              type: 'quantitative',
-              title: 'Musical Time (Fractional Quarter Notes)',
-              scale: { domain: [minX, maxX] },
-            },
-            ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
-            y: { field: 'value', type: 'nominal', title: 'Payload' },
-            color: { field: 'value', type: 'nominal', scale: colorScale },
-            tooltip: [
-              { field: 'value', type: 'nominal', title: 'Value' },
-              { field: 'quarter_str', type: 'nominal', title: 'Quarter Fraction' },
-              ...(isInterval ? [{ field: 'duration', type: 'quantitative', title: 'Duration' }] : []),
-              ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
-            ],
-          },
-        },
-      ],
+      layer: layers,
     };
   }
 
@@ -2965,14 +3476,100 @@ export function buildBoppVegaLiteSpec(
     ? 'quarter'
     : '__index';
 
-  const isInterval = extentType?.includes('interval');
+  const isInterval = isIntervalExtentType(extentType) || data.some(d => typeof d.duration === 'number');
+  const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
+  const useSingleRow = Boolean(isInterval && intervalAnalysis?.shouldUseSingleRow);
+
   if (isInterval) {
     transforms.push({
       calculate: `datum.${xField} + (datum.duration != null ? datum.duration : 0)`,
       as: '_calc_end',
     });
+    if (useSingleRow && intervalAnalysis) {
+      transforms.push({
+        calculate: `'${intervalAnalysis.singleRowLabel}'`,
+        as: '_single_row',
+      });
+    }
   }
   const colorScale = resolveColorScale(colorScheme, payloadType);
+
+  const yEncoding = useSingleRow && intervalAnalysis
+    ? {
+        field: '_single_row',
+        type: 'nominal',
+        title: intervalAnalysis.singleRowLabel,
+        axis: {
+          titlePadding: 14,
+          labelPadding: 8,
+          labelFontWeight: 'bold',
+          minExtent: 70,
+        },
+      }
+    : {
+        field: 'value',
+        type: 'nominal',
+        title: payloadType,
+        axis: {
+          titlePadding: 14,
+          labelPadding: 8,
+          labelFontWeight: 'bold',
+          minExtent: 70,
+        },
+      };
+
+  const layers: Record<string, unknown>[] = [
+    {
+      mark: isInterval ? { type: 'bar', cornerRadius: 2 } : { type: 'tick', thickness: 3 },
+      ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+      encoding: {
+        x: { field: xField, type: 'quantitative', title: xField, scale: { domain: [minX, maxX] } },
+        ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
+        y: yEncoding,
+        color: { field: 'value', type: 'nominal', scale: colorScale, title: payloadType },
+        opacity: hasConfidence && confidenceChannel === 'opacity'
+          ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+          : { value: 1.0 },
+        tooltip: [
+          { field: 'value', type: 'nominal', title: 'Value' },
+          { field: xField, type: 'quantitative', format: '.3f', title: 'Position' },
+          ...(isInterval ? [{ field: 'duration', type: 'quantitative', format: '.3f', title: 'Duration' }] : []),
+          ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
+        ],
+      },
+    },
+  ];
+
+  if (isInterval && useSingleRow && showLabels) {
+    transforms.push({
+      calculate: `(datum.${xField} + (datum.${xField} + (datum.duration != null ? datum.duration : 0))) / 2`,
+      as: '_label_midpoint',
+    });
+    layers.push({
+      mark: {
+        type: 'text',
+        align: 'center',
+        baseline: 'middle',
+        fill: textFill,
+        fontWeight: 'bold',
+        fontSize: 10,
+        limit: 120,
+      },
+      encoding: {
+        x: { field: '_label_midpoint', type: 'quantitative' },
+        y: yEncoding,
+        text: { field: 'value', type: 'nominal' },
+      },
+    });
+  }
+
+  // Active playhead indicator if playing
+  if (typeof currentTime === 'number' && currentTime >= 0) {
+    layers.push({
+      mark: { type: 'rule', stroke: cursorColor, strokeWidth: 2 },
+      encoding: { x: { datum: currentTime } },
+    });
+  }
 
   return {
     $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
@@ -2982,22 +3579,6 @@ export function buildBoppVegaLiteSpec(
     data: { values: data },
     transform: transforms,
     config: baseConfig,
-    mark: isInterval ? { type: 'bar', cornerRadius: 2 } : { type: 'tick', thickness: 3 },
-    ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-    encoding: {
-      x: { field: xField, type: 'quantitative', title: xField, scale: { domain: [minX, maxX] } },
-      ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
-      y: { field: 'value', type: 'nominal', title: payloadType },
-      color: { field: 'value', type: 'nominal', scale: colorScale },
-      opacity: hasConfidence && confidenceChannel === 'opacity'
-        ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
-        : { value: 1.0 },
-      tooltip: [
-        { field: 'value', type: 'nominal', title: 'Value' },
-        { field: xField, type: 'quantitative', format: '.3f', title: 'Position' },
-        ...(isInterval ? [{ field: 'duration', type: 'quantitative', format: '.3f', title: 'Duration' }] : []),
-        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
-      ],
-    },
+    layer: layers,
   };
 }

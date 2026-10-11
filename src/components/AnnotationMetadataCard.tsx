@@ -21,6 +21,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { BoppAnnotation } from '../types/bopp';
+import { analyzeIntervalAnnotation } from '../utils/intervalOverlap';
 
 interface AnnotationMetadataCardProps {
   annotation: BoppAnnotation;
@@ -39,6 +40,7 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
   const hasMetadata = metadata && Object.keys(metadata).length > 0;
   const hasSandbox = annotation.sandbox && Object.keys(annotation.sandbox).length > 0;
   const hasParents = annotation.parents && annotation.parents.length > 0;
+  const intervalAnalysis = analyzeIntervalAnnotation(annotation);
 
   const handleCopyId = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -102,6 +104,23 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
           }`}>
             extent: {annotation.extent?.extent_type || 'global (none)'}
           </span>
+
+          {intervalAnalysis.isIntervalExtent && (
+            <span
+              className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-medium border ${
+                intervalAnalysis.isDisjoint
+                  ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                  : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+              }`}
+              title={
+                intervalAnalysis.isDisjoint
+                  ? 'All intervals are disjoint in time: rendered in a single consolidated row'
+                  : `${intervalAnalysis.overlapCount} interval collisions detected: rendered across distinct vertical rows`
+              }
+            >
+              {intervalAnalysis.isDisjoint ? '⏱️ Disjoint (1 Row)' : `🔀 Overlapping (${intervalAnalysis.overlapCount})`}
+            </span>
+          )}
 
           {metadata?.annotator_id && (
             <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 font-medium border border-emerald-300 dark:border-emerald-800">

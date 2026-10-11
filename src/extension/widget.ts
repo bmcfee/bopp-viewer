@@ -234,9 +234,28 @@ export class BOPPWidget extends DocumentWidget<Widget> {
     const metadataCard = createAnnotationMetadataCardDOM(annotation, isDark, { defaultExpanded: false });
     container.appendChild(metadataCard);
 
+    const payloadType = annotation.payload?.payload_type as string | undefined;
+    const extentType = annotation.extent?.extent_type as string | undefined;
+    let optimalHeight = 440;
+
+    if (payloadType === 'key_mode') {
+      const isInterval = extentType?.includes('interval');
+      optimalHeight = isInterval ? 220 : 540;
+    } else if (payloadType === 'note_midi' || payloadType === 'piano_roll') {
+      optimalHeight = 480;
+    } else if (payloadType === 'chord') {
+      optimalHeight = 380;
+    } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
+      optimalHeight = 260;
+    } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
+      optimalHeight = 420;
+    } else if (!extentType || extentType === 'none') {
+      optimalHeight = 460;
+    }
+
     const chartDiv = document.createElement('div');
     chartDiv.style.width = '100%';
-    chartDiv.style.minHeight = '480px';
+    chartDiv.style.minHeight = `${optimalHeight + 60}px`;
     chartDiv.style.padding = '16px';
     chartDiv.style.boxSizing = 'border-box';
     container.appendChild(chartDiv);
@@ -244,6 +263,7 @@ export class BOPPWidget extends DocumentWidget<Widget> {
     try {
       const spec = buildBoppVegaLiteSpec(annotation, tabular as any, {
         theme: isDark ? 'dark' : 'light',
+        chartHeight: optimalHeight,
         enableOverviewBrush: true,
         enableZoomPan: true
       });

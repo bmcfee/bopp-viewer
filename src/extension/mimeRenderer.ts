@@ -295,17 +295,40 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
 
       const renderViz = () => {
         const availableW = this._containerNode.clientWidth;
-        const chartWidth = Math.max(320, Math.min(840, (availableW > 0 ? availableW : 720) - 48));
+        const chartWidth = Math.max(340, Math.min(1080, (availableW > 0 ? availableW : 780) - 36));
+
+        // Compute optimal responsive plot height avoiding squished vertical displays
+        const payloadType = annotation.payload?.payload_type as string | undefined;
+        const extentType = annotation.extent?.extent_type as string | undefined;
+        let optimalHeight = 360;
+
+        if (payloadType === 'key_mode') {
+          // If disjoint interval extent, 180-200px is optimal; if instantaneous or 24-key vertical axis, need 480-540px
+          const isInterval = extentType?.includes('interval');
+          optimalHeight = isInterval ? 220 : 520;
+        } else if (payloadType === 'note_midi' || payloadType === 'piano_roll') {
+          optimalHeight = 440;
+        } else if (payloadType === 'chord') {
+          optimalHeight = 360;
+        } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
+          optimalHeight = 240;
+        } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
+          optimalHeight = 380;
+        } else if (!extentType || extentType === 'none') {
+          // Static radial circumplex or circular circle of fifths
+          optimalHeight = Math.max(360, Math.min(480, chartWidth - 40));
+        }
 
         const spec = buildBoppVegaLiteSpec(annotation, tabular, {
           theme: isDark ? 'dark' : 'light',
           chartWidth,
-          chartHeight: 280,
+          chartHeight: optimalHeight,
           showLabels: true,
           enableZoomPan: true,
         });
 
         vizTarget.innerHTML = '';
+        vizTarget.style.minHeight = `${optimalHeight + 40}px`;
         embed(vizTarget, spec as unknown as any, {
           actions: { export: true, source: false, compiled: false, editor: false },
           renderer: 'canvas',

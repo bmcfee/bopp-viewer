@@ -653,6 +653,62 @@ const KEY_SCORE_DATA: BoppAnnotation = {
   }
 };
 
+// 3B. KEY_MODE: Static Modal Tonality Distribution (No Extent)
+// Illustrates modal split coloring in static case: C Ionian (relative C:maj), D Dorian (relative C:maj),
+// E Phrygian (relative C:maj), G Mixolydian (relative C:maj), A Aeolian (relative C:maj)
+const MODAL_KEY_GLOBAL_DATA: BoppAnnotation = {
+  media_id: "audio:miles_davis_so_what_modal_session",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "modal_jazz_analyst",
+    tool: "church_mode_detector"
+  },
+  sandbox: {
+    curator: "Brian McFee",
+    dataset: "Modal Jazz & Ecclesiastical Modes",
+    description: "Static candidate distribution across church modes illustrating split-color patches: top half colored to tonic, bottom half colored to relative major tonic.",
+  },
+  payload: {
+    payload_type: "key_mode",
+    value: ["D:dorian", "E:phrygian", "C:ionian", "G:mixolydian", "A:aeolian"]
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.45, 0.25, 0.15, 0.10, 0.05]
+  }
+};
+
+// 3C. KEY_MODE: Time-Varying Modal Progression (Time Interval Extent)
+// Illustrates modal split coloring in time-varying progression with disjoint intervals rendered on 1 row!
+const MODAL_KEY_TIME_DATA: BoppAnnotation = {
+  media_id: "audio:coltrane_impressions_modal_journey",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "modal_harmony_curator",
+    tool: "diatonic_mode_space_tracker"
+  },
+  sandbox: {
+    curator: "Brian McFee",
+    dataset: "Modal Harmony Benchmark",
+    description: "Time-varying modal harmony progression demonstrating disjoint single-row interval layout and split coloring (tonic on top/outer, relative major on bottom/inner).",
+  },
+  extent: {
+    extent_type: "time_interval",
+    time: [0.0, 16.0, 32.0, 48.0, 64.0, 80.0, 96.0],
+    duration: [16.0, 16.0, 16.0, 16.0, 16.0, 16.0, 24.0]
+  },
+  payload: {
+    payload_type: "key_mode",
+    value: ["D:dorian", "Eb:dorian", "D:dorian", "F:lydian", "G:mixolydian", "A:aeolian", "C:ionian"]
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.98, 0.95, 0.97, 0.92, 0.94, 0.96, 0.99]
+  }
+};
+
 // 4. TEMPO: Global (No Extent at all)
 const TEMPO_GLOBAL_DATA: BoppAnnotation = {
   media_id: "audio:funk_drum_loop_master",
@@ -770,6 +826,33 @@ const TAGS_TIME_INTERVAL_DATA: BoppAnnotation = {
   payload: {
     payload_type: "tag_open",
     value: ["Solo Cello", "String Section", "Brass & Woodwinds", "Full Tutti", "Decrescendo Strings"]
+  }
+};
+
+// 8B. TAG_OPEN: Time Interval Extent (Overlapping Concurrent Instrumentation)
+const TAGS_OVERLAPPING_DATA: BoppAnnotation = {
+  media_id: "audio:polyphonic_band_arrangement",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "audio_engineer",
+    tool: "multitrack_annotator"
+  },
+  sandbox: {
+    description: "Concurrent overlapping instrument presences across time: automatically rendered across multiple distinct rows to prevent collisions",
+  },
+  extent: {
+    extent_type: "time_interval",
+    time: [0.0, 8.0, 20.0, 32.0, 48.0],
+    duration: [30.0, 40.0, 35.0, 30.0, 32.0]
+  },
+  payload: {
+    payload_type: "tag_open",
+    value: ["Rhythm Section (Drums & Bass)", "Acoustic Guitar", "Lead Vocals", "Hammond Organ Pad", "Electric Guitar Solo"]
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.98, 0.94, 0.96, 0.89, 0.95]
   }
 };
 
@@ -1162,6 +1245,30 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     data: KEY_SCORE_DATA,
   },
   {
+    id: "modal_key_global",
+    filename: "annotations/modal_key_global.bopp",
+    title: "Church Modes (Static Split Colors)",
+    category: "music",
+    format: "json",
+    description: "Demonstrates key_mode payload with church modes (dorian, phrygian, etc.) showing split-color patches in static distribution: top colored to tonic, bottom colored to relative major tonic.",
+    extentType: "none",
+    payloadType: "key_mode",
+    confidenceType: "likelihood",
+    data: MODAL_KEY_GLOBAL_DATA,
+  },
+  {
+    id: "modal_key_time",
+    filename: "annotations/modal_key_timeline.bopp",
+    title: "Modal Progression (Disjoint 1-Row Track)",
+    category: "music",
+    format: "json",
+    description: "Demonstrates key_mode with time_interval extent: modal progression with split coloring and disjoint intervals rendered on a single vertical row track.",
+    extentType: "time_interval",
+    payloadType: "key_mode",
+    confidenceType: "likelihood",
+    data: MODAL_KEY_TIME_DATA,
+  },
+  {
     id: "tempo_global",
     filename: "annotations/tempo_global_bpm.bopp",
     title: "Global Tempo (No Extent)",
@@ -1211,13 +1318,25 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
   {
     id: "tags_time_intervals",
     filename: "annotations/tags_instrument_intervals.bopp",
-    title: "Instrument Presence (Time Interval)",
+    title: "Instrument Presence (Time Interval - Disjoint)",
     category: "music",
     format: "json",
-    description: "Demonstrates tag_open payload with time_interval extent (instrument sections active over time).",
+    description: "Demonstrates tag_open payload with time_interval extent with disjoint intervals: automatically rendered in a single horizontal row on the vertical axis.",
     extentType: "time_interval",
     payloadType: "tag_open",
     data: TAGS_TIME_INTERVAL_DATA,
+  },
+  {
+    id: "tags_overlapping_instruments",
+    filename: "annotations/tags_overlapping_instruments.bopp",
+    title: "Concurrent Band Tracks (Time Interval - Overlapping)",
+    category: "music",
+    format: "json",
+    description: "Demonstrates tag_open payload with time_interval extent with overlapping intervals: automatically rendered across multiple distinct rows on the vertical axis to avoid collisions.",
+    extentType: "time_interval",
+    payloadType: "tag_open",
+    confidenceType: "likelihood",
+    data: TAGS_OVERLAPPING_DATA,
   },
   {
     id: "chords_midi_ticks",

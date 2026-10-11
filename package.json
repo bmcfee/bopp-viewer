@@ -22,7 +22,9 @@
     "dev": "vite --port=3000 --host=0.0.0.0",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js jupyterlab_bopp/labextension lib .core-meta",
-    "lint": "node scripts/generate_types.mjs && tsc --noEmit"
+    "lint": "node scripts/generate_types.mjs && tsc --noEmit",
+    "test": "node scripts/generate_types.mjs && tsx --test test/*.test.ts",
+    "test:ci": "npm run build && tsx --test test/*.test.ts"
   },
   "jupyterlab": {
     "extension": true,

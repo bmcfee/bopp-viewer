@@ -30,7 +30,7 @@ export interface ValidationResult {
 const HARTE_CHORD_REGEX = new RegExp(
   '^((N|X)|(([A-G](b*|#*))((:(maj|min|dim|aug|1|5|sus2|sus4|maj6|min6|7|maj7|min7|dim7|hdim7|minmaj7|aug7|9|maj9|min9|11|maj11|min11|13|maj13|min13)(\\((\\*?((b*|#*)([1-9]|1[0-3]?))(,\\*?((b*|#*)([1-9]|1[0-3]?)))*)\\))?)|(:\\((\\*?((b*|#*)([1-9]|1[0-3]?))(,\\*?((b*|#*)([1-9]|1[0-3]?)))*)\\)))?((/((b*|#*)([1-9]|1[0-3]?)))?)?))$'
 );
-const KEY_MODE_REGEX = /^(?:N|X|([A-Ga-g][b#]?)(?::(maj|major|min|minor|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian))?)$/;
+const KEY_MODE_REGEX = /^(?:N|X|([A-Ga-g][b#]?)(?::(maj|major|min|minor|m|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian))?)$/i;
 const UUID_V5_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-5[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 const MEDIA_ID_REGEX = /^[a-zA-Z0-9]+:.*$/;
 const BOPP_VERSION_REGEX = /^1\.\d+$/;

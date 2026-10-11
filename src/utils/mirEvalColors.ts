@@ -211,24 +211,48 @@ export const ALL_24_KEYS_TOP_TO_BOTTOM = [
   'C:min', 'C:maj',
 ] as const;
 
+
+
+export type DiatonicMode = 'ionian' | 'dorian' | 'phrygian' | 'lydian' | 'mixolydian' | 'aeolian' | 'locrian' | 'maj' | 'min';
+
 /**
- * Normalizes musical key string to canonical representation (e.g. 'C:maj', 'Eb:maj')
+ * Semitone shift to relative major root for each mode.
+ * e.g., D dorian -> C major (+10 semitones mod 12); A aeolian -> C major (+3 semitones mod 12).
  */
-export function normalizeKeyName(keyStr: string): string {
-  const parsed = parseKeyMode(keyStr);
-  if (!parsed) return keyStr;
-  const standardRoots = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-  const root = standardRoots[parsed.semitone] ?? parsed.root;
-  return `${root}:${parsed.isMinor ? 'min' : 'maj'}`;
+export const MODE_TO_RELATIVE_MAJOR_SHIFT: Record<string, number> = {
+  ionian: 0,
+  major: 0,
+  maj: 0,
+  dorian: 10,
+  phrygian: 8,
+  lydian: 7,
+  mixolydian: 5,
+  aeolian: 3,
+  minor: 3,
+  min: 3,
+  m: 3,
+  locrian: 1,
+};
+
+export interface ParsedKeyMode {
+  root: string;
+  mode: string;
+  isMinor: boolean;
+  isMode: boolean; // True if one of the 7 ecclesiastical modes or non-simple major/minor
+  semitone: number;
+  relativeMajorRoot: string;
+  relativeMajorKey: string;
+  canonicalKey: string;
 }
 
 /**
- * Parses musical key string into tonic root, mode, and semitone
+ * Parses musical key or mode string into tonic root, mode name, semitone, and relative major key.
+ * Supports standard keys (C:maj, A:min) and ecclesiastical modes (D:dorian, E:phrygian, F:lydian, G:mixolydian, A:aeolian, B:locrian, C:ionian).
  */
-export function parseKeyMode(keyStr: string): { root: string; isMinor: boolean; semitone: number } | null {
+export function parseKeyMode(keyStr: string): ParsedKeyMode | null {
   if (!keyStr || keyStr === 'N' || keyStr === 'X') return null;
 
-  const match = keyStr.trim().match(/^([A-Ga-g][b#]?)(?::?(maj|major|min|minor|m)?)?/);
+  const match = keyStr.trim().match(/^([A-Ga-g][b#]?)(?::?(mixolydian|phrygian|aeolian|locrian|ionian|dorian|lydian|major|minor|maj|min|m)?)?/i);
   if (!match) return null;
 
   const rawRoot = match[1];
@@ -236,14 +260,70 @@ export function parseKeyMode(keyStr: string): { root: string; isMinor: boolean; 
   const root = rawRoot.charAt(0).toUpperCase() + rawRoot.slice(1);
 
   const semitone = CHROMATIC_ROOT_MAP[root] ?? 0;
-  // Lowercase letter (e.g. 'c') or 'min'/'minor' denotes minor key
   const isMinor =
     modeStr === 'min' ||
     modeStr === 'minor' ||
     modeStr === 'm' ||
+    modeStr === 'aeolian' ||
+    modeStr === 'dorian' ||
+    modeStr === 'phrygian' ||
+    modeStr === 'locrian' ||
     (!modeStr && rawRoot === rawRoot.toLowerCase());
 
-  return { root, isMinor, semitone };
+  const isEcclesiasticalMode =
+    modeStr === 'ionian' ||
+    modeStr === 'dorian' ||
+    modeStr === 'phrygian' ||
+    modeStr === 'lydian' ||
+    modeStr === 'mixolydian' ||
+    modeStr === 'aeolian' ||
+    modeStr === 'locrian';
+
+  const standardRoots = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const shift = MODE_TO_RELATIVE_MAJOR_SHIFT[modeStr] ?? (isMinor ? 3 : 0);
+  const relMajSemitone = (semitone + shift) % 12;
+  const relativeMajorRoot = standardRoots[relMajSemitone] ?? 'C';
+  const relativeMajorKey = `${relativeMajorRoot}:maj`;
+
+  const canonicalRoot = standardRoots[semitone] ?? root;
+  const normalizedMode = modeStr || (isMinor ? 'min' : 'maj');
+  const canonicalKey = `${canonicalRoot}:${normalizedMode}`;
+
+  return {
+    root: canonicalRoot,
+    mode: normalizedMode,
+    isMinor,
+    isMode: isEcclesiasticalMode,
+    semitone,
+    relativeMajorRoot,
+    relativeMajorKey,
+    canonicalKey,
+  };
+}
+
+/**
+ * Returns the relative major key for any key/mode (e.g., 'D:dorian' -> 'C:maj', 'A:min' -> 'C:maj')
+ */
+export function getRelativeMajorKey(keyStr: string): string {
+  const parsed = parseKeyMode(keyStr);
+  return parsed ? parsed.relativeMajorKey : 'C:maj';
+}
+
+/**
+ * Checks if a key string represents a mode (ionian, dorian, phrygian, lydian, mixolydian, aeolian, locrian)
+ */
+export function isDiatonicMode(keyStr: string): boolean {
+  const parsed = parseKeyMode(keyStr);
+  return parsed ? parsed.isMode : false;
+}
+
+/**
+ * Normalizes musical key string to canonical representation (e.g. 'C:maj', 'D:dorian')
+ */
+export function normalizeKeyName(keyStr: string): string {
+  const parsed = parseKeyMode(keyStr);
+  if (!parsed) return keyStr;
+  return parsed.canonicalKey;
 }
 
 /**
@@ -257,8 +337,8 @@ export function getKeyTonicRank(keyStr: string): number {
 }
 
 /**
- * Maps a key_mode label to mir_eval circle-of-fifths or chromatic pitch palette
- * Major keys use bright fifths/pitch, Minor keys use darker fifths_dark/pitch_dark
+ * Maps a key_mode label to mir_eval circle-of-fifths or chromatic pitch palette.
+ * Major keys use bright fifths/pitch, Minor keys use darker fifths_dark/pitch_dark.
  * In mir_eval display.py, both 'fifths' and 'pitch' colormaps are indexed by root semitone (0=C..11=B).
  */
 export function keyToMirEvalColor(keyStr: string, mode: 'fifths' | 'pitch' = 'fifths'): string {
@@ -275,6 +355,35 @@ export function keyToMirEvalColor(keyStr: string, mode: 'fifths' | 'pitch' = 'fi
   return parsed.isMinor
     ? MIR_EVAL_COLORMAPS.fifths_dark[semitone]
     : MIR_EVAL_COLORMAPS.fifths[semitone];
+}
+
+/**
+ * Computes split colors for modal keys:
+ * Top / outer half colored to the tonic.
+ * Bottom / inner half colored to the tonic of the relative major.
+ * For standard major/minor keys, both halves share the key's native color.
+ */
+export function getSplitKeyColors(
+  keyStr: string,
+  mode: 'fifths' | 'pitch' = 'fifths'
+): { tonicColor: string; relativeMajorColor: string; isSplit: boolean } {
+  const parsed = parseKeyMode(keyStr);
+  if (!parsed) {
+    return {
+      tonicColor: MIR_EVAL_COLORMAPS.neutral_gray,
+      relativeMajorColor: MIR_EVAL_COLORMAPS.neutral_gray,
+      isSplit: false,
+    };
+  }
+
+  const tonicColor = keyToMirEvalColor(keyStr, mode);
+  const relativeMajorColor = keyToMirEvalColor(parsed.relativeMajorKey, mode);
+
+  return {
+    tonicColor,
+    relativeMajorColor,
+    isSplit: parsed.isMode,
+  };
 }
 
 /**
