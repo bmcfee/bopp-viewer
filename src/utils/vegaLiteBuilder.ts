@@ -1650,6 +1650,7 @@ export function buildBoppVegaLiteSpec(
         mark: {
           type: 'rect',
           height: halfHeight,
+          yOffset: -halfHeight / 2,
           cornerRadiusTopLeft: 4,
           cornerRadiusTopRight: 4,
         },
@@ -1657,7 +1658,6 @@ export function buildBoppVegaLiteSpec(
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
           y: { field: yField, type: yType },
-          yOffset: { value: -halfHeight / 2 },
           color: { field: '_color_tonic', type: 'nominal', scale: null },
         },
       });
@@ -1667,6 +1667,7 @@ export function buildBoppVegaLiteSpec(
         mark: {
           type: 'rect',
           height: halfHeight,
+          yOffset: halfHeight / 2,
           cornerRadiusBottomLeft: 4,
           cornerRadiusBottomRight: 4,
         },
@@ -1674,7 +1675,6 @@ export function buildBoppVegaLiteSpec(
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
           y: { field: yField, type: yType },
-          yOffset: { value: halfHeight / 2 },
           color: {
             condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
             field: '_color_tonic',
@@ -1754,6 +1754,7 @@ export function buildBoppVegaLiteSpec(
         mark: {
           type: 'rect',
           height: halfHeight,
+          yOffset: -halfHeight / 2,
           cornerRadiusTopLeft: 3,
           cornerRadiusTopRight: 3,
         },
@@ -1761,7 +1762,6 @@ export function buildBoppVegaLiteSpec(
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
           y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
-          yOffset: { value: -halfHeight / 2 },
           color: { field: '_color_tonic', type: 'nominal', scale: null },
         },
       });
@@ -1771,6 +1771,7 @@ export function buildBoppVegaLiteSpec(
         mark: {
           type: 'rect',
           height: halfHeight,
+          yOffset: halfHeight / 2,
           cornerRadiusBottomLeft: 3,
           cornerRadiusBottomRight: 3,
         },
@@ -1778,7 +1779,6 @@ export function buildBoppVegaLiteSpec(
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
           y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
-          yOffset: { value: halfHeight / 2 },
           color: {
             condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
             field: '_color_tonic',
