@@ -152,9 +152,11 @@ export function buildBoppVegaLiteSpec(
     enableZoomPan = true,
     showLabels = true,
     currentTime = null,
-    chartWidth = 'container',
+    chartWidth = 760,
     chartHeight = 320,
   } = options;
+
+  const resolvedWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
 
   const extentType = annotation.extent?.extent_type;
   const payloadType = annotation.payload.payload_type;
@@ -588,18 +590,22 @@ export function buildBoppVegaLiteSpec(
 
       const wheelSize = typeof chartWidth === 'number' ? Math.min(480, Math.max(360, chartWidth - 60)) : 400;
 
+      const otherCount = sortedCandidates.length - 1;
+      const centerSubtitle = primaryCandidate.isMode
+        ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}% · ` : ''}Rel Maj: ${primaryCandidate.parsed?.relativeMajorRoot} Maj`
+        : hasMultipleCandidates
+        ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}%` : ''} (Primary)`
+        : (primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 1000) / 10}% confidence` : 'Harmonic tonal center');
+
+      const centerDetail = hasMultipleCandidates
+        ? `${otherCount} other candidate${otherCount > 1 ? 's' : ''}`
+        : 'Circle of Fifths';
+
       const centerData = [
         {
           title: primaryCandidate.label,
-          subtitle: primaryCandidate.isMode
-            ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}% · ` : ''}Rel Maj: ${primaryCandidate.parsed?.relativeMajorRoot} Maj`
-            : hasMultipleCandidates
-            ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}%` : ''} (Primary)`
-            : (primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 1000) / 10}% confidence` : 'Harmonic tonal center'),
-          detail: hasMultipleCandidates
-            ? sortedCandidates.slice(1).map(c => `${c.label} (${c.confidence !== null ? `${Math.round(c.confidence * 100)}%` : ''})`).join(' · ')
-            : '',
-          legendInfo: 'Outer: Major · Inner: Minor · Rim Arcs: Confidence · Split: Modal',
+          subtitle: centerSubtitle,
+          detail: centerDetail,
           color: primaryCandidate.color,
         },
       ];
@@ -683,7 +689,7 @@ export function buildBoppVegaLiteSpec(
               color: { value: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)' },
             },
           },
-          // 2. OUTER DONUT: Active Candidate Accent Highlight Ring
+          // 2. OUTER DONUT: Active Candidate Accent Highlight Border
           {
             data: { values: outerRingValues },
             encoding: {
@@ -694,12 +700,12 @@ export function buildBoppVegaLiteSpec(
                 scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
               },
               order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'color', type: 'nominal', scale: null },
+              color: { value: 'transparent' },
               opacity: { field: 'activeOpacity', type: 'quantitative', scale: null },
               stroke: { field: 'activeStroke', type: 'nominal', scale: null },
               strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
             },
-            mark: { type: 'arc', innerRadius: 100, outerRadius: 152 },
+            mark: { type: 'arc', innerRadius: 104, outerRadius: 148 },
           },
           // 3. OUTER DONUT: Major Tonic Label Centered in Sector
           {
@@ -856,7 +862,7 @@ export function buildBoppVegaLiteSpec(
               color: { value: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.6)' },
             },
           },
-          // 6. INNER DONUT: Active Candidate Accent Highlight Ring
+          // 6. INNER DONUT: Active Candidate Accent Highlight Border
           {
             data: { values: innerRingValues },
             encoding: {
@@ -867,12 +873,12 @@ export function buildBoppVegaLiteSpec(
                 scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
               },
               order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'color', type: 'nominal', scale: null },
+              color: { value: 'transparent' },
               opacity: { field: 'activeOpacity', type: 'quantitative', scale: null },
               stroke: { field: 'activeStroke', type: 'nominal', scale: null },
               strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
             },
-            mark: { type: 'arc', innerRadius: 55, outerRadius: 101 },
+            mark: { type: 'arc', innerRadius: 58, outerRadius: 98 },
           },
           // 7. INNER DONUT: Minor Tonic Label Centered in Sector (e.g. c, g, d, a...)
           {
@@ -986,15 +992,28 @@ export function buildBoppVegaLiteSpec(
             },
           },
 
-          // 10. Center Key Primary Title
+          // 10. Center Backing Disc (ensures complete legibility inside the inner ring)
+          {
+            data: { values: [{}] },
+            mark: {
+              type: 'arc',
+              innerRadius: 0,
+              outerRadius: 56,
+              fill: isDark ? '#090d16' : '#ffffff',
+              stroke: isDark ? '#1e293b' : '#e2e8f0',
+              strokeWidth: 1.5,
+            },
+            encoding: {},
+          },
+          // 11. Center Key Primary Title
           {
             data: { values: centerData },
             mark: {
               type: 'text',
               align: 'center',
               baseline: 'middle',
-              dy: hasMultipleCandidates ? -14 : -8,
-              fontSize: 17,
+              dy: -14,
+              fontSize: 13,
               fontWeight: 'bold',
               font: 'system-ui, -apple-system, sans-serif',
             },
@@ -1003,35 +1022,35 @@ export function buildBoppVegaLiteSpec(
               color: { field: 'color', type: 'nominal', scale: null },
             },
           },
-          // 11. Center Subtitle
+          // 12. Center Subtitle
           {
             data: { values: centerData },
             mark: {
               type: 'text',
               align: 'center',
               baseline: 'middle',
-              dy: hasMultipleCandidates ? 4 : 12,
-              fontSize: 11,
+              dy: 3,
+              fontSize: 9.5,
+              fontWeight: '600',
               fill: axisColor,
             },
             encoding: {
               text: { field: 'subtitle', type: 'nominal' },
             },
           },
-          // 12. Center Legend / Detail
+          // 13. Center Legend / Detail
           {
             data: { values: centerData },
             mark: {
               type: 'text',
               align: 'center',
               baseline: 'middle',
-              dy: hasMultipleCandidates ? 19 : 24,
-              fontSize: 9,
-              fontWeight: 'bold',
+              dy: 18,
+              fontSize: 8.5,
               fill: axisColor,
             },
             encoding: {
-              text: { field: hasMultipleCandidates ? 'detail' : 'legendInfo', type: 'nominal' },
+              text: { field: 'detail', type: 'nominal' },
             },
           },
         ],
@@ -1343,8 +1362,12 @@ export function buildBoppVegaLiteSpec(
         }));
       }
 
-      // Chord text label layer with high-contrast halo
+      // Chord text label layer with high-contrast halo and strict patch-boundary clipping
       if (showLabels) {
+        const chordLimitExpr = `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)`;
+        const chordTestExpr = `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 10`;
+
+        // 1. Halo backing layer
         layers.push({
           transform: [
             { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
@@ -1354,16 +1377,58 @@ export function buildBoppVegaLiteSpec(
             type: 'text',
             align: 'center',
             baseline: 'middle',
-            fill: textFill,
+            fill: 'transparent',
+            stroke: 'rgba(0,0,0,0.85)',
+            strokeWidth: 3,
+            strokeJoin: 'round',
             fontWeight: 'bold',
             fontSize: 11,
             font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             clip: true,
+            limit: { expr: chordLimitExpr },
           },
           encoding: {
             x: { field: 'x_mid', type: 'quantitative' },
             y: { value: mainPlotHeight / 2 + 10 },
-            text: { field: 'value', type: 'nominal' },
+            text: {
+              condition: {
+                test: chordTestExpr,
+                value: '',
+              },
+              field: 'value',
+              type: 'nominal',
+            },
+          },
+        });
+
+        // 2. Crisp foreground text layer
+        layers.push({
+          transform: [
+            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
+            { filter: `datum.duration == null || datum.duration >= 0.2` },
+          ],
+          mark: {
+            type: 'text',
+            align: 'center',
+            baseline: 'middle',
+            fill: '#ffffff',
+            fontWeight: 'bold',
+            fontSize: 11,
+            font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            clip: true,
+            limit: { expr: chordLimitExpr },
+          },
+          encoding: {
+            x: { field: 'x_mid', type: 'quantitative' },
+            y: { value: mainPlotHeight / 2 + 10 },
+            text: {
+              condition: {
+                test: chordTestExpr,
+                value: '',
+              },
+              field: 'value',
+              type: 'nominal',
+            },
           },
         });
       }
@@ -1625,10 +1690,9 @@ export function buildBoppVegaLiteSpec(
             type: yType,
             title: yTitle,
             axis: {
-              labelFontWeight: 'bold',
-              labelFontSize: 11,
+              labels: false,
+              ticks: false,
               titlePadding: 14,
-              labelPadding: 8,
               minExtent: 80,
             },
           },
@@ -1804,8 +1868,45 @@ export function buildBoppVegaLiteSpec(
       });
     }
 
-    // Text labels inside patches
+    // Text labels inside patches with high-contrast halo and strict patch-boundary clipping
     if (showLabels && isInterval) {
+      const limitExpr = `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)`;
+      const textCondition = {
+        test: `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 10`,
+        value: '',
+      };
+
+      // 1. Halo backing layer for absolute legibility on any palette color
+      layers.push({
+        transform: [
+          { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
+        ],
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'middle',
+          fill: 'transparent',
+          stroke: 'rgba(0,0,0,0.85)',
+          strokeWidth: 3,
+          strokeJoin: 'round',
+          fontWeight: 'bold',
+          fontSize: 11,
+          font: 'system-ui, -apple-system, sans-serif',
+          clip: true,
+          limit: { expr: limitExpr },
+        },
+        encoding: {
+          x: { field: 'x_mid', type: 'quantitative' },
+          y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          text: {
+            condition: textCondition,
+            field: 'value',
+            type: 'nominal',
+          },
+        },
+      });
+
+      // 2. Crisp foreground text layer
       layers.push({
         transform: [
           { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
@@ -1815,18 +1916,20 @@ export function buildBoppVegaLiteSpec(
           align: 'center',
           baseline: 'middle',
           fill: '#ffffff',
-          stroke: 'rgba(0,0,0,0.8)',
-          strokeWidth: 2,
           fontWeight: 'bold',
           fontSize: 11,
           font: 'system-ui, -apple-system, sans-serif',
           clip: true,
-          limit: { expr: `max(0, scale('x', datum._calc_end) - scale('x', datum.${xField}) - 4)` },
+          limit: { expr: limitExpr },
         },
         encoding: {
           x: { field: 'x_mid', type: 'quantitative' },
           y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', scale: { domain: keyDomain } },
-          text: { field: 'value', type: 'nominal' },
+          text: {
+            condition: textCondition,
+            field: 'value',
+            type: 'nominal',
+          },
         },
       });
     }
@@ -2159,12 +2262,19 @@ export function buildBoppVegaLiteSpec(
           fontWeight: 'bold',
           fill: '#000000',
           clip: true,
-          limit: { expr: `max(0, scale('x', datum._calc_end) - scale('x', datum.${xField}) - 2)` },
+          limit: { expr: `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 2)` },
         },
         encoding: {
           x: { field: 'x_mid', type: 'quantitative' },
           y: { field: 'value', type: 'quantitative' },
-          text: { field: 'note_name', type: 'nominal' },
+          text: {
+            condition: {
+              test: `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 8`,
+              value: '',
+            },
+            field: 'note_name',
+            type: 'nominal',
+          },
         },
       });
     }
@@ -2227,9 +2337,8 @@ export function buildBoppVegaLiteSpec(
             type: yType,
             title: yTitle,
             axis: {
+              ...(useSingleRow ? { labels: false, ticks: false } : { labelFontWeight: 'bold', labelPadding: 8 }),
               titlePadding: 14,
-              labelPadding: 8,
-              labelFontWeight: 'bold',
               minExtent: 75,
             },
           },
@@ -2265,12 +2374,20 @@ export function buildBoppVegaLiteSpec(
           fill: textFill,
           fontWeight: 'bold',
           fontSize: 11,
-          limit: 120,
+          clip: true,
+          limit: { expr: "max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time)) - 4)" },
         },
         encoding: {
           x: { field: '_label_midpoint', type: 'quantitative' },
           y: { field: yField, type: yType },
-          text: { field: colorField, type: 'nominal' },
+          text: {
+            condition: {
+              test: "((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time))) <= 12",
+              value: '',
+            },
+            field: colorField,
+            type: 'nominal',
+          },
         },
       });
     }
@@ -2345,12 +2462,19 @@ export function buildBoppVegaLiteSpec(
           fontWeight: 'bold',
           fontSize: 11,
           clip: true,
-          limit: { expr: "max(0, scale('x', datum._calc_end) - scale('x', datum.time) - 4)" },
+          limit: { expr: "max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time)) - 4)" },
         },
         encoding: {
           x: { field: 'time_mid', type: 'quantitative' },
           y: { field: yField, type: yType },
-          text: { field: '_display_label', type: 'nominal' },
+          text: {
+            condition: {
+              test: "((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time))) <= 12",
+              value: '',
+            },
+            field: '_display_label',
+            type: 'nominal',
+          },
         },
       });
     }

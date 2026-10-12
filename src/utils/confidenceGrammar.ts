@@ -251,11 +251,19 @@ export function buildIntervalConfidenceLayers(params: {
         fill: isDark ? '#ffffff' : '#09090b',
         font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
         clip: true,
+        limit: { expr: `max(0.001, (scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)` },
       },
       encoding: {
         x: { field: '_badge_x_mid', type: 'quantitative' },
         y: { value: yTop },
-        text: { field: '_badge_label', type: 'nominal' },
+        text: {
+          condition: {
+            test: `((scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 16`,
+            value: '',
+          },
+          field: '_badge_label',
+          type: 'nominal',
+        },
       },
     });
   } else if (channelMode === 'height') {
