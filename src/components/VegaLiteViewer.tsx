@@ -7,7 +7,7 @@
  * real-time FFT spectrogram rendering, and optical sheet music image overlays.
  */
 
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import vegaEmbed, { Result as VegaEmbedResult } from 'vega-embed';
 import * as vega from 'vega';
 import {
@@ -159,6 +159,120 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     return () => ro.disconnect();
   }, []);
 
+  // Playhead updater ref to decouple playback ticks from Vega view lifecycle
+  const updatePlayheadRef = useRef<(t?: number) => void>(() => {});
+
+  // Update playhead overlay position smoothly across detail and overview tracks
+  const updatePlayhead = useCallback((tSec?: number) => {
+    if (!vegaResultRef.current?.view) return;
+    const view = vegaResultRef.current.view;
+    const embedEl = chartContainerRef.current?.querySelector('.vega-embed') as HTMLElement | null;
+    const svg = embedEl?.querySelector('.bopp-playhead-overlay') as SVGSVGElement | null;
+    if (!svg) return;
+
+    const targetTime = typeof tSec === 'number' ? tSec : currentTime;
+    const detailLine = svg.querySelector('.bopp-detail-playhead-line') as SVGLineElement | null;
+    const detailHandle = svg.querySelector('.bopp-detail-playhead-handle') as SVGPolygonElement | null;
+    const overviewLine = svg.querySelector('.bopp-overview-playhead-line') as SVGLineElement | null;
+
+    if (targetTime === null || targetTime === undefined || isNaN(targetTime) || targetTime < 0) {
+      if (detailLine) detailLine.style.display = 'none';
+      if (detailHandle) detailHandle.style.display = 'none';
+      if (overviewLine) overviewLine.style.display = 'none';
+      return;
+    }
+
+    // Convert time in seconds to axis coordinate
+    let coordVal = targetTime;
+    if (extentType?.includes('tick') || extentType?.includes('midi')) {
+      coordVal = targetTime * 960; // 480 PPQ @ 120 BPM
+    } else if (extentType?.includes('quarter') || extentType?.includes('score')) {
+      coordVal = targetTime * 2; // 120 BPM = 2 quarters/s
+    }
+
+    const origin = typeof view.origin === 'function' ? view.origin() : [0, 0];
+    const originX = origin[0] || 0;
+    const originY = origin[1] || 0;
+
+    const scaleNames = Object.keys((view as any)._runtime?.scales || {});
+    const detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+    if (!detailScaleName) return;
+
+    const detailScale = view.scale(detailScaleName);
+    if (!detailScale) return;
+
+    const sgRoot = (view as any).scenegraph?.()?.root?.items?.[0];
+    const isVConcat = sgRoot?.items && sgRoot.items.length >= 2;
+    const detailGroup = isVConcat ? sgRoot.items[0] : sgRoot;
+    const overviewGroup = isVConcat ? sgRoot.items[1] : null;
+
+    const detailWidth = detailGroup?.width ?? (typeof view.width === 'function' ? view.width() : containerWidth);
+    const detailHeight = detailGroup?.height ?? (typeof view.height === 'function' ? view.height() : 300);
+    const detailGroupX = originX + (detailGroup?.x ?? 0);
+    const detailGroupY = originY + (detailGroup?.y ?? 0);
+
+    const detailRelX = detailScale(coordVal);
+    const isInsideDetail = typeof detailRelX === 'number' && !isNaN(detailRelX) && detailRelX >= 0 && detailRelX <= detailWidth;
+
+    if (isInsideDetail && (isPlaying || targetTime > 0)) {
+      const lineX = Math.round(detailGroupX + detailRelX);
+      const topY = Math.round(detailGroupY);
+      const botY = Math.round(detailGroupY + detailHeight);
+
+      if (detailLine) {
+        detailLine.style.display = 'block';
+        detailLine.setAttribute('x1', String(lineX));
+        detailLine.setAttribute('y1', String(topY));
+        detailLine.setAttribute('x2', String(lineX));
+        detailLine.setAttribute('y2', String(botY));
+      }
+      if (detailHandle) {
+        detailHandle.style.display = 'block';
+        detailHandle.setAttribute('points', `${lineX - 5},${topY} ${lineX + 5},${topY} ${lineX},${topY + 7}`);
+      }
+    } else {
+      if (detailLine) detailLine.style.display = 'none';
+      if (detailHandle) detailHandle.style.display = 'none';
+    }
+
+    // Overview track playhead
+    const overviewScaleName = ['concat_1_x', ...scaleNames.filter(k => k.includes('concat_1') && k.endsWith('_x'))].find(k => scaleNames.includes(k));
+    if (overviewGroup && overviewScaleName && (isPlaying || targetTime > 0)) {
+      const overviewScale = view.scale(overviewScaleName);
+      if (overviewScale) {
+        const overviewRelX = overviewScale(coordVal);
+        const overviewWidth = overviewGroup?.width ?? detailWidth;
+        const overviewHeight = overviewGroup?.height ?? 56;
+        if (typeof overviewRelX === 'number' && !isNaN(overviewRelX) && overviewRelX >= 0 && overviewRelX <= overviewWidth) {
+          const lineX = Math.round(originX + (overviewGroup.x ?? 0) + overviewRelX);
+          const topY = Math.round(originY + (overviewGroup.y ?? 0));
+          const botY = Math.round(topY + overviewHeight);
+
+          if (overviewLine) {
+            overviewLine.style.display = 'block';
+            overviewLine.setAttribute('x1', String(lineX));
+            overviewLine.setAttribute('y1', String(topY));
+            overviewLine.setAttribute('x2', String(lineX));
+            overviewLine.setAttribute('y2', String(botY));
+          }
+        } else if (overviewLine) {
+          overviewLine.style.display = 'none';
+        }
+      }
+    } else if (overviewLine) {
+      overviewLine.style.display = 'none';
+    }
+  }, [currentTime, isPlaying, extentType, containerWidth]);
+
+  useEffect(() => {
+    updatePlayheadRef.current = updatePlayhead;
+  }, [updatePlayhead]);
+
+  // Sync playhead when currentTime state or isPlaying changes
+  useEffect(() => {
+    updatePlayhead(currentTime);
+  }, [currentTime, isPlaying, updatePlayhead]);
+
   // Initialize Audio Player
   useEffect(() => {
     const player = new BoppAudioPlayer();
@@ -166,10 +280,12 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
     player.onTimeUpdate(t => {
       setCurrentTime(t);
+      updatePlayheadRef.current(t);
     });
 
     player.onEnded(() => {
       setIsPlaying(false);
+      updatePlayheadRef.current(0);
     });
 
     return () => {
@@ -183,6 +299,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       audioPlayerRef.current.loadAnnotation(annotation, tabularData);
       setIsPlaying(false);
       setCurrentTime(0);
+      updatePlayheadRef.current(0);
     }
   }, [annotation, tabularData]);
 
@@ -220,12 +337,14 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     const clamped = Math.max(0, Math.min(duration, newTime));
     setCurrentTime(clamped);
     audioPlayerRef.current?.seek(clamped);
+    updatePlayheadRef.current(clamped);
   };
 
   const handleResetPlayback = () => {
     audioPlayerRef.current?.stop();
     setIsPlaying(false);
     setCurrentTime(0);
+    updatePlayheadRef.current(0);
   };
 
   const handleSpeedChange = (spd: number) => {
@@ -292,7 +411,9 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         values: [[nextStart, nextEnd]],
       }]);
       view.change('brush_store', cs);
-      view.runAsync();
+      view.runAsync().then(() => {
+        updatePlayheadRef.current();
+      });
     } catch (e) {
       console.warn('Zoom preset error:', e);
     }
@@ -318,7 +439,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     return forceMultiRow ? 420 : 340;
   }, [annotation.payload?.payload_type, annotation.extent?.extent_type, forceMultiRow]);
 
-  // Build the Vega-Lite specification
+  // Build the Vega-Lite specification - decoupled from currentTime to prevent view re-embedding during playback
   const vegaSpec = useMemo(() => {
     const options: VegaLiteBuilderOptions = {
       theme,
@@ -328,7 +449,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       enableOverviewBrush,
       enableZoomPan,
       showLabels,
-      currentTime: isPlaying ? currentTime : null,
+      currentTime: null, // Playhead cursor is rendered via high-performance SVG overlay for glitch-free timeline zooming during playback
       chartWidth: containerWidth,
       chartHeight: optimalChartHeight,
       forceMultiRow,
@@ -344,8 +465,6 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     enableOverviewBrush,
     enableZoomPan,
     showLabels,
-    currentTime,
-    isPlaying,
     containerWidth,
     optimalChartHeight,
     forceMultiRow,
@@ -377,6 +496,49 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         }
         vegaResultRef.current = res;
 
+        // Attach high-performance SVG playhead overlay to .vega-embed container
+        const embedContainer = chartContainerRef.current?.querySelector('.vega-embed') as HTMLElement | null;
+        if (embedContainer) {
+          embedContainer.style.position = 'relative';
+          let svgOverlay = embedContainer.querySelector('.bopp-playhead-overlay') as SVGSVGElement | null;
+          if (!svgOverlay) {
+            svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svgOverlay.setAttribute('class', 'bopp-playhead-overlay');
+            svgOverlay.style.position = 'absolute';
+            svgOverlay.style.top = '0';
+            svgOverlay.style.left = '0';
+            svgOverlay.style.width = '100%';
+            svgOverlay.style.height = '100%';
+            svgOverlay.style.pointerEvents = 'none';
+            svgOverlay.style.zIndex = '25';
+            svgOverlay.style.overflow = 'visible';
+
+            const dLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            dLine.setAttribute('class', 'bopp-detail-playhead-line');
+            dLine.setAttribute('stroke', isDark ? '#f87171' : '#ef4444');
+            dLine.setAttribute('stroke-width', '2');
+            dLine.setAttribute('stroke-dasharray', '4 2');
+            dLine.style.display = 'none';
+            svgOverlay.appendChild(dLine);
+
+            const dHandle = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            dHandle.setAttribute('class', 'bopp-detail-playhead-handle');
+            dHandle.setAttribute('fill', isDark ? '#f87171' : '#ef4444');
+            dHandle.style.display = 'none';
+            svgOverlay.appendChild(dHandle);
+
+            const oLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            oLine.setAttribute('class', 'bopp-overview-playhead-line');
+            oLine.setAttribute('stroke', isDark ? '#f87171' : '#ef4444');
+            oLine.setAttribute('stroke-width', '2');
+            oLine.setAttribute('stroke-opacity', '0.9');
+            oLine.style.display = 'none';
+            svgOverlay.appendChild(oLine);
+
+            embedContainer.appendChild(svgOverlay);
+          }
+        }
+
         // Measure exact inner plot area bounds for precision spectrogram overlay
         try {
           const origin = typeof res.view.origin === 'function' ? res.view.origin() : [0, 0];
@@ -401,6 +563,16 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             return nextBounds;
           });
         } catch {}
+
+        // Listen for brush signal updates so playhead moves along with interactive zooms/pans in real time
+        try {
+          res.view.addSignalListener('brush', () => {
+            updatePlayheadRef.current();
+          });
+        } catch {}
+
+        // Initial playhead position render
+        updatePlayheadRef.current(currentTime);
 
         // Listen for clicks anywhere on the display to seek playhead
         res.view.addEventListener('click', (event: any, item: any) => {
@@ -430,8 +602,9 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             const viewAny = res.view as any;
             if (typeof viewAny.mouse === 'function') {
               const [, my] = viewAny.mouse(event);
-              // Detail view height is typically <= 240px; if click is in bottom overview navigator, skip seek!
-              if (my > 230 && (vegaSpec as any)?.vconcat?.length) {
+              // Detail view height: if click is in bottom overview navigator, skip seek to preserve brush interactions!
+              const detailH = (vegaSpec as any)?.vconcat?.[0]?.height ?? (optimalChartHeight - 80);
+              if (my >= detailH && (vegaSpec as any)?.vconcat?.length) {
                 return;
               }
             }

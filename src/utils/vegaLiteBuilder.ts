@@ -848,28 +848,6 @@ export function buildBoppVegaLiteSpec(
             },
             mark: { type: 'arc', innerRadius: 104, outerRadius: 148 },
           },
-          // 3. OUTER DONUT: Major Tonic Label Centered in Sector
-          {
-            data: { values: outerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              text: { field: 'displayKey', type: 'nominal' },
-              color: { field: 'textColor', type: 'nominal', scale: null },
-            },
-            mark: {
-              type: 'text',
-              radius: 126,
-              fontSize: 12,
-              fontWeight: 'bold',
-              font: 'system-ui, -apple-system, sans-serif',
-            },
-          },
           // 4A. OUTER DONUT: Confidence Meter Track along Outer Rim (Radius 150 - 156)
           {
             data: { values: outerRingValues },
@@ -1017,28 +995,6 @@ export function buildBoppVegaLiteSpec(
               strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
             },
             mark: { type: 'arc', innerRadius: 58, outerRadius: 98 },
-          },
-          // 7. INNER DONUT: Minor Tonic Label Centered in Sector (e.g. c, g, d, a...)
-          {
-            data: { values: innerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              text: { field: 'displayKey', type: 'nominal' },
-              color: { field: 'textColor', type: 'nominal', scale: null },
-            },
-            mark: {
-              type: 'text',
-              radius: 78,
-              fontSize: 11,
-              fontWeight: 'bold',
-              font: 'system-ui, -apple-system, sans-serif',
-            },
           },
           // 8A. INNER DONUT: Confidence Meter Track along Outer Rim (Radius 99.5 - 103.5)
           {
@@ -2298,11 +2254,12 @@ export function buildBoppVegaLiteSpec(
     const pianoTitle = { text: `BOPP MIDI Piano Roll: ${annotation.media_id}`, color: textColor };
     const overviewLayers = [
       {
-        mark: { type: 'rect', opacity: 0.65, cornerRadius: 1 },
+        mark: { type: 'rect', opacity: 0.75, cornerRadius: 1 },
         encoding: {
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: { field: 'value', type: 'quantitative', scale: { zero: false }, axis: null },
+          y: { field: 'y_min', type: 'quantitative', scale: { zero: false }, axis: null },
+          y2: { field: 'y_max' },
           color: {
             field: 'pitch_class',
             type: 'nominal',
@@ -2518,13 +2475,14 @@ export function buildBoppVegaLiteSpec(
     const segTitle = { text: `BOPP Structural Segmentation: ${annotation.media_id}`, color: textColor };
     const segOverviewLayers = [
       {
-        mark: { type: 'rect', opacity: 0.7, cornerRadius: 2 },
+        mark: { type: 'rect', opacity: 0.85, cornerRadius: 2 },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: { value: 2 },
-          y2: { value: 50 },
-          color: { field: colorField, type: 'nominal', legend: null },
+          ...(isMulti
+            ? { y: { field: 'level', type: 'ordinal', axis: null } }
+            : { y: { value: 2 }, y2: { value: 50 } }),
+          color: { field: colorField, type: 'nominal', scale: colorScale, legend: null },
         },
       },
     ];
@@ -2819,7 +2777,12 @@ export function buildBoppVegaLiteSpec(
     const contourTitle = { text: `BOPP Vocal Melody & Pitch Contour (F0): ${annotation.media_id}`, color: textColor };
     const overviewLayers = [
       {
-        mark: { type: 'area', color: isDark ? '#38bdf8' : '#0284c7', opacity: 0.45 },
+        mark: {
+          type: 'line',
+          interpolate: 'monotone',
+          strokeWidth: 2,
+          color: isDark ? '#38bdf8' : '#0284c7',
+        },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           y: { field: 'frequency', type: 'quantitative', scale: { zero: false }, axis: null },
