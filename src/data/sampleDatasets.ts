@@ -618,7 +618,7 @@ const KEY_MODULATION_DATA: BoppAnnotation = {
   },
   payload: {
     payload_type: "key_mode",
-    value: ["C:min", "Eb:maj", "G:min", "C:min", "C:maj"]
+    value: ["C:min", "E♭:maj", "G:min", "C:min", "C:maj"]
   },
   confidence: {
     confidence_type: "likelihood",
@@ -701,7 +701,7 @@ const MODAL_KEY_TIME_DATA: BoppAnnotation = {
   },
   payload: {
     payload_type: "key_mode",
-    value: ["D:dorian", "Eb:dorian", "D:dorian", "F:lydian", "G:mixolydian", "A:aeolian", "C:ionian"]
+    value: ["D:dorian", "E♭:dorian", "D:dorian", "F:lydian", "G:mixolydian", "A:aeolian", "C:ionian"]
   },
   confidence: {
     confidence_type: "likelihood",

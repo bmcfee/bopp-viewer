@@ -19,6 +19,7 @@ import {
 } from '../utils/boppParser';
 import { buildBoppVegaLiteSpec } from '../utils/vegaLiteBuilder';
 import { validateBoppAnnotation } from '../utils/schemaValidator';
+import { analyzeIntervalDisjointness } from '../utils/intervalOverlap';
 import { createAnnotationMetadataCardDOM } from './metadataCard';
 import type { BoppAnnotation } from '../types/bopp';
 
@@ -39,6 +40,7 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
   private _containerNode: HTMLDivElement;
   private _cachedAnnotation: BoppAnnotation | null = null;
   private _activeTab: 'visualizer' | 'table' | 'raw' = 'visualizer';
+  private _forceMultiRow: boolean = false;
   private _vegaResult: VegaEmbedResult | null = null;
   private _resizeObserver: ResizeObserver | null = null;
 
@@ -237,6 +239,37 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
     `;
     header.appendChild(leftBadges);
 
+    // Center/Right: Disjoint Interval Layout Toggle Button (flips between Single Row and Multi-Row)
+    const intervalAnalysis = analyzeIntervalDisjointness(annotation, tabular);
+    if (intervalAnalysis.isIntervalExtent && intervalAnalysis.isDisjoint) {
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.innerHTML = this._forceMultiRow ? '⧉ Multi-Row (Overlapping)' : '⧉ Single Row (Disjoint)';
+      toggleBtn.title = this._forceMultiRow
+        ? 'Currently forced to Multi-Row (overlapping style). Click to switch to consolidated Single-Row display.'
+        : 'Currently in consolidated Single-Row (disjoint style). Click to flip to Multi-Row display.';
+      toggleBtn.style.border = `1px solid ${this._forceMultiRow ? (isDark ? '#6366f1' : '#4f46e5') : (isDark ? '#10b981' : '#059669')}`;
+      toggleBtn.style.background = this._forceMultiRow
+        ? (isDark ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.1)')
+        : (isDark ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.1)');
+      toggleBtn.style.color = this._forceMultiRow
+        ? (isDark ? '#a5b4fc' : '#4338ca')
+        : (isDark ? '#6ee7b7' : '#065f46');
+      toggleBtn.style.padding = '3px 9px';
+      toggleBtn.style.borderRadius = '4px';
+      toggleBtn.style.fontSize = '11px';
+      toggleBtn.style.fontWeight = '600';
+      toggleBtn.style.cursor = 'pointer';
+      toggleBtn.style.transition = 'all 0.15s ease';
+      toggleBtn.style.marginLeft = 'auto';
+      toggleBtn.style.marginRight = '8px';
+      toggleBtn.onclick = () => {
+        this._forceMultiRow = !this._forceMultiRow;
+        this._renderUI(annotation, isDark);
+      };
+      header.appendChild(toggleBtn);
+    }
+
     // Right Tabs (Plot / Table / JSON)
     const rightTabs = document.createElement('div');
     rightTabs.style.display = 'flex';
@@ -303,17 +336,19 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
         let optimalHeight = 360;
 
         if (payloadType === 'key_mode') {
-          // If disjoint interval extent, 180-200px is optimal; if instantaneous or 24-key vertical axis, need 480-540px
+          // If disjoint interval extent, 220px is optimal; if overlapping or 24-key vertical axis, need 520px
           const isInterval = extentType?.includes('interval');
-          optimalHeight = isInterval ? 220 : 520;
+          optimalHeight = isInterval ? (this._forceMultiRow ? 520 : 220) : 520;
         } else if (payloadType === 'note_midi' || payloadType === 'piano_roll') {
           optimalHeight = 440;
         } else if (payloadType === 'chord') {
           optimalHeight = 360;
         } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
-          optimalHeight = 240;
+          optimalHeight = this._forceMultiRow ? 360 : 240;
         } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
           optimalHeight = 380;
+        } else if (payloadType === 'tempo') {
+          optimalHeight = 320;
         } else if (!extentType || extentType === 'none') {
           // Static radial circumplex or circular circle of fifths
           optimalHeight = Math.max(360, Math.min(480, chartWidth - 40));
@@ -325,6 +360,8 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
           chartHeight: optimalHeight,
           showLabels: true,
           enableZoomPan: true,
+          enableOverviewBrush: true,
+          forceMultiRow: this._forceMultiRow,
         });
 
         vizTarget.innerHTML = '';

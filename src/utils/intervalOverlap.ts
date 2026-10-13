@@ -388,3 +388,6 @@ export function analyzeIntervalAnnotation(
     singleRowLabel,
   };
 }
+
+/** Alias for analyzeIntervalAnnotation */
+export const analyzeIntervalDisjointness = analyzeIntervalAnnotation;

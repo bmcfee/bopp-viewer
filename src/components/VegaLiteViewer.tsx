@@ -82,6 +82,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const [enableOverviewBrush, setEnableOverviewBrush] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
   const [enableZoomPan, setEnableZoomPan] = useState<boolean>(true);
+  const [forceMultiRow, setForceMultiRow] = useState<boolean>(false);
 
   // Audio Playback & Media Linking
   const audioPlayerRef = useRef<BoppAudioPlayer | null>(null);
@@ -109,6 +110,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       setIsPlaying(false);
       setCurrentTime(0);
       setPlotBounds(null);
+      setForceMultiRow(false);
     }
   }, [annotationUniqueKey, linkedMedia]);
 
@@ -301,15 +303,20 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     const eType = annotation.extent?.extent_type as string | undefined;
     if (pType === 'key_mode') {
       const isInterval = eType?.includes('interval');
-      return isInterval ? 220 : 540;
+      if (isInterval) {
+        return forceMultiRow ? 520 : 220;
+      }
+      return 540;
     }
     if (pType === 'note_midi' || pType === 'piano_roll') return 460;
     if (pType === 'chord') return 360;
-    if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') return 240;
+    if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') {
+      return forceMultiRow ? 360 : 240;
+    }
     if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
     if (!eType || eType === 'none') return 440;
-    return 340;
-  }, [annotation.payload?.payload_type, annotation.extent?.extent_type]);
+    return forceMultiRow ? 420 : 340;
+  }, [annotation.payload?.payload_type, annotation.extent?.extent_type, forceMultiRow]);
 
   // Build the Vega-Lite specification
   const vegaSpec = useMemo(() => {
@@ -324,6 +331,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       currentTime: isPlaying ? currentTime : null,
       chartWidth: containerWidth,
       chartHeight: optimalChartHeight,
+      forceMultiRow,
     };
     return buildBoppVegaLiteSpec(annotation, tabularData, options);
   }, [
@@ -340,6 +348,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     isPlaying,
     containerWidth,
     optimalChartHeight,
+    forceMultiRow,
   ]);
 
   // Embed Vega-Lite into DOM
@@ -1127,29 +1136,43 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 <span>Pan & Zoom</span>
               </label>
 
-              {/* Interval Layout Continuity Badge */}
+              {/* Interval Layout Continuity Badge & Toggle Button */}
               {intervalAnalysis.isIntervalExtent && (
-                <div
-                  className="flex items-center gap-1 px-2 py-0.5 rounded border border-slate-300 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800 text-[11px] shadow-2xs font-mono select-none"
-                  title={
-                    intervalAnalysis.isDisjoint
-                      ? 'Intervals are disjoint in time: rendered in a single consolidated row on the vertical axis'
-                      : `${intervalAnalysis.overlapCount} interval collisions detected: rendered across distinct vertical rows`
-                  }
-                >
-                  <span className="text-slate-500 dark:text-slate-400 font-semibold">axis:</span>
-                  {intervalAnalysis.isDisjoint ? (
-                    <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400 font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                      <span>Single Row (Disjoint)</span>
+                intervalAnalysis.isDisjoint ? (
+                  <button
+                    type="button"
+                    onClick={() => setForceMultiRow(prev => !prev)}
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-mono font-medium transition-all shadow-2xs cursor-pointer ${
+                      forceMultiRow
+                        ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
+                        : 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                    }`}
+                    title={
+                      forceMultiRow
+                        ? 'Currently forced to Multi-Row (overlapping style). Click to switch to consolidated Single-Row display.'
+                        : 'Currently in consolidated Single-Row (disjoint style). Click to flip to Multi-Row display.'
+                    }
+                  >
+                    <Layers className="w-3 h-3 text-current" />
+                    <span className="font-semibold">
+                      {forceMultiRow ? 'Multi-Row (Overlapping)' : 'Single Row (Disjoint)'}
                     </span>
-                  ) : (
+                    <span className="text-[10px] px-1 py-0.2 rounded bg-black/10 dark:bg-white/10 uppercase tracking-wider font-bold">
+                      Toggle
+                    </span>
+                  </button>
+                ) : (
+                  <div
+                    className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-slate-300 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800 text-[11px] shadow-2xs font-mono select-none"
+                    title={`${intervalAnalysis.overlapCount} interval collisions detected: inherently rendered across distinct vertical rows`}
+                  >
+                    <span className="text-slate-500 dark:text-slate-400 font-semibold">axis:</span>
                     <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
                       <span>Multi-Row ({intervalAnalysis.overlapCount} overlaps)</span>
                     </span>
-                  )}
-                </div>
+                  </div>
+                )
               )}
 
               {enableOverviewBrush && (

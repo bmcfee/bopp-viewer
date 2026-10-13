@@ -109,24 +109,37 @@ export const MIR_EVAL_COLORMAPS = {
 export const CIRCLE_OF_FIFTHS_CLOCKWISE_INDEX: Record<string, number> = {
   C: 0,
   "B#": 0,
+  "B♯": 0,
   G: 1,
   D: 2,
   A: 3,
   E: 4,
   B: 5,
   Cb: 5,
+  "C♭": 5,
   "F#": 6,
+  "F♯": 6,
   Gb: 6,
+  "G♭": 6,
   "C#": 7,
+  "C♯": 7,
   Db: 7,
+  "D♭": 7,
   "G#": 8,
+  "G♯": 8,
   Ab: 8,
+  "A♭": 8,
   "D#": 9,
+  "D♯": 9,
   Eb: 9,
+  "E♭": 9,
   "A#": 10,
+  "A♯": 10,
   Bb: 10,
+  "B♭": 10,
   F: 11,
   "E#": 11,
+  "E♯": 11,
 };
 
 // Backwards-compatible alias
@@ -136,27 +149,75 @@ export const FIFTHS_ROOT_MAP = CIRCLE_OF_FIFTHS_CLOCKWISE_INDEX;
 export const CHROMATIC_ROOT_MAP: Record<string, number> = {
   C: 0,
   "B#": 0,
+  "B♯": 0,
   "C#": 1,
+  "C♯": 1,
   Db: 1,
+  "D♭": 1,
   D: 2,
   "D#": 3,
+  "D♯": 3,
   Eb: 3,
+  "E♭": 3,
   E: 4,
   "E#": 5,
+  "E♯": 5,
   F: 5,
   "F#": 6,
+  "F♯": 6,
   Gb: 6,
+  "G♭": 6,
   G: 7,
   "G#": 8,
+  "G♯": 8,
   Ab: 8,
+  "A♭": 8,
   A: 9,
   "A#": 10,
+  "A♯": 10,
   Bb: 10,
+  "B♭": 10,
   B: 11,
   Cb: 11,
+  "C♭": 11,
 };
 
 export type ChordQualityCategory = "maj" | "min" | "other" | "none";
+
+/**
+ * Converts ASCII accidentals (#, b) following note roots A-G and in chord degrees to proper unicode symbols (♯, ♭).
+ * Preserves suffixes, qualities, colons, numbers, and slashes.
+ */
+export function toUnicodeAccidentals(str: string | null | undefined): string {
+  if (!str) return '';
+  return String(str)
+    // Double accidentals
+    .replace(/([A-Ga-g])##/g, '$1𝄪')
+    .replace(/([A-Ga-g])bb/g, '$1𝄫')
+    // Note root accidentals: C#, Bb, F#, Eb, etc.
+    .replace(/([A-Ga-g])#/g, '$1♯')
+    .replace(/([A-Ga-g])b(?=[^a-z]|$)/g, '$1♭')
+    // Slashed bass note accidentals: /Bb, /C#, etc.
+    .replace(/\/([A-Ga-g])b(?=[^a-z]|$)/g, '/$1♭')
+    .replace(/\/([A-Ga-g])#/g, '/$1♯')
+    // Degree accidentals: b5, #5, b9, #9, #11, b13 in chords
+    .replace(/(?<=[(:/,\s]|^)b(?=\d)/g, '♭')
+    .replace(/(?<=[(:/,\s]|^)#(?=\d)/g, '♯')
+    .replace(/#(?=(?:5|9|11)(?:[^a-z]|$))/g, '♯')
+    .replace(/b(?=(?:5|9|11|13)(?:[^a-z]|$))/g, '♭');
+}
+
+/**
+ * Converts Unicode accidentals (♯, ♭, 𝄪, 𝄫) back to standard ASCII (#, b) for internal musicological lookup.
+ */
+export function toAsciiAccidentals(str: string | null | undefined): string {
+  if (!str) return '';
+  return String(str)
+    .replace(/♯/g, '#')
+    .replace(/♭/g, 'b')
+    .replace(/𝄪/g, '##')
+    .replace(/𝄫/g, 'bb');
+}
 
 /**
  * Returns exact hex color for a pitch class (0..11, C..B) from mir_eval palette
@@ -169,11 +230,10 @@ export function getPitchClassColor(pitchClass: number, mode: 'fifths' | 'pitch' 
   return MIR_EVAL_COLORMAPS.pitch[pc];
 }
 
-export const PITCH_CLASS_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const;
-
+export const PITCH_CLASS_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'] as const;
 
 /**
- * Standard circle-of-fifths order for 12 tonics with C at top (12 o'clock)
+ * Standard circle-of-fifths order for 12 tonics with C at top (12 o'clock) using proper unicode accidentals
  */
 export const FIFTHS_ORDER_12_ROOTS = [
   'C',
@@ -182,11 +242,11 @@ export const FIFTHS_ORDER_12_ROOTS = [
   'A',
   'E',
   'B',
-  'F#',
-  'Db',
-  'Ab',
-  'Eb',
-  'Bb',
+  'F♯',
+  'D♭',
+  'A♭',
+  'E♭',
+  'B♭',
   'F',
 ] as const;
 
@@ -194,20 +254,20 @@ export const FIFTHS_ORDER_12_ROOTS = [
  * Standard 24 musical keys ordered from Top to Bottom for Vega-Lite ordinal y-scale.
  * In Vega-Lite, domain[0] appears at the top, and domain[last] appears at the bottom.
  * Therefore, listing from B down to C makes the pitch axis go UP from C at the bottom!
- * Each tonic groups Major and Minor together.
+ * Each tonic groups Major and Minor together, styled with unicode accidentals ♭ and ♯.
  */
 export const ALL_24_KEYS_TOP_TO_BOTTOM = [
   'B:min', 'B:maj',
-  'Bb:min', 'Bb:maj',
+  'B♭:min', 'B♭:maj',
   'A:min', 'A:maj',
-  'Ab:min', 'Ab:maj',
+  'A♭:min', 'A♭:maj',
   'G:min', 'G:maj',
-  'F#:min', 'F#:maj',
+  'F♯:min', 'F♯:maj',
   'F:min', 'F:maj',
   'E:min', 'E:maj',
-  'Eb:min', 'Eb:maj',
+  'E♭:min', 'E♭:maj',
   'D:min', 'D:maj',
-  'Db:min', 'Db:maj',
+  'D♭:min', 'D♭:maj',
   'C:min', 'C:maj',
 ] as const;
 
@@ -252,7 +312,9 @@ export interface ParsedKeyMode {
 export function parseKeyMode(keyStr: string): ParsedKeyMode | null {
   if (!keyStr || keyStr === 'N' || keyStr === 'X') return null;
 
-  const match = keyStr.trim().match(/^([A-Ga-g][b#]?)(?::?(mixolydian|phrygian|aeolian|locrian|ionian|dorian|lydian|major|minor|maj|min|m)?)?/i);
+  // Convert unicode accidentals to ascii for parsing
+  const asciiKey = toAsciiAccidentals(keyStr.trim());
+  const match = asciiKey.match(/^([A-Ga-g][b#]?)(?::?(mixolydian|phrygian|aeolian|locrian|ionian|dorian|lydian|major|minor|maj|min|m)?)?/i);
   if (!match) return null;
 
   const rawRoot = match[1];
@@ -279,13 +341,13 @@ export function parseKeyMode(keyStr: string): ParsedKeyMode | null {
     modeStr === 'aeolian' ||
     modeStr === 'locrian';
 
-  const standardRoots = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+  const standardRoots = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
   const shift = MODE_TO_RELATIVE_MAJOR_SHIFT[modeStr] ?? (isMinor ? 3 : 0);
   const relMajSemitone = (semitone + shift) % 12;
   const relativeMajorRoot = standardRoots[relMajSemitone] ?? 'C';
   const relativeMajorKey = `${relativeMajorRoot}:maj`;
 
-  const canonicalRoot = standardRoots[semitone] ?? root;
+  const canonicalRoot = standardRoots[semitone] ?? toUnicodeAccidentals(root);
   const normalizedMode = modeStr || (isMinor ? 'min' : 'maj');
   const canonicalKey = `${canonicalRoot}:${normalizedMode}`;
 
@@ -445,7 +507,8 @@ export function extractChordRoot(chordStr: string): string | null {
   if (!chordStr || chordStr === "N" || chordStr === "X") {
     return null;
   }
-  const match = chordStr.match(/^([A-G][b#]?)/);
+  const asciiChord = toAsciiAccidentals(chordStr);
+  const match = asciiChord.match(/^([A-G][b#]?)/);
   return match ? match[1] : null;
 }
 

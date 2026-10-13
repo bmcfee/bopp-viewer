@@ -339,10 +339,10 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
 }
 
 /**
- * Converts MIDI note number (e.g. 60) to pitch name (e.g. C4)
+ * Converts MIDI note number (e.g. 60) to pitch name (e.g. C4) using unicode accidentals
  */
 export function midiToNoteName(midi: number): string {
-  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const noteNames = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
   const rounded = Math.round(midi);
   const note = noteNames[((rounded % 12) + 12) % 12];
   const octave = Math.floor(rounded / 12) - 1;
