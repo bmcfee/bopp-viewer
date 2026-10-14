@@ -55,6 +55,18 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
           <span className="font-mono text-blue-600 dark:text-blue-400 font-bold">{imageName}</span>
           <span className="text-slate-400">·</span>
           <span className="text-slate-600 dark:text-slate-400">{tabularData.length} Bounding Boxes</span>
+          {tabularData.some(d => d.confidence != null) && (() => {
+            const confs = tabularData.map(d => Number(d.confidence)).filter(c => !isNaN(c));
+            const avg = confs.length ? Math.round((confs.reduce((a, b) => a + b, 0) / confs.length) * 100) : null;
+            return avg !== null ? (
+              <>
+                <span className="text-slate-400">·</span>
+                <span className="px-2 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 font-mono font-semibold text-[11px]">
+                  Avg Likelihood: {avg}%
+                </span>
+              </>
+            ) : null;
+          })()}
         </div>
 
         <div className="flex items-center gap-3">
@@ -172,26 +184,58 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
                     rx={2}
                   />
 
+                  {/* Top-edge Likelihood Confidence Meter Bar on Bounding Box */}
+                  {record.confidence != null && (
+                    <g>
+                      {/* Backing track */}
+                      <rect
+                        x={x + 1}
+                        y={y + 1}
+                        width={Math.max(0, w - 2)}
+                        height={Math.max(4, Math.min(7, h * 0.12))}
+                        fill={isDark ? 'rgba(0,0,0,0.75)' : 'rgba(0,0,0,0.4)'}
+                        rx={1}
+                      />
+                      {/* Active confidence fill */}
+                      <rect
+                        x={x + 1}
+                        y={y + 1}
+                        width={Math.max(0, (w - 2) * Math.max(0, Math.min(1, Number(record.confidence))))}
+                        height={Math.max(4, Math.min(7, h * 0.12))}
+                        fill={isDark ? '#38bdf8' : '#0284c7'}
+                        rx={1}
+                      />
+                    </g>
+                  )}
+
                   {showLabels && (
                     <g transform={`translate(${x}, ${Math.max(14, y - 4)})`}>
-                      <rect
-                        x={0}
-                        y={-14}
-                        width={String(record.value || '').length * 7 + 10}
-                        height={16}
-                        fill={color}
-                        rx={2}
-                      />
-                      <text
-                        x={5}
-                        y={-3}
-                        fill="#ffffff"
-                        fontSize={10}
-                        fontWeight="bold"
-                        fontFamily="system-ui, sans-serif"
-                      >
-                        {String(record.value || '')}
-                      </text>
+                      {(() => {
+                        const confStr = record.confidence != null ? ` · ${Math.round(Number(record.confidence) * 100)}%` : '';
+                        const fullText = `${String(record.value || '')}${confStr}`;
+                        return (
+                          <>
+                            <rect
+                              x={0}
+                              y={-14}
+                              width={fullText.length * 6.5 + 10}
+                              height={16}
+                              fill={color}
+                              rx={2}
+                            />
+                            <text
+                              x={5}
+                              y={-3}
+                              fill="#ffffff"
+                              fontSize={10}
+                              fontWeight="bold"
+                              fontFamily="system-ui, sans-serif"
+                            >
+                              {fullText}
+                            </text>
+                          </>
+                        );
+                      })()}
                     </g>
                   )}
                 </g>
@@ -209,6 +253,12 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
               Box #{hoveredIndex + 1}:
             </span>
             <span>label: <strong className="text-slate-900 dark:text-white">{String(tabularData[hoveredIndex].value)}</strong></span>
+            {tabularData[hoveredIndex].confidence != null && (
+              <>
+                <span className="text-slate-400">·</span>
+                <span>confidence: <strong className="text-emerald-600 dark:text-emerald-400">{Math.round(Number(tabularData[hoveredIndex].confidence) * 100)}%</strong></span>
+              </>
+            )}
             <span className="text-slate-400">·</span>
             <span>x: {tabularData[hoveredIndex].x}</span>
             <span>y: {tabularData[hoveredIndex].y}</span>

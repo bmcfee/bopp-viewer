@@ -125,17 +125,47 @@ export function resolveColorScale(
   }
 
   if (isMirEvalFifths) {
+    if (uniqueValues && uniqueValues.length > 0) {
+      return {
+        domain: uniqueValues,
+        range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.fifths[i % 12]),
+      };
+    }
     return { range: MIR_EVAL_COLORMAPS.fifths };
   }
   if (isMirEvalPitch) {
+    if (uniqueValues && uniqueValues.length > 0) {
+      return {
+        domain: uniqueValues,
+        range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.pitch[i % 12]),
+      };
+    }
     return { range: MIR_EVAL_COLORMAPS.pitch };
   }
 
   if (validVegaSchemes.has(schemeName.toLowerCase())) {
+    if (uniqueValues && uniqueValues.length > 0) {
+      return { domain: uniqueValues, scheme: schemeName.toLowerCase() };
+    }
     return { scheme: schemeName.toLowerCase() };
   }
 
+  if (uniqueValues && uniqueValues.length > 0) {
+    return {
+      domain: uniqueValues,
+      range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.fifths[i % 12]),
+    };
+  }
   return { range: MIR_EVAL_COLORMAPS.fifths };
+}
+
+/**
+ * Extracts base chord label without inversion (e.g. C:maj/3 -> C:maj, G:7/5 -> G:7)
+ * to group chord rows cleanly without inversions causing redundant vertical rows.
+ */
+function getBaseChordLabel(chord: string): string {
+  if (!chord) return '';
+  return chord.replace(/\/[a-zA-Z0-9#b_]+$/, '');
 }
 
 export function buildBoppVegaLiteSpec(
@@ -156,7 +186,7 @@ export function buildBoppVegaLiteSpec(
     currentTime = null,
     chartWidth = 760,
     chartHeight = 320,
-    forceMultiRow = false,
+    forceMultiRow,
   } = options;
 
   const resolvedWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
@@ -318,8 +348,14 @@ export function buildBoppVegaLiteSpec(
       const topHeight = detailPlotHeight ?? Math.max(160, chartHeight - 74);
 
       // Strip conflicting wheel/drag zoom params from detail layers so brush selection has authoritative control
-      const cleanDetailLayers = detailLayers.map(layer => {
-        const { params: _p, ...cleanLayer } = layer as Record<string, any>;
+      const applyBrushScale = (layer: Record<string, any>): Record<string, any> => {
+        if (Array.isArray(layer.layer)) {
+          return {
+            ...layer,
+            layer: layer.layer.map(applyBrushScale),
+          };
+        }
+        const { params: _p, ...cleanLayer } = layer;
         const enc = (cleanLayer.encoding as Record<string, any>) || {};
         if (enc.x && typeof enc.x === 'object') {
           return {
@@ -334,7 +370,8 @@ export function buildBoppVegaLiteSpec(
           };
         }
         return cleanLayer;
-      });
+      };
+      const cleanDetailLayers = detailLayers.map(applyBrushScale);
 
       const brushParam = {
         name: 'brush',
@@ -408,6 +445,9 @@ export function buildBoppVegaLiteSpec(
           },
           overviewUnit,
         ],
+        resolve: {
+          scale: { color: 'independent' },
+        },
       };
     }
 
@@ -603,8 +643,10 @@ export function buildBoppVegaLiteSpec(
       // 1. Outer Ring: Major Keys & Major Modes (Ionian, Lydian, Mixolydian)
       const outerRingValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
         const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
-        const matchingCand = sortedCandidates.find(c => c.semitone === kSem && !c.isMinor);
+        const allMatches = sortedCandidates.filter(c => c.semitone === kSem && !c.isMinor);
+        const matchingCand = allMatches[0];
         const isActive = Boolean(matchingCand);
+        const isMultiMode = allMatches.length > 1;
         const candConf = matchingCand?.confidence ?? null;
 
         const sliceColor = mode === 'pitch'
@@ -616,7 +658,9 @@ export function buildBoppVegaLiteSpec(
         const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
 
         const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
-        const badgeText = isActive && candConf !== null ? confPct : '';
+        const badgeText = isMultiMode
+          ? allMatches.map(m => m.confidence !== null ? `${Math.round(m.confidence * 100)}%` : '').filter(Boolean).join('/')
+          : (isActive && candConf !== null ? confPct : '');
 
         // Arc meter geometry along outer rim of donut segment
         const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
@@ -624,9 +668,14 @@ export function buildBoppVegaLiteSpec(
         const margin = 0.015;
         const meterStart = theta0 + margin;
         const meterTrackEnd = theta1 - margin;
+        const totalSpan = meterTrackEnd - meterStart;
         const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
-        const meterFillEnd = meterStart + confVal * (meterTrackEnd - meterStart);
+        const meterFillEnd = meterStart + confVal * totalSpan;
         const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
+
+        const multiModeDescription = isMultiMode
+          ? allMatches.map(m => `${m.label} (${m.confidence !== null ? Math.round(m.confidence * 100) + '%' : 'detected'})`).join(' + ')
+          : (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`);
 
         return {
           key: k,
@@ -638,6 +687,7 @@ export function buildBoppVegaLiteSpec(
           outerColor,
           innerColor,
           isSplit,
+          isMultiMode,
           active: isActive,
           activeOpacity: isActive ? 1.0 : 0.0,
           activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
@@ -648,29 +698,29 @@ export function buildBoppVegaLiteSpec(
             ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45))
             : (isDark ? 0.28 : 0.38),
           textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: matchingCand?.fullKey ?? `${k}:maj`,
-          label: matchingCand?.label ?? `${k} Major`,
-          modeName: matchingCand?.isMode ? matchingCand.parsed?.mode : 'Major',
+          fullKey: isMultiMode ? allMatches.map(m => m.fullKey).join(' / ') : (matchingCand?.fullKey ?? `${k}:maj`),
+          label: isMultiMode ? allMatches.map(m => m.label).join(' / ') : (matchingCand?.label ?? `${k} Major`),
+          modeName: isMultiMode ? allMatches.map(m => m.parsed?.mode ?? 'Major').join(' + ') : (matchingCand?.isMode ? matchingCand.parsed?.mode : 'Major'),
           confidence: candConf,
           confPct,
           badge: badgeText,
-          badgeOpacity: isActive && candConf !== null ? 1.0 : 0.0,
+          badgeOpacity: isActive && badgeText ? 1.0 : 0.0,
           meterStart,
           meterTrackEnd,
           meterFillEnd,
           hasMeter,
           confVal,
-          status: isActive
-            ? (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`)
-            : 'Major Sector',
+          status: isActive ? multiModeDescription : 'Major Sector',
         };
       });
 
       // 2. Inner Ring: Minor Keys & Minor Modes (Aeolian, Dorian, Phrygian, Locrian)
       const innerRingValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
         const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
-        const matchingCand = sortedCandidates.find(c => c.semitone === kSem && c.isMinor);
+        const allMatches = sortedCandidates.filter(c => c.semitone === kSem && c.isMinor);
+        const matchingCand = allMatches[0];
         const isActive = Boolean(matchingCand);
+        const isMultiMode = allMatches.length > 1;
         const candConf = matchingCand?.confidence ?? null;
 
         const sliceColor = mode === 'pitch'
@@ -682,7 +732,9 @@ export function buildBoppVegaLiteSpec(
         const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
 
         const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
-        const badgeText = isActive && candConf !== null ? confPct : '';
+        const badgeText = isMultiMode
+          ? allMatches.map(m => m.confidence !== null ? `${Math.round(m.confidence * 100)}%` : '').filter(Boolean).join('/')
+          : (isActive && candConf !== null ? confPct : '');
 
         // Arc meter geometry along outer rim of inner donut segment
         const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
@@ -690,9 +742,14 @@ export function buildBoppVegaLiteSpec(
         const margin = 0.015;
         const meterStart = theta0 + margin;
         const meterTrackEnd = theta1 - margin;
+        const totalSpan = meterTrackEnd - meterStart;
         const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
-        const meterFillEnd = meterStart + confVal * (meterTrackEnd - meterStart);
+        const meterFillEnd = meterStart + confVal * totalSpan;
         const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
+
+        const multiModeDescription = isMultiMode
+          ? allMatches.map(m => `${m.label} (${m.confidence !== null ? Math.round(m.confidence * 100) + '%' : 'detected'})`).join(' + ')
+          : (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`);
 
         return {
           key: k,
@@ -704,6 +761,7 @@ export function buildBoppVegaLiteSpec(
           outerColor,
           innerColor,
           isSplit,
+          isMultiMode,
           active: isActive,
           activeOpacity: isActive ? 1.0 : 0.0,
           activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
@@ -714,40 +772,45 @@ export function buildBoppVegaLiteSpec(
             ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45))
             : (isDark ? 0.25 : 0.35),
           textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: matchingCand?.fullKey ?? `${k}:min`,
-          label: matchingCand?.label ?? `${k} Minor`,
-          modeName: matchingCand?.isMode ? matchingCand.parsed?.mode : 'Minor',
+          fullKey: isMultiMode ? allMatches.map(m => m.fullKey).join(' / ') : (matchingCand?.fullKey ?? `${k}:min`),
+          label: isMultiMode ? allMatches.map(m => m.label).join(' / ') : (matchingCand?.label ?? `${k} Minor`),
+          modeName: isMultiMode ? allMatches.map(m => m.parsed?.mode ?? 'Minor').join(' + ') : (matchingCand?.isMode ? matchingCand.parsed?.mode : 'Minor'),
           confidence: candConf,
           confPct,
           badge: badgeText,
-          badgeOpacity: isActive && candConf !== null ? 1.0 : 0.0,
+          badgeOpacity: isActive && badgeText ? 1.0 : 0.0,
           meterStart,
           meterTrackEnd,
           meterFillEnd,
           hasMeter,
           confVal,
-          status: isActive
-            ? (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`)
-            : 'Minor Sector',
+          status: isActive ? multiModeDescription : 'Minor Sector',
         };
       });
 
       const wheelSize = typeof chartWidth === 'number' ? Math.min(480, Math.max(360, chartWidth - 60)) : 400;
 
+      const sameTonicCandidates = sortedCandidates.filter(c => c.root === primaryCandidate.root);
+      const isMultiModeOnSameTonic = sameTonicCandidates.length > 1;
+
       const otherCount = sortedCandidates.length - 1;
-      const centerSubtitle = primaryCandidate.isMode
+      const centerSubtitle = isMultiModeOnSameTonic
+        ? sameTonicCandidates.map(c => `${c.parsed?.mode ?? (c.isMinor ? 'min' : 'maj')} ${c.confidence !== null ? Math.round(c.confidence * 100) + '%' : ''}`).join(' · ')
+        : primaryCandidate.isMode
         ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}% · ` : ''}Rel Maj: ${primaryCandidate.parsed?.relativeMajorRoot} Maj`
         : hasMultipleCandidates
         ? `${primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 100)}%` : ''} (Primary)`
         : (primaryCandidate.confidence !== null ? `${Math.round(primaryCandidate.confidence * 1000) / 10}% confidence` : 'Harmonic tonal center');
 
-      const centerDetail = hasMultipleCandidates
+      const centerDetail = isMultiModeOnSameTonic
+        ? `Tonic: ${primaryCandidate.root} (${sameTonicCandidates.length} modes estimated)`
+        : hasMultipleCandidates
         ? `${otherCount} other candidate${otherCount > 1 ? 's' : ''}`
         : 'Circle of Fifths';
 
       const centerData = [
         {
-          title: primaryCandidate.label,
+          title: isMultiModeOnSameTonic ? `${primaryCandidate.root} Multi-Mode` : primaryCandidate.label,
           subtitle: centerSubtitle,
           detail: centerDetail,
           color: primaryCandidate.color,
@@ -1340,9 +1403,31 @@ export function buildBoppVegaLiteSpec(
       ? 'Chord (mir_eval Chromatic Pitch)'
       : 'Chord (Harte)';
 
-    const isInstantaneous = !isScore && !isMidi && extentType === 'time' && data.every(d => d.duration === undefined || d.duration === null || d.duration === 0);
+    const isPointExtent = extentType === 'score_quarter' || extentType === 'midi_tick' || extentType === 'time';
+    const isInstantaneous = isPointExtent && data.every(d => d.duration === undefined || d.duration === null || d.duration === 0);
 
+    const intervalAnalysis = isInstantaneous ? null : analyzeIntervalAnnotation(annotation, data);
+    const isOverlapping = Boolean(!isInstantaneous && intervalAnalysis && !intervalAnalysis.isDisjoint);
+    const shouldMultiRow = Boolean(!isInstantaneous && (forceMultiRow !== undefined ? forceMultiRow : isOverlapping));
+
+    // Assign rows per base chord label (ignoring inversions so e.g. C:maj and C:maj/3 share the same row)
+    const chordDataWithLanes = enrichedChordData.map(d => {
+      const rawVal = String(d.value ?? '');
+      const baseLabel = toUnicodeAccidentals(getBaseChordLabel(rawVal));
+      if (!shouldMultiRow) {
+        return { ...d, _chord_row: 'Chords', _base_chord: baseLabel };
+      }
+      return {
+        ...d,
+        _chord_row: baseLabel || 'N',
+        _base_chord: baseLabel || 'N',
+      };
+    });
+
+    const uniqueChordRows = Array.from(new Set(chordDataWithLanes.map(d => d._chord_row))).filter(Boolean);
     const mainPlotHeight = enableOverviewBrush ? chartHeight - 80 : chartHeight - 40;
+
+    const patchStroke = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(15,23,42,0.65)';
 
     const rectEncoding: Record<string, unknown> = {
       x: {
@@ -1352,8 +1437,20 @@ export function buildBoppVegaLiteSpec(
         scale: { domain: [minX, maxX] },
       },
       x2: { field: '_calc_end' },
-      y: { value: 0 },
-      y2: { value: mainPlotHeight },
+      y: shouldMultiRow
+        ? {
+            field: '_chord_row',
+            type: 'nominal',
+            title: 'Chord',
+            scale: { domain: uniqueChordRows },
+            axis: {
+              labelFontWeight: 'bold',
+              labelPadding: 8,
+              minExtent: 70,
+            },
+          }
+        : { value: 0 },
+      ...(shouldMultiRow ? {} : { y2: { value: mainPlotHeight } }),
       color: {
         field: '_display_value',
         type: 'nominal',
@@ -1362,9 +1459,10 @@ export function buildBoppVegaLiteSpec(
       },
       tooltip: [
         { field: '_display_value', type: 'nominal', title: 'Chord' },
-        { field: xField, type: 'quantitative', format: '.3f', title: 'Start' },
-        { field: durField, type: 'quantitative', format: '.3f', title: 'Duration' },
-        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence' }] : []),
+        ...(shouldMultiRow ? [{ field: '_chord_row', type: 'nominal', title: 'Row' }] : []),
+        { field: xField, type: 'quantitative', format: isScore ? '.1f' : isMidi ? 'd' : '.3f', title: 'Start' },
+        { field: durField, type: 'quantitative', format: isScore ? '.1f' : isMidi ? 'd' : '.3f', title: 'Duration' },
+        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence' }] : []),
         ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
       ],
     };
@@ -1381,25 +1479,34 @@ export function buildBoppVegaLiteSpec(
     }
 
     if (isInstantaneous) {
-      // Instantaneous point chords (e.g. drive_time_points): vertical rules + labels + confidence pins
+      // Instantaneous point chords (e.g. drive_time_points, score_quarter points): vertical rules + circle + labels
       layers.push({
         mark: {
           type: 'rule',
-          strokeWidth: 2,
-          color: isDark ? '#38bdf8' : '#0284c7',
+          strokeWidth: 2.5,
         },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
           x: { field: xField, type: 'quantitative', title: xTitle, scale: { domain: [minX, maxX] } },
-          y: { value: 0 },
+          y: { value: 36 },
           y2: { value: mainPlotHeight },
           color: { field: '_display_value', type: 'nominal', title: colorLegendTitle, scale: chordColorScale },
           tooltip: [
             { field: '_display_value', type: 'nominal', title: 'Chord' },
-            { field: xField, type: 'quantitative', format: '.3f', title: 'Position' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+            { field: xField, type: 'quantitative', format: isScore ? '.1f' : isMidi ? 'd' : '.3f', title: 'Position' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
             ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
           ],
+        },
+      });
+
+      // Accent circle marker along top
+      layers.push({
+        mark: { type: 'circle', size: 120 },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          y: { value: 36 },
+          color: { field: '_display_value', type: 'nominal', scale: chordColorScale },
         },
       });
 
@@ -1419,35 +1526,41 @@ export function buildBoppVegaLiteSpec(
           mark: {
             type: 'text',
             align: 'center',
-            baseline: 'top',
-            dy: 4,
-            fill: textFill,
+            baseline: 'middle',
+            fill: '#ffffff',
             fontWeight: 'bold',
-            fontSize: 11,
+            fontSize: 10.5,
             font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
           },
           encoding: {
             x: { field: xField, type: 'quantitative' },
-            y: { value: 4 },
+            y: { value: 36 },
             text: { field: '_display_value', type: 'nominal' },
           },
         });
       }
     } else {
-      // Interval chords: rect blocks + confidence meter overlay on top edge
+      // Interval chords: rect blocks with clear outlines so patch transitions are razor sharp
       layers.push({
-        mark: {
-          type: 'rect',
-          stroke: isDark ? '#1e293b' : '#334155',
-          strokeWidth: 1,
-          cornerRadius: 2,
-        },
+        mark: shouldMultiRow
+          ? {
+              type: 'bar',
+              stroke: patchStroke,
+              strokeWidth: 1.5,
+              cornerRadius: 3,
+            }
+          : {
+              type: 'rect',
+              stroke: patchStroke,
+              strokeWidth: 1.5,
+              cornerRadius: 2,
+            },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: rectEncoding,
       });
 
-      // Overlay confidence meter along top edge
-      if (hasConfidence && confidenceChannel !== 'none') {
+      // Overlay confidence meter along top edge for single row
+      if (!shouldMultiRow && hasConfidence && confidenceChannel !== 'none') {
         layers.push(...buildIntervalConfidenceLayers({
           xField,
           endField: '_calc_end',
@@ -1460,12 +1573,55 @@ export function buildBoppVegaLiteSpec(
           yBottom: mainPlotHeight,
           meterHeight: 14,
         }));
+      } else if (shouldMultiRow && hasConfidence && confidenceChannel !== 'none') {
+        // Multi-row confidence meter strip along top of each chord bar
+        layers.push(
+          // Backing track
+          {
+            transform: [{ filter: 'datum.confidence != null' }],
+            mark: {
+              type: 'rect',
+              height: 4,
+              cornerRadius: 1,
+              fill: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.8)',
+            },
+            encoding: {
+              x: { field: xField, type: 'quantitative' },
+              x2: { field: '_calc_end' },
+              y: { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows } },
+              yOffset: { value: -10 },
+            },
+          },
+          // Active meter fill
+          {
+            transform: [
+              { filter: 'datum.confidence != null' },
+              { calculate: `datum.${xField} + (datum.duration != null ? datum.duration * datum.confidence : 0)`, as: '_chord_conf_end' },
+            ],
+            mark: {
+              type: 'rect',
+              height: 4,
+              cornerRadius: 1,
+              fill: isDark ? '#38bdf8' : '#0284c7',
+            },
+            encoding: {
+              x: { field: xField, type: 'quantitative' },
+              x2: { field: '_chord_conf_end' },
+              y: { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows } },
+              yOffset: { value: -10 },
+            },
+          }
+        );
       }
 
       // Chord text label layer with high-contrast halo and strict patch-boundary clipping
       if (showLabels) {
         const chordLimitExpr = `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)`;
         const chordTestExpr = `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 10`;
+
+        const yTextEncoding = shouldMultiRow
+          ? { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows } }
+          : { value: mainPlotHeight / 2 + 10 };
 
         // 1. Halo backing layer
         layers.push({
@@ -1489,7 +1645,7 @@ export function buildBoppVegaLiteSpec(
           },
           encoding: {
             x: { field: 'x_mid', type: 'quantitative' },
-            y: { value: mainPlotHeight / 2 + 10 },
+            y: yTextEncoding,
             text: {
               condition: {
                 test: chordTestExpr,
@@ -1520,7 +1676,7 @@ export function buildBoppVegaLiteSpec(
           },
           encoding: {
             x: { field: 'x_mid', type: 'quantitative' },
-            y: { value: mainPlotHeight / 2 + 10 },
+            y: yTextEncoding,
             text: {
               condition: {
                 test: chordTestExpr,
@@ -1542,29 +1698,40 @@ export function buildBoppVegaLiteSpec(
     const overviewLayers = isInstantaneous
       ? [
           {
-            mark: { type: 'rule', size: 1.5, stroke: isDark ? '#38bdf8' : '#0284c7', opacity: 0.75 },
+            mark: { type: 'rule', strokeWidth: 2 },
             encoding: {
               x: { field: xField, type: 'quantitative' },
-              y: { value: 4 },
+              y: { value: 6 },
               y2: { value: 50 },
+              color: { field: '_display_value', type: 'nominal', scale: chordColorScale, legend: null },
+            },
+          },
+          {
+            mark: { type: 'circle', size: 60 },
+            encoding: {
+              x: { field: xField, type: 'quantitative' },
+              y: { value: 28 },
+              color: { field: '_display_value', type: 'nominal', scale: chordColorScale, legend: null },
             },
           },
         ]
       : [
           {
-            mark: { type: 'rect', opacity: 0.55, cornerRadius: 2 },
+            mark: shouldMultiRow
+              ? { type: 'bar', opacity: 0.7, cornerRadius: 2, stroke: patchStroke, strokeWidth: 1 }
+              : { type: 'rect', opacity: 0.7, cornerRadius: 2, stroke: patchStroke, strokeWidth: 1 },
             encoding: {
               x: { field: xField, type: 'quantitative' },
               x2: { field: '_calc_end' },
-              y: { value: 2 },
-              y2: { value: 52 },
+              y: shouldMultiRow ? { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows }, axis: null } : { value: 2 },
+              ...(shouldMultiRow ? {} : { y2: { value: 52 } }),
               color: { field: '_display_value', type: 'nominal', legend: null, scale: chordColorScale },
             },
           },
         ];
 
     return composeTimelineSpecWithOverview({
-      data: enrichedChordData,
+      data: chordDataWithLanes,
       transforms,
       detailLayers: layers,
       overviewLayers,
@@ -1629,8 +1796,16 @@ export function buildBoppVegaLiteSpec(
       };
     });
 
-    const extraKeys = data.map(d => String(d.value ?? '')).filter(k => k && !ALL_24_KEYS_TOP_TO_BOTTOM.includes(k as any));
-    const keyDomain = [...ALL_24_KEYS_TOP_TO_BOTTOM, ...new Set(extraKeys)];
+    const uniqueKeysInPiece = Array.from(new Set(enrichedData.map(d => String(d.value ?? '')))).filter(Boolean);
+    const orderedKeysInPiece = [...uniqueKeysInPiece].sort((a, b) => {
+      const pa = parseKeyMode(a);
+      const pb = parseKeyMode(b);
+      const semA = pa ? pa.semitone : 0;
+      const semB = pb ? pb.semitone : 0;
+      return semA - semB;
+    });
+    // In multi-row mode, scale domain ONLY to keys in the piece to avoid 20+ empty rows!
+    const keyDomain = orderedKeysInPiece.length > 0 ? orderedKeysInPiece : ALL_24_KEYS_TOP_TO_BOTTOM;
     const keyColors = keyDomain.map(k => keyToMirEvalColor(k, mode));
 
     const keyColorScale = {
@@ -1648,7 +1823,7 @@ export function buildBoppVegaLiteSpec(
 
     const yField = useSingleRow ? '_single_row' : 'value';
     const yType = 'nominal';
-    const yTitle = useSingleRow ? singleRowAxisTitle : 'Tonic Pitch (C at bottom)';
+    const yTitle = useSingleRow ? singleRowAxisTitle : 'Tonic Pitch';
 
     const layers: Record<string, unknown>[] = [];
 
@@ -1688,13 +1863,13 @@ export function buildBoppVegaLiteSpec(
             scale: null,
           },
           opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
             : { value: 1.0 },
           tooltip: [
             { field: '_display_value', type: 'nominal', title: 'Key/Mode' },
             { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
             { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
           ],
         },
       });
@@ -1734,14 +1909,14 @@ export function buildBoppVegaLiteSpec(
             },
           },
           opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
             : { value: 1.0 },
           tooltip: [
             { field: '_display_value', type: 'nominal', title: 'Key / Mode' },
             { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
             { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
             { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
           ],
         },
       });
@@ -1760,6 +1935,9 @@ export function buildBoppVegaLiteSpec(
           x2: { field: '_calc_end' },
           y: { field: yField, type: yType },
           color: { field: '_color_tonic', type: 'nominal', scale: null },
+          opacity: hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+            : { value: 1.0 },
         },
       });
 
@@ -1782,11 +1960,74 @@ export function buildBoppVegaLiteSpec(
             type: 'nominal',
             scale: null,
           },
+          opacity: hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+            : { value: 1.0 },
         },
       });
+
+      // Top edge confidence meter for single row key intervals
+      if (hasConfidence && confidenceChannel !== 'none') {
+        layers.push({
+          transform: [{ filter: 'datum.confidence != null' }],
+          mark: {
+            type: 'rect',
+            height: 6,
+            cornerRadius: 1,
+            fill: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)',
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: yField, type: yType },
+            yOffset: { value: -halfHeight + 4 },
+          },
+        });
+        layers.push({
+          transform: [
+            { filter: 'datum.confidence != null' },
+            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration : 1) * datum.confidence`, as: '_conf_end' },
+          ],
+          mark: {
+            type: 'rect',
+            height: 6,
+            cornerRadius: 1,
+            fill: isDark ? '#38bdf8' : '#0284c7',
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_conf_end' },
+            y: { field: yField, type: yType },
+            yOffset: { value: -halfHeight + 4 },
+          },
+        });
+        // Numerical percentage badge on key interval
+        layers.push({
+          transform: [
+            { filter: 'datum.confidence != null && (datum.duration == null || datum.duration >= 8)' },
+            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
+            { calculate: "round(datum.confidence * 100) + '%'", as: '_conf_pct_str' },
+          ],
+          mark: {
+            type: 'text',
+            align: 'center',
+            baseline: 'middle',
+            yOffset: -halfHeight + 12,
+            fontSize: 9.5,
+            fontWeight: 'bold',
+            fill: isDark ? '#ffffff' : '#0f172a',
+            font: 'ui-monospace, monospace',
+          },
+          encoding: {
+            x: { field: 'x_mid', type: 'quantitative' },
+            y: { field: yField, type: yType },
+            text: { field: '_conf_pct_str', type: 'nominal' },
+          },
+        });
+      }
     } else {
       // OVERLAPPING INTERVALS: Multi-row vertical axis with two adjacent patches per row
-      const rowHeight = 22;
+      const rowHeight = 26;
       const halfHeight = rowHeight / 2;
 
       // Outer bounding container / border per row
@@ -1811,7 +2052,7 @@ export function buildBoppVegaLiteSpec(
           y: {
             field: yField,
             type: 'nominal',
-            title: 'Tonic Pitch (C at bottom)',
+            title: 'Tonic Pitch',
             scale: { domain: keyDomain },
             axis: {
               labelFontWeight: 'bold',
@@ -1822,7 +2063,7 @@ export function buildBoppVegaLiteSpec(
             },
           },
           opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.75, 1.0] } }
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
             : { value: 1.0 },
           tooltip: [
             { field: '_display_value', type: 'nominal', title: 'Key / Mode' },
@@ -1830,7 +2071,7 @@ export function buildBoppVegaLiteSpec(
             { field: '_row_key', type: 'nominal', title: 'Tonic Row' },
             { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
             { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
           ],
         },
       });
@@ -1849,6 +2090,9 @@ export function buildBoppVegaLiteSpec(
           x2: { field: '_calc_end' },
           y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
           color: { field: '_color_tonic', type: 'nominal', scale: null },
+          opacity: hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+            : { value: 1.0 },
         },
       });
 
@@ -1871,8 +2115,48 @@ export function buildBoppVegaLiteSpec(
             type: 'nominal',
             scale: null,
           },
+          opacity: hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+            : { value: 1.0 },
         },
       });
+
+      // Top edge confidence meter for multi-row key intervals
+      if (hasConfidence && confidenceChannel !== 'none') {
+        layers.push({
+          transform: [{ filter: 'datum.confidence != null' }],
+          mark: {
+            type: 'rect',
+            height: 4,
+            cornerRadius: 1,
+            fill: isDark ? 'rgba(0,0,0,0.75)' : 'rgba(255,255,255,0.85)',
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+            yOffset: { value: -halfHeight + 3 },
+          },
+        });
+        layers.push({
+          transform: [
+            { filter: 'datum.confidence != null' },
+            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration : 1) * datum.confidence`, as: '_conf_end' },
+          ],
+          mark: {
+            type: 'rect',
+            height: 4,
+            cornerRadius: 1,
+            fill: isDark ? '#38bdf8' : '#0284c7',
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_conf_end' },
+            y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+            yOffset: { value: -halfHeight + 3 },
+          },
+        });
+      }
     }
 
     // Text labels inside patches with high-contrast halo and strict patch-boundary clipping
@@ -2037,6 +2321,7 @@ export function buildBoppVegaLiteSpec(
         isDark,
         confidenceType: confidenceType as any,
         channelMode: confidenceChannel,
+        showTextLabels: false,
       }));
     }
 
@@ -2086,6 +2371,84 @@ export function buildBoppVegaLiteSpec(
       maxXVal: maxX,
       plotTitle: beatTitle,
       detailPlotHeight: chartHeight - 74,
+    });
+  }
+
+  // =========================================================================
+  // 2.5. TIME + ONSET (Audio transients, e.g. percussive onset detection)
+  // Clean impulse / stem plot proportional to likelihood without crowding!
+  // =========================================================================
+  if (extentType === 'time' && payloadType === 'onset') {
+    const onsetColor = isDark ? '#38bdf8' : '#0284c7';
+    const mainPlotHeight = chartHeight - 74;
+
+    const layers: Record<string, unknown>[] = [
+      // Stems from baseline 0 up to likelihood height
+      {
+        mark: { type: 'rule', strokeWidth: 2.5, strokeCap: 'round', stroke: onsetColor },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+          y: { datum: 0 },
+          y2: {
+            field: hasConfidence ? 'confidence' : 'value',
+            type: 'quantitative',
+            scale: { domain: [0, 1], zero: true },
+          },
+          tooltip: [
+            { field: 'time', type: 'quantitative', format: '.3f', title: 'Onset Timestamp (s)' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Detection Likelihood' }] : []),
+          ],
+        },
+      },
+      // Accent cap circle at peak of each onset spike
+      {
+        mark: { type: 'circle', size: 48, color: onsetColor },
+        encoding: {
+          x: { field: 'time', type: 'quantitative' },
+          y: {
+            field: hasConfidence ? 'confidence' : 'value',
+            type: 'quantitative',
+            title: hasConfidence ? 'Onset Likelihood' : 'Onset Strength',
+            scale: { domain: [0, 1], zero: true },
+            axis: hasConfidence
+              ? { format: '.0%', titleColor: textColor, labelColor: axisColor, tickCount: 5 }
+              : { titleColor: textColor, labelColor: axisColor, tickCount: 5 },
+          },
+          tooltip: [
+            { field: 'time', type: 'quantitative', format: '.3f', title: 'Onset Timestamp (s)' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Detection Likelihood' }] : []),
+          ],
+        },
+      },
+    ];
+
+    const cursor = makeCursorLayer('time');
+    if (cursor) layers.push(cursor);
+
+    const onsetTitle = { text: `BOPP Percussive Transient Onsets: ${annotation.media_id}`, color: textColor };
+    const overviewLayers = [
+      {
+        mark: { type: 'rule', strokeWidth: 1.5, stroke: onsetColor, opacity: 0.8 },
+        encoding: {
+          x: { field: 'time', type: 'quantitative' },
+          y: { value: 6 },
+          y2: { value: 48 },
+        },
+      },
+    ];
+
+    return composeTimelineSpecWithOverview({
+      data,
+      transforms,
+      detailLayers: layers,
+      overviewLayers,
+      xField: 'time',
+      xTitle: 'Time (seconds)',
+      minXVal: minX,
+      maxXVal: maxX,
+      plotTitle: onsetTitle,
+      detailPlotHeight: mainPlotHeight,
     });
   }
 
@@ -2252,13 +2615,23 @@ export function buildBoppVegaLiteSpec(
 
     const cursor = makeCursorLayer(xField);
     const pianoTitle = { text: `BOPP MIDI Piano Roll: ${annotation.media_id}`, color: textColor };
+    
+    const pitchValues = data.map(d => Number(d.value)).filter(v => !isNaN(v));
+    const minPitch = pitchValues.length ? Math.min(...pitchValues) : 48;
+    const maxPitch = pitchValues.length ? Math.max(...pitchValues) : 84;
+
     const overviewLayers = [
       {
         mark: { type: 'rect', opacity: 0.75, cornerRadius: 1 },
         encoding: {
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: { field: 'y_min', type: 'quantitative', scale: { zero: false }, axis: null },
+          y: {
+            field: 'y_min',
+            type: 'quantitative',
+            scale: { domain: [minPitch - 1.5, maxPitch + 1.5], zero: false },
+            axis: null,
+          },
           y2: { field: 'y_max' },
           color: {
             field: 'pitch_class',
@@ -2287,7 +2660,7 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   // 4. TIME_INTERVAL + MULTI_SEGMENT / SEGMENT_OPEN (Structural Analysis)
   // =========================================================================
-  if (extentType === 'time_interval' && (payloadType === 'multi_segment' || payloadType === 'segment_open')) {
+  if (extentType === 'time_interval' && (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open')) {
     const isMulti = payloadType === 'multi_segment';
     const intervalAnalysis = analyzeIntervalAnnotation(annotation, data);
     const useSingleRow = Boolean(!forceMultiRow && !isMulti && intervalAnalysis.shouldUseSingleRow);
@@ -2301,9 +2674,14 @@ export function buildBoppVegaLiteSpec(
 
     const yField = isMulti ? 'level' : useSingleRow ? '_single_row' : 'value';
     const yType = isMulti ? 'ordinal' : 'nominal';
-    const yTitle = isMulti ? 'Structural Level' : useSingleRow ? intervalAnalysis.singleRowLabel : 'Section';
+    const yTitle = isMulti ? 'Structural Level' : useSingleRow ? intervalAnalysis.singleRowLabel : (payloadType === 'tag_open' ? 'Tracks / Instruments' : 'Section');
     const colorField = isMulti ? 'label' : 'value';
-    const colorScale = resolveColorScale(colorScheme, payloadType);
+    const uniqueLabels = Array.from(new Set(data.map(d => String(d[colorField] ?? d.value ?? '')))).filter(Boolean);
+    const colorScale = resolveColorScale(colorScheme, payloadType, uniqueLabels);
+
+    const levels = isMulti
+      ? Array.from(new Set(data.map(d => Number(d.level)).filter(l => !isNaN(l)))).sort((a, b) => a - b)
+      : [];
 
     transforms.push({
       calculate: 'datum.time + (datum.duration != null ? datum.duration : 0)',
@@ -2314,8 +2692,8 @@ export function buildBoppVegaLiteSpec(
       {
         mark: {
           type: 'rect',
-          stroke: isDark ? '#0f172a' : '#1e293b',
-          strokeWidth: 1,
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
           cornerRadius: 4,
         },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
@@ -2326,18 +2704,19 @@ export function buildBoppVegaLiteSpec(
             field: yField,
             type: yType,
             title: yTitle,
+            scale: isMulti ? { domain: levels } : !useSingleRow ? { domain: uniqueLabels } : undefined,
             axis: {
               ...(useSingleRow ? { labels: false, ticks: false } : { labelFontWeight: 'bold', labelPadding: 8 }),
               titlePadding: 14,
               minExtent: 75,
             },
           },
-          color: { field: colorField, type: 'nominal', title: 'Segment', scale: colorScale },
+          color: { field: colorField, type: 'nominal', title: payloadType === 'tag_open' ? 'Tag' : 'Segment', scale: colorScale },
           opacity: hasConfidence && confidenceChannel === 'opacity'
             ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
             : { value: 1.0 },
           tooltip: [
-            { field: colorField, type: 'nominal', title: 'Section' },
+            { field: colorField, type: 'nominal', title: payloadType === 'tag_open' ? 'Tag' : 'Section' },
             ...(payloadType === 'multi_segment' ? [{ field: 'level', type: 'quantitative', title: 'Level' }] : []),
             { field: 'time', type: 'quantitative', format: '.2f', title: 'Start (s)' },
             { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
@@ -2350,10 +2729,10 @@ export function buildBoppVegaLiteSpec(
       },
     ];
 
-    // Centered text labels for single row disjoint segments when enabled
-    if (useSingleRow && showLabels) {
+    // Centered single crisp text label inside patch (NO redundant text layers)
+    if (showLabels) {
       transforms.push({
-        calculate: '(datum.time + (datum.time + (datum.duration != null ? datum.duration : 0))) / 2',
+        calculate: 'datum.time + (datum.duration != null ? datum.duration / 2 : 0)',
         as: '_label_midpoint',
       });
       layers.push({
@@ -2361,7 +2740,7 @@ export function buildBoppVegaLiteSpec(
           type: 'text',
           align: 'center',
           baseline: 'middle',
-          fill: textFill,
+          fill: '#ffffff',
           fontWeight: 'bold',
           fontSize: 11,
           clip: true,
@@ -2369,7 +2748,7 @@ export function buildBoppVegaLiteSpec(
         },
         encoding: {
           x: { field: '_label_midpoint', type: 'quantitative' },
-          y: { field: yField, type: yType },
+          y: { field: yField, type: yType, scale: isMulti ? { domain: levels } : !useSingleRow ? { domain: uniqueLabels } : undefined },
           text: {
             condition: {
               test: "((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time))) <= 12",
@@ -2382,106 +2761,75 @@ export function buildBoppVegaLiteSpec(
       });
     }
 
-    // Overlay horizontal confidence / agreement meter strip along the top edge of each segment block
-    if (hasConfidence && confidenceChannel === 'meter') {
+    // Confidence meter: pinned strictly along the top edge of each segment patch
+    if (useSingleRow && hasConfidence && confidenceChannel !== 'none') {
+      layers.push(...buildIntervalConfidenceLayers({
+        xField: 'time',
+        endField: '_calc_end',
+        durField: 'duration',
+        chartHeight,
+        isDark,
+        confidenceType: confidenceType as any,
+        channelMode: confidenceChannel,
+        yTop: 8,
+        yBottom: chartHeight - 74,
+        meterHeight: 12,
+        showTextLabels: false,
+      }));
+    } else if (!useSingleRow && hasConfidence && confidenceChannel === 'meter') {
       layers.push(
         // Backing track
         {
           mark: {
             type: 'rect',
-            yOffset: -12,
-            height: 3.5,
-            fill: isDark ? 'rgba(0, 0, 0, 0.7)' : 'rgba(0, 0, 0, 0.25)',
+            height: 4,
+            fill: isDark ? 'rgba(0, 0, 0, 0.75)' : 'rgba(0, 0, 0, 0.25)',
             cornerRadius: 1,
           },
           encoding: {
             x: { field: 'time', type: 'quantitative' },
             x2: { field: '_calc_end' },
-            y: { field: yField, type: yType },
+            y: { field: yField, type: yType, scale: isMulti ? { domain: levels } : { domain: uniqueLabels } },
+            yOffset: { value: -12 },
           },
         },
-        // Active agreement fill
+        // Active confidence fill
         {
           transform: [
             { calculate: 'datum.time + (datum.duration != null ? datum.duration * (datum.confidence != null ? datum.confidence : 1.0) : 0)', as: '_seg_conf_end' },
           ],
           mark: {
             type: 'rect',
-            yOffset: -12,
-            height: 3.5,
+            height: 4,
             cornerRadius: 1,
+            fill: isDark ? '#38bdf8' : '#0284c7',
           },
           encoding: {
             x: { field: 'time', type: 'quantitative' },
             x2: { field: '_seg_conf_end' },
-            y: { field: yField, type: yType },
-            color: {
-              field: 'confidence',
-              type: 'quantitative',
-              scale: {
-                domain: [0, 0.65, 0.85, 1.0],
-                range: isDark
-                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-              },
-              legend: null,
-            },
+            y: { field: yField, type: yType, scale: isMulti ? { domain: levels } : { domain: uniqueLabels } },
+            yOffset: { value: -12 },
           },
         }
       );
     }
 
-    if (showLabels) {
-      layers.push({
-        transform: [
-          { calculate: 'datum.time + (datum.duration != null ? datum.duration / 2 : 0)', as: 'time_mid' },
-          {
-            calculate: hasConfidence && confidenceType === 'agreement' && Boolean(data.some(d => d.agreement_ratio_str))
-              ? "datum." + colorField + " + (datum.agreement_ratio_str != null ? ' · 👥 ' + datum.agreement_ratio_str : '')"
-              : hasConfidence
-              ? "datum." + colorField + " + (datum.confidence != null ? ' (' + round(datum.confidence * 100) + '%)' : '')"
-              : "datum." + colorField,
-            as: '_display_label',
-          },
-        ],
-        mark: {
-          type: 'text',
-          align: 'center',
-          baseline: 'middle',
-          fill: textFill,
-          fontWeight: 'bold',
-          fontSize: 11,
-          clip: true,
-          limit: { expr: "max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time)) - 4)" },
-        },
-        encoding: {
-          x: { field: 'time_mid', type: 'quantitative' },
-          y: { field: yField, type: yType },
-          text: {
-            condition: {
-              test: "((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time))) <= 12",
-              value: '',
-            },
-            field: '_display_label',
-            type: 'nominal',
-          },
-        },
-      });
-    }
-
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
 
-    const segTitle = { text: `BOPP Structural Segmentation: ${annotation.media_id}`, color: textColor };
+    const segTitle = { text: `BOPP Structural Analysis: ${annotation.media_id}`, color: textColor };
     const segOverviewLayers = [
       {
-        mark: { type: 'rect', opacity: 0.85, cornerRadius: 2 },
+        mark: { type: useSingleRow ? 'rect' : 'bar', opacity: 0.85, cornerRadius: 2 },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           x2: { field: '_calc_end' },
-          ...(isMulti
-            ? { y: { field: 'level', type: 'ordinal', axis: null } }
-            : { y: { value: 2 }, y2: { value: 50 } }),
+          y: isMulti
+            ? { field: 'level', type: 'ordinal', scale: { domain: levels }, axis: null }
+            : useSingleRow
+            ? { value: 2 }
+            : { field: 'value', type: 'nominal', scale: { domain: uniqueLabels }, axis: null },
+          ...(useSingleRow ? { y2: { value: 50 } } : {}),
           color: { field: colorField, type: 'nominal', scale: colorScale, legend: null },
         },
       },
@@ -2654,6 +3002,139 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'pixel_box') {
     const colorScale = resolveColorScale(colorScheme, payloadType);
+    const boxLayers: Record<string, unknown>[] = [
+      {
+        transform: [
+          { calculate: 'datum.x + datum.width', as: 'x2' },
+          { calculate: 'datum.y + datum.height', as: 'y2' },
+        ],
+        mark: {
+          type: 'rect',
+          fillOpacity: hasConfidence && confidenceChannel === 'opacity'
+            ? undefined
+            : isDark ? 0.35 : 0.25,
+          strokeWidth: 2,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
+          x2: { field: 'x2' },
+          // Invert Y axis for image coordinates standard (top-left 0,0)
+          y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
+          y2: { field: 'y2' },
+          color: { field: 'value', type: 'nominal', title: 'Object Class', scale: colorScale },
+          stroke: { field: 'value', type: 'nominal', scale: colorScale },
+          ...(hasConfidence && confidenceChannel === 'opacity' ? {
+            opacity: { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] }, title: 'Confidence' }
+          } : {}),
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Object' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+            { field: 'x', type: 'quantitative', title: 'X' },
+            { field: 'y', type: 'quantitative', title: 'Y' },
+            { field: 'width', type: 'quantitative', title: 'Width' },
+            { field: 'height', type: 'quantitative', title: 'Height' },
+          ],
+        },
+      },
+    ];
+
+    // Top-edge confidence meter for pixel bounding boxes
+    if (hasConfidence && confidenceChannel !== 'none') {
+      boxLayers.push(
+        // Meter background track
+        {
+          transform: [
+            { filter: 'datum.confidence != null' },
+            { calculate: 'datum.x + datum.width', as: 'x2' },
+            { calculate: 'datum.y + max(4, min(10, datum.height * 0.15))', as: '_pixel_meter_bottom' },
+          ],
+          mark: { type: 'rect', fill: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.75)', cornerRadius: 1 },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            x2: { field: 'x2' },
+            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+            y2: { field: '_pixel_meter_bottom' },
+          },
+        },
+        // Active confidence meter fill
+        {
+          transform: [
+            { filter: 'datum.confidence != null' },
+            { calculate: 'datum.x + datum.width * (datum.confidence != null ? datum.confidence : 1.0)', as: '_pixel_conf_end' },
+            { calculate: 'datum.y + max(4, min(10, datum.height * 0.15))', as: '_pixel_meter_bottom' },
+          ],
+          mark: { type: 'rect', fill: isDark ? '#38bdf8' : '#0284c7', cornerRadius: 1 },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            x2: { field: '_pixel_conf_end' },
+            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+            y2: { field: '_pixel_meter_bottom' },
+          },
+        }
+      );
+    }
+
+    if (showLabels) {
+      boxLayers.push(
+        // Halo backdrop for 100% legibility
+        {
+          transform: [
+            {
+              calculate: hasConfidence
+                ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
+                : "datum.value",
+              as: '_box_label',
+            },
+          ],
+          mark: {
+            type: 'text',
+            align: 'left',
+            baseline: 'top',
+            dx: 4,
+            dy: 4,
+            fontSize: 10,
+            fontWeight: 'bold',
+            fill: 'transparent',
+            stroke: 'rgba(0,0,0,0.85)',
+            strokeWidth: 3,
+            strokeJoin: 'round',
+          },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+            text: { field: '_box_label', type: 'nominal' },
+          },
+        },
+        // Crisp foreground label with classification + confidence percentage
+        {
+          transform: [
+            {
+              calculate: hasConfidence
+                ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
+                : "datum.value",
+              as: '_box_label',
+            },
+          ],
+          mark: {
+            type: 'text',
+            align: 'left',
+            baseline: 'top',
+            dx: 4,
+            dy: 4,
+            fontSize: 10,
+            fontWeight: 'bold',
+            fill: '#ffffff',
+          },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+            text: { field: '_box_label', type: 'nominal' },
+          },
+        }
+      );
+    }
+
     return {
       $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
       width: chartWidth,
@@ -2662,32 +3143,7 @@ export function buildBoppVegaLiteSpec(
       data: { values: data },
       transform: transforms,
       config: baseConfig,
-      layer: [
-        {
-          transform: [
-            { calculate: 'datum.x + datum.width', as: 'x2' },
-            { calculate: 'datum.y + datum.height', as: 'y2' },
-          ],
-          mark: { type: 'rect', fillOpacity: isDark ? 0.35 : 0.25, strokeWidth: 2 },
-          ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-          encoding: {
-            x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
-            x2: { field: 'x2' },
-            // Invert Y axis for image coordinates standard (top-left 0,0)
-            y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
-            y2: { field: 'y2' },
-            color: { field: 'value', type: 'nominal', title: 'Object Class', scale: colorScale },
-            stroke: { field: 'value', type: 'nominal', scale: colorScale },
-            tooltip: [
-              { field: 'value', type: 'nominal', title: 'Object' },
-              { field: 'x', type: 'quantitative', title: 'X' },
-              { field: 'y', type: 'quantitative', title: 'Y' },
-              { field: 'width', type: 'quantitative', title: 'Width' },
-              { field: 'height', type: 'quantitative', title: 'Height' },
-            ],
-          },
-        },
-      ],
+      layer: boxLayers,
     };
   }
 
@@ -2696,6 +3152,31 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'time' && (payloadType === 'pitch_contour' || (payloadType as string) === 'note_hz')) {
     const layers: Record<string, unknown>[] = [];
+    const freqValues = data.map(d => Number(d.frequency ?? d.value)).filter(f => !isNaN(f) && f > 0);
+    const minFreq = freqValues.length ? Math.min(...freqValues) : 100;
+    const maxFreq = freqValues.length ? Math.max(...freqValues) : 1000;
+    const freqPad = Math.max(15, (maxFreq - minFreq) * 0.1);
+
+    // If likelihood confidence is present, add shaded activation likelihood baseline ribbon
+    if (hasConfidence && confidenceType === 'likelihood' && confidenceChannel !== 'none') {
+      layers.push({
+        transform: [
+          { filter: 'datum.confidence != null' },
+          { calculate: `${minFreq - freqPad}`, as: '_base_freq' },
+          { calculate: `${minFreq - freqPad} + (${maxFreq - minFreq + 2 * freqPad}) * 0.18 * datum.confidence`, as: '_conf_freq_top' },
+        ],
+        mark: {
+          type: 'area',
+          opacity: isDark ? 0.32 : 0.22,
+          color: isDark ? '#38bdf8' : '#0284c7',
+        },
+        encoding: {
+          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+          y: { field: '_base_freq', type: 'quantitative', scale: { domain: [minFreq - freqPad, maxFreq + freqPad], zero: false } },
+          y2: { field: '_conf_freq_top', type: 'quantitative' },
+        },
+      });
+    }
 
     // If variance confidence is present, add shaded 95% Confidence Interval error ribbon (±1.96σ)
     if (hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none') {
@@ -2705,8 +3186,8 @@ export function buildBoppVegaLiteSpec(
         ],
         mark: {
           type: 'area',
-          opacity: isDark ? 0.16 : 0.10,
-          color: isDark ? '#ffffff' : '#000000',
+          opacity: isDark ? 0.25 : 0.18,
+          color: isDark ? '#38bdf8' : '#0284c7',
         },
         encoding: {
           x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
@@ -2715,7 +3196,7 @@ export function buildBoppVegaLiteSpec(
         },
       });
 
-      // Whiskers and horizontal caps (Achromatic: white in dark mode, dark charcoal in light mode)
+      // Whiskers and horizontal caps (switch cleanly between dark cyan and crisp ocean blue)
       layers.push(...buildVarianceErrorBarLayers({
         xField: 'time',
         yField: 'frequency',
@@ -2723,7 +3204,7 @@ export function buildBoppVegaLiteSpec(
         upperField: 'frequency_ci_upper',
         isDark,
         capWidth: 8,
-        whiskerColor: isDark ? '#ffffff' : '#0f172a',
+        whiskerColor: isDark ? '#7dd3fc' : '#0284c7',
       }));
     }
 
@@ -2741,13 +3222,13 @@ export function buildBoppVegaLiteSpec(
       },
     });
 
-    // Sample points colored by voiced state
+    // Sample points colored by voiced state and modulated by likelihood confidence
     layers.push({
-      mark: { type: 'point', filled: true, size: 55 },
+      mark: { type: 'point', filled: true },
       ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
       encoding: {
         x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-        y: { field: 'frequency', type: 'quantitative', title: 'Fundamental Frequency F0 (Hz)', scale: { zero: false } },
+        y: { field: 'frequency', type: 'quantitative', title: 'Fundamental Frequency F0 (Hz)', scale: { domain: [minFreq - freqPad, maxFreq + freqPad], zero: false } },
         color: {
           field: 'voicing',
           type: 'nominal',
@@ -2757,11 +3238,20 @@ export function buildBoppVegaLiteSpec(
             labelExpr: "datum.value == 1 ? 'Voiced' : 'Unvoiced'",
           },
         },
+        opacity: hasConfidence && confidenceType === 'likelihood'
+          ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.25, 1.0] }, title: 'Tracking Likelihood' }
+          : { value: 1.0 },
+        size: hasConfidence && confidenceType === 'likelihood'
+          ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [25, 80] }, legend: null }
+          : { value: 55 },
         tooltip: [
           { field: 'time', type: 'quantitative', format: '.3f', title: 'Time (s)' },
           { field: 'frequency', type: 'quantitative', format: '.2f', title: 'Pitch F0 (Hz)' },
           { field: 'voicing', type: 'nominal', title: 'Voiced (1=yes, 0=no)' },
-          ...(hasConfidence ? [
+          ...(hasConfidence && confidenceType === 'likelihood' ? [
+            { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Model Likelihood' },
+          ] : []),
+          ...(hasConfidence && confidenceType === 'variance' ? [
             { field: 'confidence_variance', type: 'quantitative', format: '.2f', title: 'Variance (σ²)' },
             { field: 'confidence_std', type: 'quantitative', format: '.2f', title: 'Std Dev (σ Hz)' },
             { field: 'frequency_ci_lower', type: 'quantitative', format: '.2f', title: '95% CI Lower (Hz)' },
@@ -2781,11 +3271,17 @@ export function buildBoppVegaLiteSpec(
           type: 'line',
           interpolate: 'monotone',
           strokeWidth: 2,
-          color: isDark ? '#38bdf8' : '#0284c7',
+          stroke: isDark ? '#38bdf8' : '#0284c7',
+          fill: null,
         },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
-          y: { field: 'frequency', type: 'quantitative', scale: { zero: false }, axis: null },
+          y: {
+            field: 'frequency',
+            type: 'quantitative',
+            scale: { domain: [minFreq - freqPad, maxFreq + freqPad], zero: false },
+            axis: null,
+          },
         },
       },
     ];
@@ -3081,30 +3577,6 @@ export function buildBoppVegaLiteSpec(
                 { field: 'arousal', type: 'quantitative', format: '.3f', title: 'Arousal' },
                 ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' }] : []),
               ],
-            },
-          },
-          // Coordinate labels beside points
-          {
-            transform: [
-              {
-                calculate: "'(' + format(datum.valence, '.2f') + ', ' + format(datum.arousal, '.2f') + ')'",
-                as: 'point_coord_label',
-              },
-            ],
-            mark: {
-              type: 'text',
-              align: 'left',
-              baseline: 'bottom',
-              dx: 8,
-              dy: -6,
-              fontSize: 10,
-              fontWeight: 'bold',
-              fill: textColor,
-            },
-            encoding: {
-              x: { field: 'valence', type: 'quantitative' },
-              y: { field: 'arousal', type: 'quantitative' },
-              text: { field: 'point_coord_label', type: 'nominal' },
             },
           },
         ],
@@ -3481,7 +3953,9 @@ export function buildBoppVegaLiteSpec(
           ],
           mark: {
             type: 'text',
-            dy: -12,
+            align: 'left',
+            dx: 6,
+            dy: -10,
             fontSize: 10.5,
             fontWeight: 'bold',
             fill: textFill,
@@ -3692,13 +4166,14 @@ export function buildBoppVegaLiteSpec(
   const fallbackOverviewLayers = [
     isInterval
       ? {
-          mark: { type: 'rect', opacity: 0.65, cornerRadius: 2 },
+          mark: useSingleRow ? { type: 'rect', opacity: 0.75, cornerRadius: 2 } : { type: 'bar', opacity: 0.75, cornerRadius: 2 },
           encoding: {
             x: { field: xField, type: 'quantitative' },
             x2: { field: '_calc_end' },
-            y: { value: 2 },
-            y2: { value: 50 },
-            color: { field: 'value', type: 'nominal', legend: null },
+            ...(useSingleRow
+              ? { y: { value: 2 }, y2: { value: 50 } }
+              : { y: { field: 'value', type: 'nominal', axis: null } }),
+            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
           },
         }
       : {

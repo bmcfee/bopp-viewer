@@ -122,6 +122,7 @@ export function buildIntervalConfidenceLayers(params: {
   yTop?: number;
   yBottom?: number;
   meterHeight?: number;
+  showTextLabels?: boolean;
 }): Record<string, unknown>[] {
   const {
     xField,
@@ -134,6 +135,7 @@ export function buildIntervalConfidenceLayers(params: {
     yTop = 8,
     yBottom = chartHeight - 60,
     meterHeight = 12,
+    showTextLabels = false,
   } = params;
 
   if (channelMode === 'none' || channelMode === 'opacity') {
@@ -192,6 +194,7 @@ export function buildIntervalConfidenceLayers(params: {
       mark: {
         type: 'rect',
         cornerRadius: 2,
+        fill: isDark ? '#38bdf8' : '#0284c7',
         stroke: isDark ? '#ffffff' : '#09090b',
         strokeWidth: 0.5,
       },
@@ -200,17 +203,6 @@ export function buildIntervalConfidenceLayers(params: {
         x2: { field: '_conf_meter_end' },
         y: { value: yTop + 2 },
         y2: { value: yTop + meterHeight - 2 },
-        color: {
-          field: 'confidence',
-          type: 'quantitative',
-          scale: {
-            domain: [0, 0.5, 0.8, 1.0],
-            range: isDark
-              ? ['#52525b', '#a1a1aa', '#e4e4e7', '#ffffff']
-              : ['#a1a1aa', '#52525b', '#27272a', '#09090b'],
-          },
-          legend: null,
-        },
         tooltip: [
           { field: 'value', type: 'nominal', title: 'Annotation' },
           {
@@ -226,46 +218,48 @@ export function buildIntervalConfidenceLayers(params: {
       },
     });
 
-    // 3. Agreement / Confidence Text Glyphs overlay for visible intervals
-    layers.push({
-      transform: [
-        { filter: `datum.confidence != null && (datum.${durField} == null || datum.${durField} >= 0.25)` },
-        {
-          calculate: `datum.${xField} + (datum.${durField} != null ? datum.${durField} / 2 : 0)`,
-          as: '_badge_x_mid',
-        },
-        {
-          calculate: confidenceType === 'agreement'
-            ? "datum.agreement_ratio_str != null ? (datum.n_annotators >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
-            : "round(datum.confidence * 100) + '%'",
-          as: '_badge_label',
-        },
-      ],
-      mark: {
-        type: 'text',
-        align: 'center',
-        baseline: 'top',
-        dy: meterHeight + 3,
-        fontSize: 10,
-        fontWeight: 'bold',
-        fill: isDark ? '#ffffff' : '#09090b',
-        font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        clip: true,
-        limit: { expr: `max(0.001, (scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)` },
-      },
-      encoding: {
-        x: { field: '_badge_x_mid', type: 'quantitative' },
-        y: { value: yTop },
-        text: {
-          condition: {
-            test: `((scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 16`,
-            value: '',
+    // 3. Agreement / Confidence Text Glyphs overlay for visible intervals (only if explicitly enabled to prevent cluttering patch tags)
+    if (showTextLabels) {
+      layers.push({
+        transform: [
+          { filter: `datum.confidence != null && (datum.${durField} == null || datum.${durField} >= 0.25)` },
+          {
+            calculate: `datum.${xField} + (datum.${durField} != null ? datum.${durField} / 2 : 0)`,
+            as: '_badge_x_mid',
           },
-          field: '_badge_label',
-          type: 'nominal',
+          {
+            calculate: confidenceType === 'agreement'
+              ? "datum.agreement_ratio_str != null ? (datum.n_annotators >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
+              : "round(datum.confidence * 100) + '%'",
+            as: '_badge_label',
+          },
+        ],
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'top',
+          dy: meterHeight + 3,
+          fontSize: 10,
+          fontWeight: 'bold',
+          fill: isDark ? '#ffffff' : '#09090b',
+          font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          clip: true,
+          limit: { expr: `max(0.001, (scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)` },
         },
-      },
-    });
+        encoding: {
+          x: { field: '_badge_x_mid', type: 'quantitative' },
+          y: { value: yTop },
+          text: {
+            condition: {
+              test: `((scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 16`,
+              value: '',
+            },
+            field: '_badge_label',
+            type: 'nominal',
+          },
+        },
+      });
+    }
   } else if (channelMode === 'height') {
     // Proportional Height Gauge: fills from bottom of interval block upwards by confidence ratio (Achromatic)
     layers.push({
@@ -324,6 +318,7 @@ export function buildInstantaneousConfidenceLayers(params: {
   confidenceType?: 'likelihood' | 'agreement' | 'variance';
   channelMode: ConfidenceChannelMode;
   yBaseline?: number;
+  showTextLabels?: boolean;
 }): Record<string, unknown>[] {
   const {
     xField,
@@ -332,6 +327,7 @@ export function buildInstantaneousConfidenceLayers(params: {
     confidenceType = 'likelihood',
     channelMode,
     yBaseline = chartHeight - 60,
+    showTextLabels = false,
   } = params;
 
   if (channelMode === 'none' || channelMode === 'opacity') {
@@ -353,7 +349,7 @@ export function buildInstantaneousConfidenceLayers(params: {
       ],
       mark: {
         type: 'rule',
-        strokeWidth: 2,
+        strokeWidth: 1.5,
         strokeCap: 'round',
       },
       encoding: {
@@ -374,7 +370,7 @@ export function buildInstantaneousConfidenceLayers(params: {
       },
     });
 
-    // 2. Head circle of the confidence pin (point) - Achromatic
+    // 2. Head circle of the confidence pin (point) - Sleek 32px point (approx 3.5px radius)
     layers.push({
       transform: [
         { filter: 'datum.confidence != null' },
@@ -385,9 +381,9 @@ export function buildInstantaneousConfidenceLayers(params: {
       ],
       mark: {
         type: 'circle',
-        size: 90,
+        size: 32,
         stroke: isDark ? '#000000' : '#ffffff',
-        strokeWidth: 1.5,
+        strokeWidth: 1,
       },
       encoding: {
         x: { field: xField, type: 'quantitative' },
@@ -419,36 +415,38 @@ export function buildInstantaneousConfidenceLayers(params: {
       },
     });
 
-    // 3. Agreement / Percent label above the pin (Achromatic text)
-    layers.push({
-      transform: [
-        { filter: 'datum.confidence != null' },
-        {
-          calculate: `${yBaseline} - ${maxHeight} * datum.confidence - 8`,
-          as: '_pin_y_text',
+    // 3. Agreement / Percent label above the pin (only if explicitly enabled to prevent crowding)
+    if (showTextLabels) {
+      layers.push({
+        transform: [
+          { filter: 'datum.confidence != null' },
+          {
+            calculate: `${yBaseline} - ${maxHeight} * datum.confidence - 8`,
+            as: '_pin_y_text',
+          },
+          {
+            calculate: confidenceType === 'agreement'
+              ? "datum.agreement_ratio_str != null ? (datum.n_annotators >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
+              : "round(datum.confidence * 100) + '%'",
+            as: '_pin_label',
+          },
+        ],
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'bottom',
+          fontSize: 9,
+          fontWeight: 'bold',
+          fill: isDark ? '#ffffff' : '#0f172a',
+          font: 'ui-monospace, monospace',
         },
-        {
-          calculate: confidenceType === 'agreement'
-            ? "datum.agreement_ratio_str != null ? (datum.n_annotators >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
-            : "round(datum.confidence * 100) + '%'",
-          as: '_pin_label',
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          y: { field: '_pin_y_text', type: 'quantitative' },
+          text: { field: '_pin_label', type: 'nominal' },
         },
-      ],
-      mark: {
-        type: 'text',
-        align: 'center',
-        baseline: 'bottom',
-        fontSize: 9.5,
-        fontWeight: 'bold',
-        fill: isDark ? '#ffffff' : '#0f172a',
-        font: 'ui-monospace, monospace',
-      },
-      encoding: {
-        x: { field: xField, type: 'quantitative' },
-        y: { field: '_pin_y_text', type: 'quantitative' },
-        text: { field: '_pin_label', type: 'nominal' },
-      },
-    });
+      });
+    }
   }
 
   return layers;

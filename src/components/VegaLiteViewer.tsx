@@ -82,11 +82,16 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const [enableOverviewBrush, setEnableOverviewBrush] = useState<boolean>(true);
   const [showLabels, setShowLabels] = useState<boolean>(true);
   const [enableZoomPan, setEnableZoomPan] = useState<boolean>(true);
-  const [forceMultiRow, setForceMultiRow] = useState<boolean>(false);
+  const [userMultiRowOverride, setUserMultiRowOverride] = useState<boolean | null>(null);
 
-  // Audio Playback & Media Linking
+  useEffect(() => {
+    setUserMultiRowOverride(null);
+  }, [annotation]);
+
   const audioPlayerRef = useRef<BoppAudioPlayer | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const isPlayingRef = useRef<boolean>(false);
+  isPlayingRef.current = isPlaying;
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [linkedMedia, setLinkedMedia] = useState<LinkedMedia | null>(null);
@@ -110,7 +115,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       setIsPlaying(false);
       setCurrentTime(0);
       setPlotBounds(null);
-      setForceMultiRow(false);
+      setUserMultiRowOverride(null);
     }
   }, [annotationUniqueKey, linkedMedia]);
 
@@ -135,6 +140,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   // Summary stats for metric indicators
   const stats = useMemo(() => computeSummaryStats(annotation, tabularData), [annotation, tabularData]);
   const intervalAnalysis = useMemo(() => analyzeIntervalAnnotation(annotation, tabularData), [annotation, tabularData]);
+  const defaultMultiRow = intervalAnalysis.isIntervalExtent ? !intervalAnalysis.isDisjoint : false;
+  const effectiveMultiRow = userMultiRowOverride !== null ? userMultiRowOverride : defaultMultiRow;
   const duration = linkedMedia?.duration || stats.duration || 10;
 
   // Measure container width dynamically from outer plot card with a deadband to eliminate loop warnings
@@ -142,6 +149,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     const cardEl = plotCardRef.current;
     if (!cardEl) return;
     const updateWidth = () => {
+      if (isPlayingRef.current) return; // Prevent container width recalculations and view resets during playback
       const el = plotCardRef.current;
       if (!el) return;
       const w = el.clientWidth;
@@ -404,13 +412,21 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       }
 
       const unit = brushStore?.[0]?.unit || 'concat_1';
-      const fields = brushStore?.[0]?.fields || [{ field: 'time', channel: 'x', type: 'R' }];
+      const actualXField = extentType?.includes('tick') || extentType?.includes('midi')
+        ? 'tick'
+        : extentType?.includes('quarter') || extentType?.includes('score')
+        ? 'quarter'
+        : 'time';
+      const fields = brushStore?.[0]?.fields || [{ field: actualXField, channel: 'x', type: 'R' }];
       const cs = vega.changeset().remove(() => true).insert([{
         unit,
         fields,
         values: [[nextStart, nextEnd]],
       }]);
       view.change('brush_store', cs);
+      try {
+        view.signal('brush', { [actualXField]: [nextStart, nextEnd] });
+      } catch {}
       view.runAsync().then(() => {
         updatePlayheadRef.current();
       });
@@ -425,19 +441,19 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     if (pType === 'key_mode') {
       const isInterval = eType?.includes('interval');
       if (isInterval) {
-        return forceMultiRow ? 520 : 220;
+        return effectiveMultiRow ? 340 : 220;
       }
       return 540;
     }
     if (pType === 'note_midi' || pType === 'piano_roll') return 460;
-    if (pType === 'chord') return 360;
+    if (pType === 'chord') return effectiveMultiRow ? 420 : 320;
     if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') {
-      return forceMultiRow ? 360 : 240;
+      return effectiveMultiRow ? 360 : 240;
     }
     if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
     if (!eType || eType === 'none') return 440;
-    return forceMultiRow ? 420 : 340;
-  }, [annotation.payload?.payload_type, annotation.extent?.extent_type, forceMultiRow]);
+    return effectiveMultiRow ? 420 : 340;
+  }, [annotation.payload?.payload_type, annotation.extent?.extent_type, effectiveMultiRow]);
 
   // Build the Vega-Lite specification - decoupled from currentTime to prevent view re-embedding during playback
   const vegaSpec = useMemo(() => {
@@ -452,7 +468,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       currentTime: null, // Playhead cursor is rendered via high-performance SVG overlay for glitch-free timeline zooming during playback
       chartWidth: containerWidth,
       chartHeight: optimalChartHeight,
-      forceMultiRow,
+      forceMultiRow: effectiveMultiRow,
     };
     return buildBoppVegaLiteSpec(annotation, tabularData, options);
   }, [
@@ -467,7 +483,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     showLabels,
     containerWidth,
     optimalChartHeight,
-    forceMultiRow,
+    effectiveMultiRow,
   ]);
 
   // Embed Vega-Lite into DOM
@@ -511,19 +527,21 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             svgOverlay.style.height = '100%';
             svgOverlay.style.pointerEvents = 'none';
             svgOverlay.style.zIndex = '25';
-            svgOverlay.style.overflow = 'visible';
+            svgOverlay.style.overflow = 'hidden';
 
             const dLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
             dLine.setAttribute('class', 'bopp-detail-playhead-line');
             dLine.setAttribute('stroke', isDark ? '#f87171' : '#ef4444');
             dLine.setAttribute('stroke-width', '2');
             dLine.setAttribute('stroke-dasharray', '4 2');
+            dLine.style.pointerEvents = 'none';
             dLine.style.display = 'none';
             svgOverlay.appendChild(dLine);
 
             const dHandle = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
             dHandle.setAttribute('class', 'bopp-detail-playhead-handle');
             dHandle.setAttribute('fill', isDark ? '#f87171' : '#ef4444');
+            dHandle.style.pointerEvents = 'none';
             dHandle.style.display = 'none';
             svgOverlay.appendChild(dHandle);
 
@@ -532,6 +550,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             oLine.setAttribute('stroke', isDark ? '#f87171' : '#ef4444');
             oLine.setAttribute('stroke-width', '2');
             oLine.setAttribute('stroke-opacity', '0.9');
+            oLine.style.pointerEvents = 'none';
             oLine.style.display = 'none';
             svgOverlay.appendChild(oLine);
 
@@ -1311,41 +1330,30 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
               {/* Interval Layout Continuity Badge & Toggle Button */}
               {intervalAnalysis.isIntervalExtent && (
-                intervalAnalysis.isDisjoint ? (
-                  <button
-                    type="button"
-                    onClick={() => setForceMultiRow(prev => !prev)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-mono font-medium transition-all shadow-2xs cursor-pointer ${
-                      forceMultiRow
-                        ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
-                        : 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
-                    }`}
-                    title={
-                      forceMultiRow
-                        ? 'Currently forced to Multi-Row (overlapping style). Click to switch to consolidated Single-Row display.'
-                        : 'Currently in consolidated Single-Row (disjoint style). Click to flip to Multi-Row display.'
-                    }
-                  >
-                    <Layers className="w-3 h-3 text-current" />
-                    <span className="font-semibold">
-                      {forceMultiRow ? 'Multi-Row (Overlapping)' : 'Single Row (Disjoint)'}
-                    </span>
-                    <span className="text-[10px] px-1 py-0.2 rounded bg-black/10 dark:bg-white/10 uppercase tracking-wider font-bold">
-                      Toggle
-                    </span>
-                  </button>
-                ) : (
-                  <div
-                    className="flex items-center gap-1.5 px-2 py-0.5 rounded border border-slate-300 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800 text-[11px] shadow-2xs font-mono select-none"
-                    title={`${intervalAnalysis.overlapCount} interval collisions detected: inherently rendered across distinct vertical rows`}
-                  >
-                    <span className="text-slate-500 dark:text-slate-400 font-semibold">axis:</span>
-                    <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-400 font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                      <span>Multi-Row ({intervalAnalysis.overlapCount} overlaps)</span>
-                    </span>
-                  </div>
-                )
+                <button
+                  type="button"
+                  onClick={() => setUserMultiRowOverride(!effectiveMultiRow)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-mono font-medium transition-all shadow-2xs cursor-pointer ${
+                    effectiveMultiRow
+                      ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
+                      : 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+                  }`}
+                  title={
+                    effectiveMultiRow
+                      ? 'Currently displayed in Multi-Row layout. Click to switch to Single-Row.'
+                      : 'Currently displayed in Single-Row layout. Click to switch to Multi-Row.'
+                  }
+                >
+                  <Layers className="w-3 h-3 text-current" />
+                  <span className="font-semibold">
+                    {effectiveMultiRow
+                      ? `Multi-Row${!intervalAnalysis.isDisjoint ? ` (${intervalAnalysis.overlapCount} overlaps)` : ''}`
+                      : 'Single Row (Consolidated)'}
+                  </span>
+                  <span className="text-[10px] px-1 py-0.2 rounded bg-black/10 dark:bg-white/10 uppercase tracking-wider font-bold">
+                    Toggle
+                  </span>
+                </button>
               )}
 
               {enableOverviewBrush && (
