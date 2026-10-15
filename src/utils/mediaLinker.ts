@@ -8,6 +8,7 @@
  */
 
 import type { BoppAnnotation } from '../types/bopp';
+import { noteNameToMidi } from './boppParser';
 
 export type LinkedMediaType = 'audio' | 'image' | null;
 
@@ -360,7 +361,12 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     let maxNoteEnd = 4.0;
 
     for (let k = 0; k < midiNotes.length; k++) {
-      const midi = typeof midiNotes[k] === 'number' ? midiNotes[k] : 60;
+      const rawNote = midiNotes[k];
+      const midi: number = typeof rawNote === 'number'
+        ? rawNote
+        : typeof rawNote === 'string'
+        ? (noteNameToMidi(rawNote) ?? 60)
+        : 60;
       const freq = 440 * Math.pow(2, (midi - 69) / 12);
       // Standard 480 PPQ @ 120 BPM: 960 ticks per sec
       const startSec = isMidiTicks ? (ticks[k] || 0) / 960 : (ticks[k] || 0);

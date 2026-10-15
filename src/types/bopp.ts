@@ -143,12 +143,12 @@ export interface MoodThayerPayload {
 
 export interface NoteHzPayload {
   payload_type: 'note_hz';
-  value: number[];
+  value: (number | string)[];
 }
 
 export interface NoteMidiPayload {
   payload_type: 'note_midi';
-  value: number[];
+  value: (number | string)[];
 }
 
 export interface ObjectPayload {

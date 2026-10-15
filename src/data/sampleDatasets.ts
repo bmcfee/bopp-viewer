@@ -243,6 +243,62 @@ const MOZART_SCORE_DATA: BoppAnnotation = {
   },
 };
 
+// Piano Roll with Categorical Note Names (C3, D3, E3, G3, A3, C4) on Numerical MIDI Axis
+const NOTE_NAMES_PIANOROLL_DATA: BoppAnnotation = {
+  media_id: "audio:scale_note_names_pianoroll",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "musicologist_01",
+    tool: "piano_roll_transcriber"
+  },
+  sandbox: {
+    piece: "Diatonic Motif (Note Names: C3, D3, E3, G3, A3, C4)",
+    description: "time_interval extent with note_midi string names demonstrating non-equidistant numerical pitch axis"
+  },
+  extent: {
+    extent_type: "time_interval",
+    time: [0.0, 0.6, 1.2, 1.8, 2.4, 3.0],
+    duration: [0.5, 0.5, 0.5, 0.5, 0.5, 0.8]
+  },
+  payload: {
+    payload_type: "note_midi",
+    value: ["C3", "D3", "E3", "G3", "A3", "C4"]
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.98, 0.95, 0.92, 0.96, 0.94, 0.99]
+  }
+};
+
+// Piano Roll with Note Frequencies in Hz (C3=130.81, D3=146.83, E3=164.81, G3=196.00, C4=261.63 Hz)
+const NOTE_HZ_PIANOROLL_DATA: BoppAnnotation = {
+  media_id: "audio:frequency_hz_pianoroll",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    annotator_id: "pyin_f0_segmenter",
+    tool: "audio_note_extractor"
+  },
+  sandbox: {
+    piece: "Acoustic Note Segments in Hz (Log Frequency Pitch Axis)",
+    description: "time_interval extent with note_hz payload: note pitches in Hz mapped to numerical log-frequency piano roll"
+  },
+  extent: {
+    extent_type: "time_interval",
+    time: [0.0, 0.6, 1.2, 1.8, 2.4, 3.0],
+    duration: [0.5, 0.5, 0.5, 0.5, 0.5, 0.8]
+  },
+  payload: {
+    payload_type: "note_hz",
+    value: [130.81, 146.83, 164.81, 196.00, 220.00, 261.63]
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.94, 0.91, 0.95, 0.93, 0.97, 0.96]
+  }
+};
+
 // Hierarchical Song Structure
 const sections = [
   { t: 0.0, d: 12.5, label: "Intro", level: 0, conf: 0.95 },
@@ -1666,6 +1722,30 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     extentType: "time_interval",
     payloadType: "note_midi",
     data: MOZART_DATA_NOCONF,
+  },
+  {
+    id: "interval_note_names_pianoroll",
+    filename: "time_intervals/17_note_names_pianoroll.bopp",
+    title: "Note Names Scale: C3, D3, E3 (Numerical Pitch)",
+    category: "music",
+    format: "json",
+    description: "time_interval extent with note_midi string names (C3, D3, E3...): numerical pitch axis reflects true semitone spacing.",
+    extentType: "time_interval",
+    payloadType: "note_midi",
+    confidenceType: "likelihood",
+    data: NOTE_NAMES_PIANOROLL_DATA,
+  },
+  {
+    id: "interval_note_hz_pianoroll",
+    filename: "time_intervals/18_note_hz_pianoroll.bopp",
+    title: "Note Frequencies (Hz): Piano Roll (Log Pitch)",
+    category: "music",
+    format: "json",
+    description: "time_interval extent with note_hz payload: note frequencies in Hz mapped to numerical log-frequency semitone axis.",
+    extentType: "time_interval",
+    payloadType: "note_hz",
+    confidenceType: "likelihood",
+    data: NOTE_HZ_PIANOROLL_DATA,
   },
 
   // =========================================================================

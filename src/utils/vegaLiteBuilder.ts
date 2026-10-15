@@ -8,7 +8,7 @@
  */
 
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
-import { annotationToTabular } from './boppParser';
+import { annotationToTabular, noteNameToMidi, hzToMidi, midiToHz, midiToNoteName } from './boppParser';
 import {
   chordToMirEvalColor,
   keyToMirEvalColor,
@@ -16,6 +16,7 @@ import {
   getKeyTonicRank,
   normalizeKeyName,
   parseKeyMode,
+  extractChordRoot,
   toUnicodeAccidentals,
   ALL_24_KEYS_TOP_TO_BOTTOM,
   FIFTHS_ORDER_12_ROOTS,
@@ -91,7 +92,7 @@ export function resolveColorScale(
     return { range: MIR_EVAL_COLORMAPS.fifths };
   }
 
-  if (payloadType === 'note_midi' || payloadType === 'hz' || payloadType === 'pitch_contour') {
+  if (payloadType === 'note_midi' || payloadType === 'note_hz' || payloadType === 'hz' || payloadType === 'pitch_contour' || payloadType === 'piano_roll') {
     if (isMirEvalPitch) {
       if (uniqueValues && uniqueValues.length > 0) {
         return {
@@ -1424,9 +1425,28 @@ export function buildBoppVegaLiteSpec(
       };
     });
 
-    const uniqueChordRows = Array.from(new Set(chordDataWithLanes.map(d => d._chord_row))).filter(Boolean);
-    const mainPlotHeight = enableOverviewBrush ? chartHeight - 80 : chartHeight - 40;
+    const getChordSemitone = (chordStr: string): number => {
+      const root = extractChordRoot(chordStr);
+      if (!root) return -1;
+      return CHROMATIC_ROOT_MAP[root] ?? -1;
+    };
 
+    const uniqueChordRows = Array.from(new Set(chordDataWithLanes.map(d => d._chord_row))).filter(Boolean);
+    uniqueChordRows.sort((a, b) => {
+      const semA = getChordSemitone(a);
+      const semB = getChordSemitone(b);
+      // 'N' or unparsed non-harmonic tags go to the bottom
+      if (semA === -1 && semB === -1) return a.localeCompare(b);
+      if (semA === -1) return 1;
+      if (semB === -1) return -1;
+      if (semA !== semB) {
+        // Chromatic pitch height: higher pitch at top (domain[0]), C at bottom
+        return semB - semA;
+      }
+      return a.localeCompare(b);
+    });
+
+    const mainPlotHeight = enableOverviewBrush ? chartHeight - 80 : chartHeight - 40;
     const patchStroke = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(15,23,42,0.65)';
 
     const rectEncoding: Record<string, unknown> = {
@@ -1442,6 +1462,7 @@ export function buildBoppVegaLiteSpec(
             field: '_chord_row',
             type: 'nominal',
             title: 'Chord',
+            sort: uniqueChordRows,
             scale: { domain: uniqueChordRows },
             axis: {
               labelFontWeight: 'bold',
@@ -1588,7 +1609,7 @@ export function buildBoppVegaLiteSpec(
             encoding: {
               x: { field: xField, type: 'quantitative' },
               x2: { field: '_calc_end' },
-              y: { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows } },
+              y: { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } },
               yOffset: { value: -10 },
             },
           },
@@ -1607,7 +1628,7 @@ export function buildBoppVegaLiteSpec(
             encoding: {
               x: { field: xField, type: 'quantitative' },
               x2: { field: '_chord_conf_end' },
-              y: { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows } },
+              y: { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } },
               yOffset: { value: -10 },
             },
           }
@@ -1620,7 +1641,7 @@ export function buildBoppVegaLiteSpec(
         const chordTestExpr = `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 10`;
 
         const yTextEncoding = shouldMultiRow
-          ? { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows } }
+          ? { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } }
           : { value: mainPlotHeight / 2 + 10 };
 
         // 1. Halo backing layer
@@ -1723,7 +1744,7 @@ export function buildBoppVegaLiteSpec(
             encoding: {
               x: { field: xField, type: 'quantitative' },
               x2: { field: '_calc_end' },
-              y: shouldMultiRow ? { field: '_chord_row', type: 'nominal', scale: { domain: uniqueChordRows }, axis: null } : { value: 2 },
+              y: shouldMultiRow ? { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows }, axis: null } : { value: 2 },
               ...(shouldMultiRow ? {} : { y2: { value: 52 } }),
               color: { field: '_display_value', type: 'nominal', legend: null, scale: chordColorScale },
             },
@@ -1800,9 +1821,19 @@ export function buildBoppVegaLiteSpec(
     const orderedKeysInPiece = [...uniqueKeysInPiece].sort((a, b) => {
       const pa = parseKeyMode(a);
       const pb = parseKeyMode(b);
-      const semA = pa ? pa.semitone : 0;
-      const semB = pb ? pb.semitone : 0;
-      return semA - semB;
+      const semA = pa ? pa.semitone : -1;
+      const semB = pb ? pb.semitone : -1;
+      if (semA === -1 && semB === -1) return a.localeCompare(b);
+      if (semA === -1) return 1;
+      if (semB === -1) return -1;
+      if (semA !== semB) {
+        // Chromatic pitch height: higher semitone at top (domain[0]), C at bottom
+        return semB - semA;
+      }
+      const minA = pa?.isMinor ? 1 : 0;
+      const minB = pb?.isMinor ? 1 : 0;
+      if (minA !== minB) return minA - minB;
+      return a.localeCompare(b);
     });
     // In multi-row mode, scale domain ONLY to keys in the piece to avoid 20+ empty rows!
     const keyDomain = orderedKeysInPiece.length > 0 ? orderedKeysInPiece : ALL_24_KEYS_TOP_TO_BOTTOM;
@@ -1848,6 +1879,7 @@ export function buildBoppVegaLiteSpec(
             field: yField,
             type: yType,
             title: yTitle,
+            sort: keyDomain,
             scale: { domain: keyDomain },
             axis: {
               labelFontWeight: 'bold',
@@ -2053,6 +2085,7 @@ export function buildBoppVegaLiteSpec(
             field: yField,
             type: 'nominal',
             title: 'Tonic Pitch',
+            sort: keyDomain,
             scale: { domain: keyDomain },
             axis: {
               labelFontWeight: 'bold',
@@ -2088,7 +2121,7 @@ export function buildBoppVegaLiteSpec(
         encoding: {
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
           color: { field: '_color_tonic', type: 'nominal', scale: null },
           opacity: hasConfidence && confidenceChannel === 'opacity'
             ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
@@ -2108,7 +2141,7 @@ export function buildBoppVegaLiteSpec(
         encoding: {
           x: { field: xField, type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
           color: {
             condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
             field: '_color_tonic',
@@ -2134,7 +2167,7 @@ export function buildBoppVegaLiteSpec(
           encoding: {
             x: { field: xField, type: 'quantitative' },
             x2: { field: '_calc_end' },
-            y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+            y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
             yOffset: { value: -halfHeight + 3 },
           },
         });
@@ -2152,7 +2185,7 @@ export function buildBoppVegaLiteSpec(
           encoding: {
             x: { field: xField, type: 'quantitative' },
             x2: { field: '_conf_end' },
-            y: { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+            y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
             yOffset: { value: -halfHeight + 3 },
           },
         });
@@ -2215,7 +2248,7 @@ export function buildBoppVegaLiteSpec(
         },
         encoding: {
           x: { field: 'x_mid', type: 'quantitative' },
-          y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
           text: {
             condition: textCondition,
             field: '_display_value',
@@ -2453,11 +2486,13 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 3. NOTE_MIDI (Piano Roll)
+  // 3. NOTE_MIDI & NOTE_HZ (Piano Roll)
   // Unit height note bars centered on the MIDI pitch number with opaque boxes!
-  // Colors matched to mir_eval palette by pitch class (C=0 .. B=11)
+  // Axis is strictly NUMERICAL (quantitative), never categorical, reflecting true
+  // semitone spacing from note names to MIDI numbers (and thus to log frequency).
+  // Colors matched to mir_eval palette by pitch class (C=0 .. B=11).
   // =========================================================================
-  if (payloadType === 'note_midi') {
+  if (payloadType === 'note_midi' || payloadType === 'note_hz' || (payloadType as string) === 'piano_roll') {
     const isMidi = extentType?.includes('midi') || extentType?.includes('tick') || (data.length > 0 && typeof data[0].tick === 'number');
     const isScore = extentType?.includes('score') || extentType?.includes('quarter') || (data.length > 0 && typeof data[0].quarter === 'number');
     const xField = isMidi ? 'tick' : isScore ? 'quarter' : 'time';
@@ -2467,9 +2502,47 @@ export function buildBoppVegaLiteSpec(
     // mir_eval exact pitch class colors: 12 elements for semitones 0 (C) through 11 (B)
     const pitchClassColors = isPitchScheme ? MIR_EVAL_COLORMAPS.pitch : MIR_EVAL_COLORMAPS.fifths;
 
+    // Normalize each record so that datum.value is strictly a numerical MIDI note number
+    // Even if the input provided string note names ("C3", "D3", "E3") or frequencies in Hz
+    const enrichedNoteData = data.map(d => {
+      let numericMidi = typeof d.value === 'number' && payloadType !== 'note_hz' ? d.value : null;
+      let hzVal = typeof d.hz === 'number' ? d.hz : (typeof d.value === 'number' && payloadType === 'note_hz' ? d.value : null);
+      let noteName = d.note_name ? String(d.note_name) : null;
+
+      // If string note name provided (e.g. "C3", "D3", "E3")
+      if (numericMidi === null && typeof d.value === 'string') {
+        numericMidi = noteNameToMidi(d.value);
+        if (numericMidi !== null && !noteName) {
+          noteName = d.value.trim();
+        }
+      }
+      // If frequency in Hz provided
+      if (numericMidi === null && hzVal !== null && hzVal > 0) {
+        numericMidi = hzToMidi(hzVal);
+      }
+      if (numericMidi !== null && !noteName) {
+        noteName = midiToNoteName(numericMidi);
+      }
+      if (numericMidi !== null && hzVal === null) {
+        hzVal = midiToHz(numericMidi);
+      }
+
+      const finalMidi = numericMidi ?? (typeof d.value === 'number' ? d.value : 60);
+      const roundedPc = ((Math.round(finalMidi) % 12) + 12) % 12;
+
+      return {
+        ...d,
+        value: finalMidi,
+        midi_pitch: Math.round(finalMidi * 100) / 100,
+        hz: hzVal ? Math.round(hzVal * 10) / 10 : null,
+        note_name: noteName ?? midiToNoteName(finalMidi),
+        pitch_class: roundedPc,
+        pitch_class_name: ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'][roundedPc],
+      };
+    });
+
     // Internal transforms for unit-height centered notes:
-    // Centered on datum.value: spans [datum.value - 0.5, datum.value + 0.5], unit height = 1.0!
-    // Internal calculate for interval end and pitch class:
+    // Centered on datum.value: spans [datum.value - 0.5, datum.value + 0.5], unit height = 1.0 semitone!
     transforms.push(
       { calculate: 'datum.value - 0.5', as: 'y_min' },
       { calculate: 'datum.value + 0.5', as: 'y_max' },
@@ -2477,6 +2550,45 @@ export function buildBoppVegaLiteSpec(
       { calculate: '((floor(datum.value) % 12) + 12) % 12', as: 'pitch_class' },
       { calculate: "['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][((floor(datum.value) % 12) + 12) % 12]", as: 'pitch_class_name' }
     );
+
+    const pitchValues = enrichedNoteData.map(d => Number(d.value)).filter(v => !isNaN(v));
+    const minPitch = pitchValues.length ? Math.min(...pitchValues) : 48;
+    const maxPitch = pitchValues.length ? Math.max(...pitchValues) : 84;
+    const minInt = Math.floor(minPitch);
+    const maxInt = Math.ceil(maxPitch);
+    const span = maxInt - minInt;
+    const uniquePitches = Array.from(new Set(pitchValues.map(p => Math.round(p)))).sort((a, b) => a - b);
+
+    // Build numerical axis tick positions reflecting true musical semitone distances:
+    // C3 (48), D3 (50), E3 (52) are NOT equidistant: distance(C3, D3) = 2, distance(D3, E3) = 2, distance(E3, F3) = 1!
+    const tickSet = new Set<number>();
+    if (span <= 28) {
+      // Small range: show every semitone integer
+      for (let m = minInt; m <= maxInt; m++) {
+        tickSet.add(m);
+      }
+    } else if (span <= 52) {
+      // Medium range: show all natural notes (white keys) plus active notes in piece
+      for (let m = minInt; m <= maxInt; m++) {
+        const pc = ((m % 12) + 12) % 12;
+        if ([0, 2, 4, 5, 7, 9, 11].includes(pc)) {
+          tickSet.add(m);
+        }
+      }
+    } else {
+      // Wide range: show all octave C notes plus active notes in piece
+      for (let m = minInt; m <= maxInt; m++) {
+        const pc = ((m % 12) + 12) % 12;
+        if (pc === 0 || pc === 7) {
+          tickSet.add(m);
+        }
+      }
+    }
+    // Always include any note pitches present in the piece so their categorical tick labels align exactly
+    for (const p of uniquePitches) {
+      tickSet.add(p);
+    }
+    const tickValues = Array.from(tickSet).sort((a, b) => a - b);
 
     const layers: Record<string, unknown>[] = [
       {
@@ -2495,11 +2607,21 @@ export function buildBoppVegaLiteSpec(
           y: {
             field: 'y_min',
             type: 'quantitative',
-            title: 'Pitch / Note',
-            scale: { zero: false, padding: 8 },
+            title: payloadType === 'note_hz' ? 'Pitch (Note / Log Hz)' : 'Pitch / Note',
+            scale: {
+              domain: [minPitch - 1.5, maxPitch + 1.5],
+              zero: false,
+              padding: 4,
+            },
             axis: {
               tickMinStep: 1,
-              labelExpr: "['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][datum.value % 12] + (floor(datum.value / 12) - 1) + ' (' + datum.value + ')'",
+              values: tickValues,
+              labelExpr: "['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'][((round(datum.value) % 12) + 12) % 12] + (floor(round(datum.value) / 12) - 1)",
+              labelFontWeight: 'bold',
+              labelFontSize: 10,
+              titlePadding: 14,
+              labelPadding: 8,
+              minExtent: 65,
             },
           },
           y2: { field: 'y_max' },
@@ -2520,9 +2642,12 @@ export function buildBoppVegaLiteSpec(
           tooltip: [
             { field: 'note_name', type: 'nominal', title: 'Note' },
             { field: 'pitch_class_name', type: 'nominal', title: 'Pitch Class' },
-            { field: 'value', type: 'quantitative', title: 'MIDI Pitch' },
-            { field: xField, type: 'quantitative', format: '.2f', title: 'Start' },
-            { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration' },
+            { field: 'value', type: 'quantitative', format: '.1f', title: 'MIDI Pitch' },
+            ...(payloadType === 'note_hz' || enrichedNoteData.some(d => d.hz != null)
+              ? [{ field: 'hz', type: 'quantitative', format: '.1f', title: 'Frequency (Hz)' }]
+              : []),
+            { field: xField, type: 'quantitative', format: isScore ? '.2f' : isMidi ? 'd' : '.2f', title: 'Start' },
+            { field: 'duration', type: 'quantitative', format: isScore ? '.2f' : isMidi ? 'd' : '.2f', title: 'Duration' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
           ],
         },
@@ -2614,11 +2739,14 @@ export function buildBoppVegaLiteSpec(
     }
 
     const cursor = makeCursorLayer(xField);
-    const pianoTitle = { text: `BOPP MIDI Piano Roll: ${annotation.media_id}`, color: textColor };
-    
-    const pitchValues = data.map(d => Number(d.value)).filter(v => !isNaN(v));
-    const minPitch = pitchValues.length ? Math.min(...pitchValues) : 48;
-    const maxPitch = pitchValues.length ? Math.max(...pitchValues) : 84;
+    const pianoTitle = {
+      text: payloadType === 'note_hz'
+        ? `BOPP Note Piano Roll (Hz / Log Pitch): ${annotation.media_id}`
+        : `BOPP MIDI Piano Roll: ${annotation.media_id}`,
+      subtitle: 'Numerical Pitch Axis (Semitone Spacing / Log Frequency) · mir_eval Pitch Class Colors',
+      color: textColor,
+      subtitleColor: axisColor,
+    };
 
     const overviewLayers = [
       {
@@ -2644,7 +2772,7 @@ export function buildBoppVegaLiteSpec(
     ];
 
     return composeTimelineSpecWithOverview({
-      data,
+      data: enrichedNoteData,
       transforms,
       detailLayers: layers,
       overviewLayers,
@@ -3150,7 +3278,7 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   // 7. TIME + PITCH_CONTOUR (Continuous F0 vocal/instrument melody)
   // =========================================================================
-  if (extentType === 'time' && (payloadType === 'pitch_contour' || (payloadType as string) === 'note_hz')) {
+  if (extentType === 'time' && payloadType === 'pitch_contour') {
     const layers: Record<string, unknown>[] = [];
     const freqValues = data.map(d => Number(d.frequency ?? d.value)).filter(f => !isNaN(f) && f > 0);
     const minFreq = freqValues.length ? Math.min(...freqValues) : 100;

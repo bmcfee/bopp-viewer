@@ -6,7 +6,7 @@
  */
 
 import { decode as decodeMsgpack, encode as encodeMsgpack } from '@msgpack/msgpack';
-import { normalizeKeyName } from './mirEvalColors';
+import { normalizeKeyName, toAsciiAccidentals } from './mirEvalColors';
 import type {
   BoppAnnotation,
   BoppExtent,
@@ -179,14 +179,51 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
         record.valence = payload.valence?.[i];
         record.arousal = payload.arousal?.[i];
         break;
-      case 'note_hz':
-        record.value = payload.value?.[i];
-        break;
-      case 'note_midi': {
-        const midi = payload.value?.[i];
-        record.value = midi;
+      case 'note_hz': {
+        const raw = payload.value?.[i];
+        let hz: number | null = null;
+        let midi: number | null = null;
+        if (typeof raw === 'number') {
+          hz = raw;
+          midi = hzToMidi(raw);
+        } else if (typeof raw === 'string') {
+          const parsedMidi = noteNameToMidi(raw);
+          if (parsedMidi !== null) {
+            midi = parsedMidi;
+            hz = midiToHz(parsedMidi);
+          } else {
+            const num = parseFloat(raw);
+            if (!isNaN(num) && num > 0) {
+              hz = num;
+              midi = hzToMidi(num);
+            }
+          }
+        }
+        record.value = midi ?? hz ?? raw;
+        record.hz = hz ?? (typeof midi === 'number' ? midiToHz(midi) : null);
+        record.midi = midi;
         if (typeof midi === 'number') {
           record.note_name = midiToNoteName(midi);
+        } else if (typeof raw === 'string') {
+          record.note_name = raw;
+        }
+        break;
+      }
+      case 'note_midi': {
+        const raw = payload.value?.[i];
+        let midi: number | null = null;
+        if (typeof raw === 'number') {
+          midi = raw;
+        } else if (typeof raw === 'string') {
+          midi = noteNameToMidi(raw);
+        }
+        record.value = midi ?? raw;
+        record.midi = midi;
+        if (typeof midi === 'number') {
+          record.note_name = midiToNoteName(midi);
+          record.hz = midiToHz(midi);
+        } else if (typeof raw === 'string') {
+          record.note_name = raw;
         }
         break;
       }
@@ -336,6 +373,62 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
   }
 
   return records;
+}
+
+/**
+ * Maps musical note name string (e.g. 'C3', 'D#4', 'Eb2', 'C♯3') to MIDI note number (0..127).
+ * If already a number, returns the number.
+ */
+export function noteNameToMidi(noteName: string | number | null | undefined): number | null {
+  if (typeof noteName === 'number') {
+    return isFinite(noteName) ? noteName : null;
+  }
+  if (!noteName || typeof noteName !== 'string') return null;
+
+  const cleaned = toAsciiAccidentals(noteName.trim());
+  const match = cleaned.match(/^([A-Ga-g])([b#]?)(-?\d+)?$/);
+  if (!match) {
+    const num = parseFloat(cleaned);
+    return isFinite(num) ? num : null;
+  }
+
+  const rootChar = match[1].toUpperCase();
+  const acc = match[2] || '';
+  const octaveStr = match[3];
+  const octave = octaveStr !== undefined ? parseInt(octaveStr, 10) : 4;
+
+  const semitones: Record<string, number> = {
+    C: 0, 'C#': 1, Db: 1,
+    D: 2, 'D#': 3, Eb: 3,
+    E: 4,
+    F: 5, 'F#': 6, Gb: 6,
+    G: 7, 'G#': 8, Ab: 8,
+    A: 9, 'A#': 10, Bb: 10,
+    B: 11,
+  };
+
+  const key = rootChar + acc;
+  const semitone = semitones[key];
+  if (semitone === undefined) return null;
+
+  return (octave + 1) * 12 + semitone;
+}
+
+/**
+ * Converts frequency in Hz to fractional MIDI note number.
+ * e.g. 440 Hz -> 69.0 (A4), 261.63 Hz -> 60.0 (C4), 130.81 Hz -> 48.0 (C3).
+ */
+export function hzToMidi(hz: number | null | undefined): number | null {
+  if (typeof hz !== 'number' || isNaN(hz) || hz <= 0) return null;
+  return 69 + 12 * Math.log2(hz / 440);
+}
+
+/**
+ * Converts MIDI note number to frequency in Hz.
+ * e.g. 69 -> 440 Hz, 60 -> 261.63 Hz, 48 -> 130.81 Hz.
+ */
+export function midiToHz(midi: number): number {
+  return 440 * Math.pow(2, (midi - 69) / 12);
 }
 
 /**

@@ -507,9 +507,11 @@ export function extractChordRoot(chordStr: string): string | null {
   if (!chordStr || chordStr === "N" || chordStr === "X") {
     return null;
   }
-  const asciiChord = toAsciiAccidentals(chordStr);
-  const match = asciiChord.match(/^([A-G][b#]?)/);
-  return match ? match[1] : null;
+  const asciiChord = toAsciiAccidentals(chordStr.trim());
+  const match = asciiChord.match(/^([A-Ga-g][b#]?)/);
+  if (!match) return null;
+  const raw = match[1];
+  return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
 }
 
 /**
