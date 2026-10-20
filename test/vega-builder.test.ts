@@ -364,7 +364,43 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
       }
     }
   });
+
+  await t.test('12. Global genres/tags with no confidence render as an alphabetized collection of badges', () => {
+    const globalNoConf = SAMPLE_DATASETS.find(d => d.id === 'global_tags_noconf')!;
+    const tabular = annotationToTabular(globalNoConf.data);
+    const spec = buildBoppVegaLiteSpec(globalNoConf.data, tabular, {
+      chartWidth: 760,
+      isDark: true,
+    }) as any;
+
+    assert.ok(spec, 'Spec must be generated for global tags without confidence');
+    assert.strictEqual(spec.$schema, 'https://vega.github.io/schema/vega-lite/v5.json');
+    assert.ok(spec.title?.text?.includes('Global Genres & Tags'), 'Title should reflect global genres/tags');
+    assert.ok(spec.title?.subtitle?.includes('Alphabetized'), 'Subtitle should indicate alphabetized collection');
+
+    // Values must be strictly alphabetized
+    const values = spec.data?.values;
+    assert.ok(Array.isArray(values), 'Spec data values must be an array');
+    assert.strictEqual(values.length, 6, 'Must include all 6 tags');
+    const tags = values.map((v: any) => v.value);
+    const sorted = [...tags].sort((a, b) => a.localeCompare(b));
+    assert.deepStrictEqual(tags, sorted, 'Tags must be strictly alphabetized');
+
+    // Marks must render badge pills, accent dots, and text labels (no quantitative axis or redundant bar charts)
+    assert.ok(spec.layer, 'Spec must have layers');
+    const rectMark = spec.layer.find((l: any) => l.mark?.type === 'rect' && l.mark?.cornerRadius > 0);
+    assert.ok(rectMark, 'Must include rounded rect mark for badge cards');
+    const textMark = spec.layer.find((l: any) => l.mark?.type === 'text');
+    assert.ok(textMark, 'Must include text mark for badge labels');
+
+    // Vega compilation verification
+    const compiled = vl.compile(spec);
+    assert.doesNotThrow(() => {
+      parseVega(compiled.spec);
+    }, 'Vega parser failed for global tags badge spec');
+  });
 });
+
 
 
 

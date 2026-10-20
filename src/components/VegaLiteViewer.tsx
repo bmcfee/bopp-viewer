@@ -31,6 +31,9 @@ import {
   Maximize2,
   ChevronLeft,
   ChevronRight,
+  Tag,
+  Copy,
+  Check,
 } from 'lucide-react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import { buildBoppVegaLiteSpec, VegaLiteBuilderOptions } from '../utils/vegaLiteBuilder';
@@ -101,6 +104,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [compatibilityNotice, setCompatibilityNotice] = useState<string | null>(null);
   const [showSpectrogram, setShowSpectrogram] = useState<boolean>(true);
+  const [badgeSearchQuery, setBadgeSearchQuery] = useState<string>('');
+  const [copiedBadges, setCopiedBadges] = useState<boolean>(false);
 
   // Media link should reset when swapping out annotation data
   const annotationUniqueKey = `${annotation.id ?? ''}_${annotation.media_id ?? ''}_${annotation.payload?.payload_type ?? ''}_${annotation.extent?.extent_type ?? 'none'}`;
@@ -118,6 +123,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       setCurrentTime(0);
       setPlotBounds(null);
       setUserMultiRowOverride(null);
+      setBadgeSearchQuery('');
     }
   }, [annotationUniqueKey, linkedMedia]);
 
@@ -127,6 +133,29 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const extentType = annotation.extent?.extent_type;
   const payloadType = annotation.payload.payload_type;
   const isDark = theme === 'dark';
+
+  // Identify global genres / tags without confidence rating
+  const isGlobalNoConfGenres = useMemo(() => {
+    const isGlobal = !extentType || (extentType as string) === 'none';
+    const isTag = payloadType === 'tag_open' || (payloadType as string) === 'genre' || (payloadType as string) === 'tag';
+    const hasConf = Boolean(annotation.confidence?.confidence_type) && tabularData.some(d => typeof d.confidence === 'number');
+    return isGlobal && isTag && !hasConf;
+  }, [extentType, payloadType, annotation.confidence?.confidence_type, tabularData]);
+
+  const filteredTabularData = useMemo(() => {
+    if (!isGlobalNoConfGenres || !badgeSearchQuery.trim()) return tabularData;
+    const q = badgeSearchQuery.trim().toLowerCase();
+    return tabularData.filter(d => String(d.value ?? '').toLowerCase().includes(q));
+  }, [isGlobalNoConfGenres, badgeSearchQuery, tabularData]);
+
+  const handleCopyAllBadges = useCallback(() => {
+    const sortedTags = [...filteredTabularData]
+      .map(d => String(d.value ?? ''))
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }));
+    navigator.clipboard.writeText(sortedTags.join(', '));
+    setCopiedBadges(true);
+    setTimeout(() => setCopiedBadges(false), 2000);
+  }, [filteredTabularData]);
 
   // Check if sonification is functionally meaningful for this payload
   const canSonify = useMemo(
@@ -586,12 +615,20 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     if (pType === 'note_midi' || pType === 'piano_roll') return 460;
     if (pType === 'chord') return effectiveMultiRow ? 420 : 320;
     if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') {
+      if (!eType || eType === 'none') {
+        if (isGlobalNoConfGenres) {
+          const numCols = Math.max(1, Math.min(filteredTabularData.length, Math.floor((containerWidth - 80) / 194)));
+          const numRows = Math.ceil(filteredTabularData.length / numCols);
+          return Math.max(120, numRows * 50 + 70);
+        }
+        return Math.max(180, Math.min(420, tabularData.length * 44 + 80));
+      }
       return effectiveMultiRow ? 360 : 240;
     }
     if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
     if (!eType || eType === 'none') return 440;
     return effectiveMultiRow ? 420 : 340;
-  }, [annotation.payload?.payload_type, annotation.extent?.extent_type, effectiveMultiRow]);
+  }, [annotation.payload?.payload_type, annotation.extent?.extent_type, isGlobalNoConfGenres, filteredTabularData.length, containerWidth, tabularData.length, effectiveMultiRow]);
 
   // Build the Vega-Lite specification - decoupled from currentTime to prevent view re-embedding during playback
   const vegaSpec = useMemo(() => {
@@ -608,9 +645,11 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       chartHeight: optimalChartHeight,
       forceMultiRow: effectiveMultiRow,
     };
-    return buildBoppVegaLiteSpec(annotation, tabularData, options);
+    return buildBoppVegaLiteSpec(annotation, isGlobalNoConfGenres ? filteredTabularData : tabularData, options);
   }, [
     annotation,
+    isGlobalNoConfGenres,
+    filteredTabularData,
     tabularData,
     theme,
     colorScheme,
@@ -1259,8 +1298,63 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         <div className="p-4 flex-1 flex flex-col min-h-0">
           <div
             ref={plotCardRef}
-            className="w-full flex-1 bg-white dark:bg-neutral-950 rounded-lg border border-slate-300 dark:border-neutral-800 p-4 flex flex-col justify-start overflow-x-auto min-h-[420px] shadow-2xs relative"
+            className={`w-full flex-1 bg-white dark:bg-neutral-950 rounded-lg border border-slate-300 dark:border-neutral-800 p-4 flex flex-col justify-start overflow-x-auto shadow-2xs relative ${
+              isGlobalNoConfGenres ? 'min-h-[180px]' : 'min-h-[420px]'
+            }`}
           >
+            {/* Interactive Badge Controls Toolbar for Global Genres/Tags without confidence */}
+            {isGlobalNoConfGenres && (
+              <div className="mb-4 pb-3 border-b border-slate-200 dark:border-neutral-800 flex flex-wrap items-center justify-between gap-3 text-xs w-full">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-md bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/60">
+                    <Tag className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                      <span>Alphabetized Badges Collection</span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-neutral-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-neutral-700">
+                        {filteredTabularData.length}{badgeSearchQuery ? ` / ${tabularData.length}` : ''}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Alphabetized global classification tags (replaces redundant 100% bars)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {tabularData.length > 4 && (
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Filter badges..."
+                        value={badgeSearchQuery}
+                        onChange={e => setBadgeSearchQuery(e.target.value)}
+                        className="px-2.5 py-1 text-xs bg-slate-50 dark:bg-neutral-850 border border-slate-300 dark:border-neutral-700 rounded text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 w-36 sm:w-44"
+                      />
+                      {badgeSearchQuery && (
+                        <button
+                          onClick={() => setBadgeSearchQuery('')}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleCopyAllBadges}
+                    className="flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-neutral-800 border border-slate-300 dark:border-neutral-700 rounded hover:bg-slate-200 dark:hover:bg-neutral-700 transition-colors shadow-2xs cursor-pointer"
+                    title="Copy all alphabetized tags as a comma-separated list"
+                  >
+                    {copiedBadges ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedBadges ? 'Copied!' : 'Copy All'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="w-full flex items-center justify-start md:justify-center">
               <div className="relative inline-block">
                 {/* Underlying Spectrogram Overlay / Placeholder (positioned directly behind the plot marks) */}

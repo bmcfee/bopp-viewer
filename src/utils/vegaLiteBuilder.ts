@@ -1228,150 +1228,286 @@ export function buildBoppVegaLiteSpec(
       };
     }
 
-    // 0C. GLOBAL GENRES & TAGS DISPLAY (Full horizontal quantitative axis with visible bars)
+    // 0C. GLOBAL GENRES & TAGS DISPLAY
     // Note: mood_thayer static affect is processed in section 8 below (Russell Circumplex)
     if (payloadType !== 'mood_thayer') {
       const colorScale = resolveColorScale(colorScheme, payloadType);
-    const tagHeight = Math.max(180, Math.min(420, data.length * 44 + 80));
-    const sortedData = [...data].sort(
-      (a, b) => (typeof b.confidence === 'number' ? b.confidence : 1) - (typeof a.confidence === 'number' ? a.confidence : 1)
-    );
-    const barWidth = typeof chartWidth === 'number' ? Math.max(260, chartWidth - 140) : chartWidth;
 
-    return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-      width: barWidth,
-      height: tagHeight,
-      title: {
-        text: `Global ${payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
-        subtitle: 'Scope: Entire Media Object (Global classification and metadata tags)',
-        color: textColor,
-        subtitleColor: axisColor,
-      },
-      data: { values: sortedData },
-      config: baseConfig,
-      encoding: {
-        y: {
-          field: 'value',
-          type: 'nominal',
-          title: 'Tag / Genre / Mood',
-          sort: null,
-          axis: {
-            labelFontSize: 12,
-            labelFontWeight: 'bold',
-            labelColor: textColor,
-            titleColor: textColor,
-            titleFontSize: 12,
-            titleFontWeight: 'bold',
-            titlePadding: 16,
-            labelPadding: 12,
-            minExtent: 160,
-            labelLimit: 300,
-            domain: true,
-            domainColor: axisColor,
-            ticks: true,
-            tickColor: axisColor,
+      // When NO confidence rating is provided, full-width quantitative bars are completely redundant.
+      // Instead, render as an alphabetized collection of badges!
+      const hasConfidenceData = hasConfidence && data.some(d => typeof d.confidence === 'number');
+
+      if (!hasConfidenceData) {
+        // Strictly alphabetize tags/genres
+        const alphabetizedData = [...data].sort((a, b) =>
+          String(a.value ?? '').localeCompare(String(b.value ?? ''), undefined, {
+            sensitivity: 'base',
+            numeric: true,
+          })
+        );
+
+        const count = alphabetizedData.length;
+        const availableW = typeof chartWidth === 'number' && chartWidth > 0 ? Math.max(300, chartWidth - 80) : 680;
+        const badgeHeight = 38;
+        const gapX = 14;
+        const gapY = 12;
+        const minBadgeWidth = 180;
+        const numCols = Math.max(1, Math.min(count, Math.floor(availableW / (minBadgeWidth + gapX))));
+        const actualBadgeWidth = Math.floor((availableW - (numCols - 1) * gapX) / numCols);
+        const numRows = Math.ceil(count / numCols);
+        const totalW = numCols * actualBadgeWidth + (numCols - 1) * gapX;
+        const totalH = numRows * badgeHeight + (numRows - 1) * gapY;
+
+        const badgeValues = alphabetizedData.map((d, i) => {
+          const col = i % numCols;
+          const row = Math.floor(i / numCols);
+          const x1 = col * (actualBadgeWidth + gapX);
+          const x2 = x1 + actualBadgeWidth;
+          const y1 = row * (badgeHeight + gapY);
+          const y2 = y1 + badgeHeight;
+          const valStr = String(d.value ?? '');
+          return {
+            value: valStr,
+            x1,
+            x2,
+            y1,
+            y2,
+            dotX: x1 + 16,
+            textX: x1 + 30,
+            cy: y1 + badgeHeight / 2,
+            rank: `#${i + 1} of ${count}`,
+            scope: 'Global (Entire Media Object)',
+          };
+        });
+
+        return {
+          $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+          width: totalW,
+          height: totalH,
+          title: {
+            text: `Global ${payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
+            subtitle: `Alphabetized collection · Scope: Entire Media Object · ${count} ${count === 1 ? 'badge' : 'badges'} (No confidence rating)`,
+            anchor: 'start',
+            fontSize: 14,
+            fontWeight: 'bold',
+            subtitleFontSize: 11,
+            color: textColor,
+            subtitleColor: axisColor,
+            offset: 20,
           },
-        },
-      },
-      layer: [
-        // Background track bar (0 to 100%)
-        {
-          transform: [
-            { calculate: '1.0', as: 'full_scale' },
-          ],
-          mark: {
-            type: 'bar',
-            height: 24,
-            cornerRadius: 4,
-            fill: isDark ? '#1e293b' : '#f1f5f9',
+          data: { values: badgeValues },
+          config: {
+            ...baseConfig,
+            view: { stroke: 'transparent' },
           },
-          encoding: {
-            x: {
-              field: 'full_scale',
-              type: 'quantitative',
-              scale: { domain: [0, 1] },
-              axis: null,
-            },
-          },
-        },
-        // Active confidence / relevance bar with full horizontal axis
-        {
-          transform: [
-            { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
-          ],
-          mark: {
-            type: 'bar',
-            height: 24,
-            cornerRadius: 4,
-          },
-          encoding: {
-            x: {
-              field: 'conf_val',
-              type: 'quantitative',
-              title: hasConfidence ? 'Confidence / Relevance (0–100%)' : 'Presence (Global)',
-              scale: { domain: [0, 1] },
-              axis: {
-                format: '%',
-                grid: true,
-                tickCount: 5,
-                titleColor: textColor,
-                titleFontSize: 11,
-                titleFontWeight: 'bold',
-                labelColor: axisColor,
-                labelFontSize: 11,
+          layer: [
+            // Badge background pill card
+            {
+              mark: {
+                type: 'rect',
+                cornerRadius: 19,
+                strokeWidth: 1.5,
+                cursor: 'pointer',
+                fillOpacity: isDark ? 0.22 : 0.12,
+              },
+              encoding: {
+                x: { field: 'x1', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
+                x2: { field: 'x2' },
+                y: { field: 'y1', type: 'quantitative', scale: { domain: [0, totalH] }, axis: null },
+                y2: { field: 'y2' },
+                color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+                stroke: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+                tooltip: [
+                  { field: 'value', type: 'nominal', title: 'Tag / Genre' },
+                  { field: 'rank', type: 'nominal', title: 'Alphabetical Order' },
+                  { field: 'scope', type: 'nominal', title: 'Scope' },
+                ],
               },
             },
-            color: {
-              field: 'value',
-              type: 'nominal',
-              scale: colorScale,
-              legend: null,
+            // Badge accent circle / indicator dot
+            {
+              mark: {
+                type: 'circle',
+                size: 55,
+                cursor: 'pointer',
+              },
+              encoding: {
+                x: { field: 'dotX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
+                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH] }, axis: null },
+                color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+                tooltip: [
+                  { field: 'value', type: 'nominal', title: 'Tag / Genre' },
+                ],
+              },
             },
-            tooltip: [
-              { field: 'value', type: 'nominal', title: 'Tag / Genre' },
-              ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' }] : []),
-            ],
-          },
-        },
-        // In-bar Tag label annotation (guarantees tag name is completely readable directly on the plot itself in exports/images)
-        {
-          mark: {
-            type: 'text',
-            align: 'left',
-            baseline: 'middle',
-            dx: 8,
-            fontSize: 11,
-            fontWeight: 'bold',
-            fill: '#ffffff',
-          },
-          encoding: {
-            x: { value: 0 },
-            text: { field: 'value', type: 'nominal' },
-          },
-        },
-        // Numeric percentage or presence annotation at bar end
-        {
-          transform: [
-            { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
-            { calculate: "datum.confidence != null ? round(datum.confidence * 1000) / 10 + '%' : 'Present'", as: 'display_txt' },
+            // Badge text label
+            {
+              mark: {
+                type: 'text',
+                align: 'left',
+                baseline: 'middle',
+                fontSize: 12.5,
+                fontWeight: 'bold',
+                fill: textColor,
+                font: 'system-ui, -apple-system, sans-serif',
+                limit: actualBadgeWidth - 42,
+                cursor: 'pointer',
+              },
+              encoding: {
+                x: { field: 'textX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
+                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH] }, axis: null },
+                text: { field: 'value', type: 'nominal' },
+                tooltip: [
+                  { field: 'value', type: 'nominal', title: 'Tag / Genre' },
+                  { field: 'rank', type: 'nominal', title: 'Alphabetical Order' },
+                ],
+              },
+            },
           ],
-          mark: {
-            type: 'text',
-            align: 'left',
-            baseline: 'middle',
-            dx: 8,
-            fontSize: 11,
-            fontWeight: 'bold',
-            fill: textColor,
-          },
-          encoding: {
-            x: { field: 'conf_val', type: 'quantitative' },
-            text: { field: 'display_txt', type: 'nominal' },
+        };
+      }
+
+      // WITH Confidence rating: full horizontal quantitative axis with visible bars representing confidence %
+      const tagHeight = Math.max(180, Math.min(420, data.length * 44 + 80));
+      const sortedData = [...data].sort(
+        (a, b) => (typeof b.confidence === 'number' ? b.confidence : 1) - (typeof a.confidence === 'number' ? a.confidence : 1)
+      );
+      const barWidth = typeof chartWidth === 'number' ? Math.max(260, chartWidth - 140) : chartWidth;
+
+      return {
+        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        width: barWidth,
+        height: tagHeight,
+        title: {
+          text: `Global ${payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
+          subtitle: 'Scope: Entire Media Object (Global classification and metadata tags)',
+          color: textColor,
+          subtitleColor: axisColor,
+        },
+        data: { values: sortedData },
+        config: baseConfig,
+        encoding: {
+          y: {
+            field: 'value',
+            type: 'nominal',
+            title: 'Tag / Genre / Mood',
+            sort: null,
+            axis: {
+              labelFontSize: 12,
+              labelFontWeight: 'bold',
+              labelColor: textColor,
+              titleColor: textColor,
+              titleFontSize: 12,
+              titleFontWeight: 'bold',
+              titlePadding: 16,
+              labelPadding: 12,
+              minExtent: 160,
+              labelLimit: 300,
+              domain: true,
+              domainColor: axisColor,
+              ticks: true,
+              tickColor: axisColor,
+            },
           },
         },
-      ],
-    };
+        layer: [
+          // Background track bar (0 to 100%)
+          {
+            transform: [
+              { calculate: '1.0', as: 'full_scale' },
+            ],
+            mark: {
+              type: 'bar',
+              height: 24,
+              cornerRadius: 4,
+              fill: isDark ? '#1e293b' : '#f1f5f9',
+            },
+            encoding: {
+              x: {
+                field: 'full_scale',
+                type: 'quantitative',
+                scale: { domain: [0, 1] },
+                axis: null,
+              },
+            },
+          },
+          // Active confidence / relevance bar with full horizontal axis
+          {
+            transform: [
+              { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
+            ],
+            mark: {
+              type: 'bar',
+              height: 24,
+              cornerRadius: 4,
+            },
+            encoding: {
+              x: {
+                field: 'conf_val',
+                type: 'quantitative',
+                title: 'Confidence / Relevance (0–100%)',
+                scale: { domain: [0, 1] },
+                axis: {
+                  format: '%',
+                  grid: true,
+                  tickCount: 5,
+                  titleColor: textColor,
+                  titleFontSize: 11,
+                  titleFontWeight: 'bold',
+                  labelColor: axisColor,
+                  labelFontSize: 11,
+                },
+              },
+              color: {
+                field: 'value',
+                type: 'nominal',
+                scale: colorScale,
+                legend: null,
+              },
+              tooltip: [
+                { field: 'value', type: 'nominal', title: 'Tag / Genre' },
+                { field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' },
+              ],
+            },
+          },
+          // In-bar Tag label annotation
+          {
+            mark: {
+              type: 'text',
+              align: 'left',
+              baseline: 'middle',
+              dx: 8,
+              fontSize: 11,
+              fontWeight: 'bold',
+              fill: '#ffffff',
+            },
+            encoding: {
+              x: { value: 0 },
+              text: { field: 'value', type: 'nominal' },
+            },
+          },
+          // Numeric percentage annotation at bar end
+          {
+            transform: [
+              { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
+              { calculate: "datum.confidence != null ? round(datum.confidence * 1000) / 10 + '%' : ''", as: 'display_txt' },
+            ],
+            mark: {
+              type: 'text',
+              align: 'left',
+              baseline: 'middle',
+              dx: 8,
+              fontSize: 11,
+              fontWeight: 'bold',
+              fill: textColor,
+            },
+            encoding: {
+              x: { field: 'conf_val', type: 'quantitative' },
+              text: { field: 'display_txt', type: 'nominal' },
+            },
+          },
+        ],
+      };
     }
   }
 

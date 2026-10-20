@@ -1414,7 +1414,7 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Global Tags: Genres & Moods (No Confidence)",
     category: "music",
     format: "json",
-    description: "tag_open payload with NO extent and NO confidence: global descriptive media tags.",
+    description: "tag_open payload with NO extent and NO confidence: global descriptive media tags rendered as an alphabetized collection of badges.",
     extentType: "none",
     payloadType: "tag_open",
     data: TAGS_GLOBAL_NOCONF,

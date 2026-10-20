@@ -344,7 +344,18 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
         } else if (payloadType === 'chord') {
           optimalHeight = 360;
         } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
-          optimalHeight = this._forceMultiRow ? 360 : 240;
+          if (!extentType || extentType === 'none') {
+            const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
+            if (!hasConf) {
+              const numCols = Math.max(1, Math.min(tabular.length, Math.floor((chartWidth - 60) / 194)));
+              const numRows = Math.ceil(tabular.length / numCols);
+              optimalHeight = Math.max(120, numRows * 50 + 70);
+            } else {
+              optimalHeight = Math.max(180, Math.min(420, tabular.length * 44 + 80));
+            }
+          } else {
+            optimalHeight = this._forceMultiRow ? 360 : 240;
+          }
         } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
           optimalHeight = 380;
         } else if (payloadType === 'tempo') {
