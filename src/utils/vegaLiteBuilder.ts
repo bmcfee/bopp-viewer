@@ -40,6 +40,11 @@ import {
 // Ensure mir_eval schemes are registered with Vega
 registerMirEvalSchemes();
 
+/**
+ * Standard Vega-Lite v6 specification schema URL.
+ */
+export const VEGA_LITE_SCHEMA = 'https://vega.github.io/schema/vega-lite/v6.json';
+
 export interface VegaLiteBuilderOptions {
   theme?: 'light' | 'dark';
   colorScheme?: string;
@@ -434,7 +439,7 @@ export function buildBoppVegaLiteSpec(
       };
 
       return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        $schema: VEGA_LITE_SCHEMA,
         data: { values: plotData },
         transform: plotTransforms,
         config: baseConfig,
@@ -458,7 +463,7 @@ export function buildBoppVegaLiteSpec(
 
     // Single-unit fallback
     return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+      $schema: VEGA_LITE_SCHEMA,
       width: chartWidth,
       height: chartHeight,
       title: finalTitle,
@@ -483,7 +488,7 @@ export function buildBoppVegaLiteSpec(
       const bpmWidth = typeof chartWidth === 'number' ? Math.min(680, Math.max(340, chartWidth - 80)) : 560;
 
       return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        $schema: VEGA_LITE_SCHEMA,
         width: bpmWidth,
         height: 190,
         title: {
@@ -1222,7 +1227,7 @@ export function buildBoppVegaLiteSpec(
       };
 
       return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        $schema: VEGA_LITE_SCHEMA,
         config: baseConfig,
         ...radialChartSpec,
       };
@@ -1283,7 +1288,7 @@ export function buildBoppVegaLiteSpec(
         });
 
         return {
-          $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+          $schema: VEGA_LITE_SCHEMA,
           width: totalW,
           height: totalH,
           title: {
@@ -1377,7 +1382,7 @@ export function buildBoppVegaLiteSpec(
       const barWidth = typeof chartWidth === 'number' ? Math.max(260, chartWidth - 140) : chartWidth;
 
       return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        $schema: VEGA_LITE_SCHEMA,
         width: barWidth,
         height: tagHeight,
         title: {
@@ -3510,7 +3515,7 @@ export function buildBoppVegaLiteSpec(
     }
 
     return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+      $schema: VEGA_LITE_SCHEMA,
       width: chartWidth,
       height: chartHeight,
       title: { text: `BOPP Pixel Bounding Boxes: ${annotation.media_id}`, color: textColor },
@@ -3792,7 +3797,7 @@ export function buildBoppVegaLiteSpec(
         });
 
         return {
-          $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+          $schema: VEGA_LITE_SCHEMA,
           width: circumplexSize,
           height: circumplexSize,
           title: {
@@ -3905,7 +3910,7 @@ export function buildBoppVegaLiteSpec(
 
       // Discrete Scatter Plot without Connecting Line (Matching trajectory right-hand subplot without connecting line)
       return {
-        $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+        $schema: VEGA_LITE_SCHEMA,
         width: circumplexSize,
         height: circumplexSize,
         title: {
@@ -3960,7 +3965,7 @@ export function buildBoppVegaLiteSpec(
     // Case B: Dynamic mood with time progression
     const xTimeField = 'time';
     return {
-      $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+      $schema: VEGA_LITE_SCHEMA,
       title: { text: `BOPP Mood Thayer (Circumplex Model): ${annotation.media_id}`, color: textColor },
       data: { values: data },
       transform: transforms,
@@ -4576,7 +4581,7 @@ export function buildBoppVegaLiteSpec(
   }
 
   return {
-    $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+    $schema: VEGA_LITE_SCHEMA,
     width: chartWidth,
     height: chartHeight,
     title: fallbackTitle,

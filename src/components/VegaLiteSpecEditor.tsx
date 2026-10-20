@@ -70,7 +70,7 @@ export const VegaLiteSpecEditor: React.FC<VegaLiteSpecEditorProps> = ({
         <div className="flex items-center gap-2">
           <Code className="w-4 h-4 text-blue-500" />
           <span className="font-semibold text-neutral-800 dark:text-neutral-200">
-            Vega-Lite v5 Specification
+            Vega-Lite v6 Specification
           </span>
           <span className="text-neutral-400">·</span>
           <span className="text-neutral-500 font-mono text-[11px]">

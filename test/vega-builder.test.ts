@@ -21,8 +21,8 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
       assert.ok(spec, `Spec must be generated for ${sample.id}`);
       assert.strictEqual(
         spec.$schema,
-        'https://vega.github.io/schema/vega-lite/v5.json',
-        `Spec must reference Vega-Lite v5 schema for ${sample.id}`
+        'https://vega.github.io/schema/vega-lite/v6.json',
+        `Spec must reference Vega-Lite v6 schema for ${sample.id}`
       );
 
       // Verify Vega-Lite can compile without error and Vega can parse it cleanly
@@ -374,7 +374,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
     }) as any;
 
     assert.ok(spec, 'Spec must be generated for global tags without confidence');
-    assert.strictEqual(spec.$schema, 'https://vega.github.io/schema/vega-lite/v5.json');
+    assert.strictEqual(spec.$schema, 'https://vega.github.io/schema/vega-lite/v6.json');
     assert.ok(spec.title?.text?.includes('Global Genres & Tags'), 'Title should reflect global genres/tags');
     assert.ok(spec.title?.subtitle?.includes('Alphabetized'), 'Subtitle should indicate alphabetized collection');
 
