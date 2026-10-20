@@ -1253,11 +1253,13 @@ export function buildBoppVegaLiteSpec(
         const gapY = 12;
         const minBadgeWidth = 180;
         const numCols = Math.max(1, Math.min(count, Math.floor(availableW / (minBadgeWidth + gapX))));
-        const actualBadgeWidth = Math.floor((availableW - (numCols - 1) * gapX) / numCols);
         const numRows = Math.ceil(count / numCols);
-        const totalW = numCols * actualBadgeWidth + (numCols - 1) * gapX;
+        const actualColCount = Math.min(numCols, count);
+        const actualBadgeWidth = Math.floor((availableW - (actualColCount - 1) * gapX) / actualColCount);
+        const totalW = actualColCount * actualBadgeWidth + (actualColCount - 1) * gapX;
         const totalH = numRows * badgeHeight + (numRows - 1) * gapY;
 
+        // Flow alphabetized badges in rows: left-to-right, then top-to-bottom
         const badgeValues = alphabetizedData.map((d, i) => {
           const col = i % numCols;
           const row = Math.floor(i / numCols);
@@ -1313,7 +1315,7 @@ export function buildBoppVegaLiteSpec(
               encoding: {
                 x: { field: 'x1', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
                 x2: { field: 'x2' },
-                y: { field: 'y1', type: 'quantitative', scale: { domain: [0, totalH] }, axis: null },
+                y: { field: 'y1', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
                 y2: { field: 'y2' },
                 color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
                 stroke: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
@@ -1333,7 +1335,7 @@ export function buildBoppVegaLiteSpec(
               },
               encoding: {
                 x: { field: 'dotX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
-                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH] }, axis: null },
+                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
                 color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
                 tooltip: [
                   { field: 'value', type: 'nominal', title: 'Tag / Genre' },
@@ -1355,7 +1357,7 @@ export function buildBoppVegaLiteSpec(
               },
               encoding: {
                 x: { field: 'textX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
-                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH] }, axis: null },
+                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
                 text: { field: 'value', type: 'nominal' },
                 tooltip: [
                   { field: 'value', type: 'nominal', title: 'Tag / Genre' },

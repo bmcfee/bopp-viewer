@@ -386,6 +386,16 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
     const sorted = [...tags].sort((a, b) => a.localeCompare(b));
     assert.deepStrictEqual(tags, sorted, 'Tags must be strictly alphabetized');
 
+    // Badges must flow in rows: left-to-right across columns, then top-to-bottom down rows:
+    // First row: Ambient (col 0), Cinematic (col 1), Crescendo (col 2) sharing the same y coordinate
+    assert.strictEqual(values[0].y1, values[1].y1, 'Row items must share the same vertical baseline');
+    assert.strictEqual(values[1].y1, values[2].y1, 'Row items must share the same vertical baseline');
+    assert.ok(values[0].x1 < values[1].x1, 'Row items must flow left-to-right');
+    assert.ok(values[1].x1 < values[2].x1, 'Row items must flow left-to-right');
+    // Second row: Electric Guitar (col 0) starts below the first row
+    assert.ok(values[3].y1 > values[0].y1, 'Next row must be positioned below previous row (top-to-bottom)');
+    assert.strictEqual(values[3].x1, values[0].x1, 'Start of next row aligns with column 0');
+
     // Marks must render badge pills, accent dots, and text labels (no quantitative axis or redundant bar charts)
     assert.ok(spec.layer, 'Spec must have layers');
     const rectMark = spec.layer.find((l: any) => l.mark?.type === 'rect' && l.mark?.cornerRadius > 0);
