@@ -143,9 +143,10 @@ export function buildIntervalConfidenceLayers(params: {
   }
 
   const layers: Record<string, unknown>[] = [];
-  // Achromatic container capsule: pure black background on dark theme, pure white on light theme
-  const trackBg = isDark ? '#000000' : '#ffffff';
-  const trackBorder = isDark ? 'rgba(255, 255, 255, 0.65)' : 'rgba(0, 0, 0, 0.60)';
+  // Subtle backing track embedded within patch top edge: small and consistent with MIDI note style
+  const trackBg = isDark ? 'rgba(0, 0, 0, 0.65)' : 'rgba(0, 0, 0, 0.25)';
+  const trackBorder = isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.15)';
+  const mH = Math.min(meterHeight, 4);
 
   if (channelMode === 'meter') {
     // 1. Backing Meter Track along the top edge of each interval patch
@@ -157,14 +158,14 @@ export function buildIntervalConfidenceLayers(params: {
         type: 'rect',
         fill: trackBg,
         stroke: trackBorder,
-        strokeWidth: 1.2,
-        cornerRadius: 3,
+        strokeWidth: 0.5,
+        cornerRadius: 1,
       },
       encoding: {
         x: { field: xField, type: 'quantitative' },
         x2: { field: endField },
         y: { value: yTop },
-        y2: { value: yTop + meterHeight },
+        y2: { value: yTop + mH },
         tooltip: [
           { field: 'value', type: 'nominal', title: 'Annotation' },
           { field: xField, type: 'quantitative', format: '.2f', title: 'Start' },
@@ -182,7 +183,7 @@ export function buildIntervalConfidenceLayers(params: {
       },
     });
 
-    // 2. Active Confidence Fill Bar (NO HUE: pure luminance scale from slate to white/charcoal)
+    // 2. Active Confidence Fill Bar (embedded small within patch, achromatic luminance scale)
     layers.push({
       transform: [
         { filter: 'datum.confidence != null && datum.confidence > 0' },
@@ -193,16 +194,26 @@ export function buildIntervalConfidenceLayers(params: {
       ],
       mark: {
         type: 'rect',
-        cornerRadius: 2,
-        fill: isDark ? '#38bdf8' : '#0284c7',
+        cornerRadius: 1,
         stroke: isDark ? '#ffffff' : '#09090b',
         strokeWidth: 0.5,
       },
       encoding: {
         x: { field: xField, type: 'quantitative' },
         x2: { field: '_conf_meter_end' },
-        y: { value: yTop + 2 },
-        y2: { value: yTop + meterHeight - 2 },
+        y: { value: yTop },
+        y2: { value: yTop + mH },
+        color: {
+          field: 'confidence',
+          type: 'quantitative',
+          scale: {
+            domain: [0, 0.65, 0.85, 1.0],
+            range: isDark
+              ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
+              : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
+          },
+          legend: null,
+        },
         tooltip: [
           { field: 'value', type: 'nominal', title: 'Annotation' },
           {

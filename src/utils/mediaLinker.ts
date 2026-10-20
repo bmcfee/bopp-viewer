@@ -8,7 +8,7 @@
  */
 
 import type { BoppAnnotation } from '../types/bopp';
-import { noteNameToMidi } from './boppParser';
+import { noteNameToMidi, annotationToTabular } from './boppParser';
 
 export type LinkedMediaType = 'audio' | 'image' | null;
 
@@ -116,54 +116,67 @@ export function checkMediaCompatibility(
 export function generateDemoSheetMusicUrl(): string {
   const width = 800;
   const height = 400;
+  // Calibrated to align with BOPP spatial_omr_pixels ground truth bounding boxes:
+  // Treble Clef: [45, 120, 180, 65]
+  // Time Signature: [240, 115, 75, 70]
+  // C4: [330, 95, 45, 110]
+  // E4: [390, 85, 45, 120]
+  // G4: [450, 75, 45, 130]
+  // C5: [520, 65, 50, 140]
+  // Barline: [590, 90, 80, 20]
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="background:#fffcf2; font-family: serif;">
     <!-- Stave lines -->
     <defs>
       <pattern id="stave" width="100" height="40" patternUnits="userSpaceOnUse">
-        <line x1="0" y1="0" x2="100" y2="0" stroke="#334155" stroke-width="1.5"/>
-        <line x1="0" y1="10" x2="100" y2="10" stroke="#334155" stroke-width="1.5"/>
-        <line x1="0" y1="20" x2="100" y2="20" stroke="#334155" stroke-width="1.5"/>
-        <line x1="0" y1="30" x2="100" y2="30" stroke="#334155" stroke-width="1.5"/>
-        <line x1="0" y1="40" x2="100" y2="40" stroke="#334155" stroke-width="1.5"/>
+        <line x1="0" y1="0" x2="100" y2="0" stroke="#475569" stroke-width="1.5"/>
+        <line x1="0" y1="10" x2="100" y2="10" stroke="#475569" stroke-width="1.5"/>
+        <line x1="0" y1="20" x2="100" y2="20" stroke="#475569" stroke-width="1.5"/>
+        <line x1="0" y1="30" x2="100" y2="30" stroke="#475569" stroke-width="1.5"/>
+        <line x1="0" y1="40" x2="100" y2="40" stroke="#475569" stroke-width="1.5"/>
       </pattern>
     </defs>
 
     <!-- Header Title -->
-    <text x="400" y="45" font-size="22" font-weight="bold" text-anchor="middle" fill="#0f172a">Prelude in C Major - Optical Sheet Music (OMR)</text>
-    <text x="400" y="70" font-size="13" font-style="italic" text-anchor="middle" fill="#64748b">BOPP Bounded Observation Payload Protocol Ground Truth Sample</text>
+    <text x="400" y="38" font-size="20" font-weight="bold" text-anchor="middle" fill="#0f172a">Prelude in C Major - Optical Sheet Music (OMR)</text>
+    <text x="400" y="58" font-size="12" font-style="italic" text-anchor="middle" fill="#64748b">BOPP Bounded Observation Payload Protocol Ground Truth Sample</text>
 
-    <!-- Staves -->
-    <rect x="30" y="100" width="740" height="40" fill="url(#stave)" />
-    <rect x="30" y="240" width="740" height="40" fill="url(#stave)" />
+    <!-- Main System Staves -->
+    <rect x="30" y="130" width="740" height="40" fill="url(#stave)" />
+    <rect x="30" y="250" width="740" height="40" fill="url(#stave)" />
 
-    <!-- Bar lines -->
-    <line x1="30" y1="100" x2="30" y2="140" stroke="#1e293b" stroke-width="2.5"/>
-    <line x1="770" y1="100" x2="770" y2="140" stroke="#1e293b" stroke-width="2.5"/>
-    <line x1="590" y1="100" x2="590" y2="140" stroke="#1e293b" stroke-width="2"/>
+    <!-- System Start Bar lines -->
+    <line x1="30" y1="130" x2="30" y2="170" stroke="#1e293b" stroke-width="2.5"/>
+    <line x1="770" y1="130" x2="770" y2="170" stroke="#1e293b" stroke-width="2.5"/>
 
-    <!-- Treble Clef Graphic approximation -->
-    <text x="50" y="135" font-size="52" fill="#1e293b" font-family="serif">𝄞</text>
-    <!-- Time Signature 4/4 -->
-    <text x="110" y="118" font-size="20" font-weight="bold" fill="#1e293b">4</text>
-    <text x="110" y="138" font-size="20" font-weight="bold" fill="#1e293b">4</text>
+    <!-- 1. Treble Clef Graphic (aligned inside box [45, 120, 180, 65]) -->
+    <text x="135" y="168" font-size="58" fill="#1e293b" font-family="serif" text-anchor="middle">𝄞</text>
 
-    <!-- Notes on Stave -->
-    <!-- C4 -->
-    <ellipse cx="250" cy="148" rx="7" ry="5.5" transform="rotate(-20 250 148)" fill="#1e293b" />
-    <line x1="240" y1="148" x2="260" y2="148" stroke="#1e293b" stroke-width="1.5"/>
-    <line x1="256" y1="148" x2="256" y2="105" stroke="#1e293b" stroke-width="1.5"/>
+    <!-- 2. Time Signature 4/4 (aligned inside box [240, 115, 75, 70]) -->
+    <text x="277.5" y="146" font-size="24" font-weight="bold" text-anchor="middle" fill="#1e293b">4</text>
+    <text x="277.5" y="172" font-size="24" font-weight="bold" text-anchor="middle" fill="#1e293b">4</text>
 
-    <!-- E4 -->
-    <ellipse cx="340" cy="140" rx="7" ry="5.5" transform="rotate(-20 340 140)" fill="#1e293b" />
-    <line x1="346" y1="140" x2="346" y2="97" stroke="#1e293b" stroke-width="1.5"/>
+    <!-- 3. Notes on Stave -->
+    <!-- C4 (aligned inside box [330, 95, 45, 110]) -->
+    <ellipse cx="352.5" cy="180" rx="7.5" ry="5.5" transform="rotate(-20 352.5 180)" fill="#1e293b" />
+    <line x1="338" y1="180" x2="367" y2="180" stroke="#1e293b" stroke-width="1.5"/>
+    <line x1="359" y1="180" x2="359" y2="98" stroke="#1e293b" stroke-width="1.8"/>
 
-    <!-- G4 -->
-    <ellipse cx="430" cy="130" rx="7" ry="5.5" transform="rotate(-20 430 130)" fill="#1e293b" />
-    <line x1="436" y1="130" x2="436" y2="87" stroke="#1e293b" stroke-width="1.5"/>
+    <!-- E4 (aligned inside box [390, 85, 45, 120]) -->
+    <ellipse cx="412.5" cy="170" rx="7.5" ry="5.5" transform="rotate(-20 412.5 170)" fill="#1e293b" />
+    <line x1="419" y1="170" x2="419" y2="88" stroke="#1e293b" stroke-width="1.8"/>
 
-    <!-- C5 -->
-    <ellipse cx="520" cy="110" rx="7" ry="5.5" transform="rotate(-20 520 110)" fill="#1e293b" />
-    <line x1="526" y1="110" x2="526" y2="67" stroke="#1e293b" stroke-width="1.5"/>
+    <!-- G4 (aligned inside box [450, 75, 45, 130]) -->
+    <ellipse cx="472.5" cy="160" rx="7.5" ry="5.5" transform="rotate(-20 472.5 160)" fill="#1e293b" />
+    <line x1="479" y1="160" x2="479" y2="78" stroke="#1e293b" stroke-width="1.8"/>
+
+    <!-- C5 (aligned inside box [520, 65, 50, 140]) -->
+    <ellipse cx="545" cy="140" rx="7.5" ry="5.5" transform="rotate(-20 545 140)" fill="#1e293b" />
+    <line x1="551.5" y1="140" x2="551.5" y2="68" stroke="#1e293b" stroke-width="1.8"/>
+
+    <!-- 4. Measure Barline Header Bracket & Line (aligned inside box [590, 90, 80, 20]) -->
+    <rect x="592" y="92" width="76" height="16" rx="3" fill="#334155" opacity="0.9" />
+    <text x="630" y="104" font-size="8.5" font-family="sans-serif" font-weight="bold" fill="#ffffff" text-anchor="middle">BAR 1</text>
+    <line x1="630" y1="108" x2="630" y2="170" stroke="#1e293b" stroke-width="2.5"/>
   </svg>`;
 
   const blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -194,7 +207,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
       const end = (times[i] || 0) + (durations[i] || 0);
       if (end > totalDuration) totalDuration = end;
     }
-    totalDuration += 0.5;
+    const tfMaxTime = Math.max(12.0, Math.ceil(totalDuration + 0.5));
+    totalDuration = tfMaxTime;
 
     const numSamples = Math.floor(sampleRate * totalDuration);
     const buffer = new ArrayBuffer(44 + numSamples * 2);
@@ -426,7 +440,292 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     };
   }
 
-  // 3. Fallback / Default: Mozart Piano Sonata Motif
+  // 4. Chords (Harmonic Progressions matching exact annotation timestamps)
+  if (payloadType === 'chord') {
+    const isMidiTicks = extentType?.includes('midi') || extentType?.includes('tick');
+    const isScoreQuarters = extentType?.includes('score') || extentType?.includes('quarter');
+    const extentObj = annotation.extent as any;
+    const rawTimes = isMidiTicks ? (extentObj?.tick || []) : isScoreQuarters ? (extentObj?.quarter || []) : (extentObj?.time || []);
+    const rawDurations = extentObj?.duration || [];
+    const chordValues = Array.isArray(annotation.payload.value) ? annotation.payload.value : [];
+
+    const rootPitchMap: Record<string, number> = {
+      C: 48, 'C#': 49, Db: 49, D: 50, 'D#': 51, Eb: 51, E: 52, F: 53,
+      'F#': 54, Gb: 54, G: 55, 'G#': 56, Ab: 56, A: 57, 'A#': 58, Bb: 58, B: 59,
+    };
+
+    interface ChordEvent {
+      t: number;
+      d: number;
+      freqs: number[];
+    }
+    const chordEvents: ChordEvent[] = [];
+    let maxChordEnd = 4.0;
+
+    for (let k = 0; k < chordValues.length; k++) {
+      const chordStr = String(chordValues[k] || '');
+      if (chordStr === 'N' || chordStr === 'X' || !chordStr) continue;
+
+      let startSec = 0;
+      let durSec = 1.0;
+      if (isMidiTicks) {
+        startSec = (rawTimes[k] || 0) / 960;
+        durSec = (rawDurations[k] || 960) / 960;
+      } else if (isScoreQuarters) {
+        startSec = (rawTimes[k] || 0) * 0.5;
+        durSec = (rawDurations[k] || 2) * 0.5;
+      } else {
+        startSec = rawTimes[k] || 0;
+        durSec = rawDurations[k] || (k < rawTimes.length - 1 ? (rawTimes[k + 1] - startSec) : 1.5);
+      }
+
+      const match = chordStr.match(/^([A-G][b#]?)(?::(.*))?$/);
+      if (!match) continue;
+      const rootName = match[1];
+      const quality = match[2] || 'maj';
+      const rootMidi = rootPitchMap[rootName] ?? 48;
+      const isMinor = quality.includes('min') || quality.includes('dim');
+      const isSeventh = quality.includes('7');
+      const intervals = [0, isMinor ? 3 : 4, 7];
+      if (isSeventh) intervals.push(isMinor ? 10 : 11);
+
+      const freqs = intervals.map(semis => 440 * Math.pow(2, (rootMidi + semis - 69) / 12));
+      chordEvents.push({ t: startSec, d: durSec, freqs });
+      if (startSec + durSec > maxChordEnd) {
+        maxChordEnd = startSec + durSec;
+      }
+    }
+    maxChordEnd += 0.5;
+
+    const numSamples = Math.floor(sampleRate * maxChordEnd);
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    let writeOffset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      let sampleVal = 0;
+
+      for (const c of chordEvents) {
+        if (t >= c.t && t < c.t + c.d) {
+          const relT = t - c.t;
+          const env = Math.exp(-relT * 1.8) * Math.sin(Math.min(1, relT * 40) * Math.PI * 0.5);
+          for (const f of c.freqs) {
+            sampleVal += (Math.sin(2 * Math.PI * f * relT) * 0.7 + Math.sin(4 * Math.PI * f * relT) * 0.3) * env * 0.22;
+          }
+        }
+      }
+
+      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
+      view.setInt16(writeOffset, int16, true);
+      writeOffset += 2;
+    }
+
+    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+    return {
+      url: URL.createObjectURL(wavBlob),
+      name: 'Harmonic_Chords_Audio.wav',
+      duration: maxChordEnd,
+    };
+  }
+
+  // 5. Beats (Rhythmic Metronome / Pulse matching exact annotation timestamps)
+  if (payloadType === 'beat') {
+    const extentObj = annotation.extent as any;
+    const times = extentObj?.time || [];
+    const beatValues = Array.isArray(annotation.payload.value) ? annotation.payload.value : [];
+    let maxBeatEnd = Math.max(4.0, ...times) + 0.6;
+
+    const numSamples = Math.floor(sampleRate * maxBeatEnd);
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    let writeOffset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      let sampleVal = 0;
+
+      for (let k = 0; k < times.length; k++) {
+        const bTime = times[k] || 0;
+        const isDownbeat = beatValues[k] === 1;
+        const freq = isDownbeat ? 880 : 440;
+        if (t >= bTime && t < bTime + 0.08) {
+          const noteT = t - bTime;
+          const env = Math.exp(-noteT * 50);
+          sampleVal += Math.sin(2 * Math.PI * freq * noteT) * env * (isDownbeat ? 0.7 : 0.4);
+        }
+      }
+
+      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
+      view.setInt16(writeOffset, int16, true);
+      writeOffset += 2;
+    }
+
+    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+    return {
+      url: URL.createObjectURL(wavBlob),
+      name: 'Rhythmic_Beats_Track.wav',
+      duration: maxBeatEnd,
+    };
+  }
+
+  // 6. Onsets (Acoustic Transient Detection Events matching exact timestamps)
+  if (payloadType === 'onset') {
+    const extentObj = annotation.extent as any;
+    const times = extentObj?.time || [];
+    let maxOnsetEnd = Math.max(4.0, ...times) + 0.5;
+
+    const numSamples = Math.floor(sampleRate * maxOnsetEnd);
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    let writeOffset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      let sampleVal = 0;
+
+      for (let k = 0; k < times.length; k++) {
+        const oTime = times[k] || 0;
+        if (t >= oTime && t < oTime + 0.06) {
+          const noteT = t - oTime;
+          const env = Math.exp(-noteT * 70);
+          sampleVal += Math.sin(2 * Math.PI * 1200 * noteT) * env * 0.6;
+        }
+      }
+
+      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
+      view.setInt16(writeOffset, int16, true);
+      writeOffset += 2;
+    }
+
+    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+    return {
+      url: URL.createObjectURL(wavBlob),
+      name: 'Onsets_Click_Track.wav',
+      duration: maxOnsetEnd,
+    };
+  }
+
+  // 7. Tone Frequencies in Hz
+  if (payloadType === 'note_hz' || (payloadType as string) === 'hz') {
+    const extentObj = annotation.extent as any;
+    const times = extentObj?.time || [];
+    const durations = extentObj?.duration || [];
+    const payloadObj = annotation.payload as any;
+    const freqs = Array.isArray(payloadObj.value) ? payloadObj.value : [];
+    let maxToneEnd = 4.0;
+    for (let k = 0; k < times.length; k++) {
+      const end = (times[k] || 0) + (durations[k] || 0.5);
+      if (end > maxToneEnd) maxToneEnd = end;
+    }
+    maxToneEnd += 0.5;
+
+    const numSamples = Math.floor(sampleRate * maxToneEnd);
+    const buffer = new ArrayBuffer(44 + numSamples * 2);
+    const view = new DataView(buffer);
+
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+
+    let writeOffset = 44;
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      let sampleVal = 0;
+
+      for (let k = 0; k < times.length; k++) {
+        const start = times[k] || 0;
+        const dur = durations[k] || 0.5;
+        const f = Number(freqs[k]) || 440;
+        if (t >= start && t < start + dur) {
+          const relT = t - start;
+          const env = Math.exp(-relT * 2.0) * Math.sin(Math.min(1, relT * 40) * Math.PI * 0.5);
+          sampleVal += Math.sin(2 * Math.PI * f * relT) * env * 0.5;
+        }
+      }
+
+      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
+      view.setInt16(writeOffset, int16, true);
+      writeOffset += 2;
+    }
+
+    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+    return {
+      url: URL.createObjectURL(wavBlob),
+      name: 'Tones_Audio_Track.wav',
+      duration: maxToneEnd,
+    };
+  }
+
+  // 8. Fallback / Default: Mozart Piano Sonata Motif
   const durationSec = 11.8;
   const numSamples = Math.floor(sampleRate * durationSec);
   const buffer = new ArrayBuffer(44 + numSamples * 2);

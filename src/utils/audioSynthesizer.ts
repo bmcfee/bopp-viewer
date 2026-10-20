@@ -69,15 +69,23 @@ export class BoppAudioPlayer {
     return this.ctx!;
   }
 
-  public setLinkedAudioElement(el: HTMLAudioElement | null) {
+  public setLinkedAudioElement(el: HTMLAudioElement | null, explicitDuration?: number) {
     if (this.linkedAudioEl && this.linkedAudioEl !== el) {
       this.linkedAudioEl.pause();
     }
     this.linkedAudioEl = el;
+    if (typeof explicitDuration === 'number' && explicitDuration > 0) {
+      this.duration = explicitDuration;
+    }
     if (el) {
       if (!isNaN(el.duration) && el.duration > 0) {
         this.duration = el.duration;
       }
+      el.addEventListener('loadedmetadata', () => {
+        if (!isNaN(el.duration) && el.duration > 0) {
+          this.duration = el.duration;
+        }
+      });
       el.playbackRate = this.speed;
       el.onended = () => {
         this.isPlaying = false;

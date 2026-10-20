@@ -32,6 +32,7 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
   const [showLabels, setShowLabels] = useState<boolean>(true);
   const [zoom, setZoom] = useState<number>(1.0);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [imageDims, setImageDims] = useState<{ width: number; height: number }>({ width: 800, height: 400 });
 
   const isDark = theme === 'dark';
 
@@ -147,12 +148,20 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
           <img
             src={imageUrl}
             alt={imageName}
+            onLoad={e => {
+              const img = e.currentTarget;
+              if (img.naturalWidth && img.naturalHeight) {
+                setImageDims({ width: img.naturalWidth, height: img.naturalHeight });
+              }
+            }}
             className="block max-w-none select-none pointer-events-none"
             style={{ minWidth: 600 }}
           />
 
-          {/* SVG Overlay of BOPP Bounding Boxes */}
+          {/* SVG Overlay of BOPP Bounding Boxes - calibrated 1:1 with image coordinates */}
           <svg
+            viewBox={`0 0 ${imageDims.width} ${imageDims.height}`}
+            preserveAspectRatio="none"
             className="absolute inset-0 w-full h-full pointer-events-auto"
             style={{ width: '100%', height: '100%' }}
           >

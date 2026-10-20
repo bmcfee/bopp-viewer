@@ -238,10 +238,11 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
       },
     };
     const specDisjoint = buildBoppVegaLiteSpec(disjointDoc);
-    const layer0Disjoint = (specDisjoint.layer as any[])[0];
+    const disjointLayers = (specDisjoint as any).vconcat ? (specDisjoint as any).vconcat[0].layer : (specDisjoint as any).layer;
+    const layer0Disjoint = disjointLayers[0];
     assert.strictEqual(layer0Disjoint.encoding.y.field, '_single_row', 'Disjoint intervals must use _single_row for vertical axis');
     assert.ok(
-      (specDisjoint.transform as any[]).some((t: any) => t.as === '_single_row'),
+      ((specDisjoint as any).transform as any[]).some((t: any) => t.as === '_single_row'),
       'Must inject _single_row calculation transform'
     );
 
@@ -264,7 +265,8 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
       },
     };
     const specOverlap = buildBoppVegaLiteSpec(overlapDoc);
-    const layer0Overlap = (specOverlap.layer as any[])[0];
+    const overlapLayers = (specOverlap as any).vconcat ? (specOverlap as any).vconcat[0].layer : (specOverlap as any).layer;
+    const layer0Overlap = overlapLayers[0];
     assert.strictEqual(layer0Overlap.encoding.y.field, 'value', 'Overlapping intervals must use field "value" to allocate different rows');
 
     // Verify it compiles to valid Vega
@@ -273,28 +275,30 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
   });
 
   await t.test('8. Sample dataset tags_time_intervals renders as single row while tags_overlapping renders as multi-row', () => {
-    const disjointDs = SAMPLE_DATASETS.find(d => d.id === 'tags_time_intervals');
-    assert.ok(disjointDs, 'tags_time_intervals must exist');
-    const specDisjoint = buildBoppVegaLiteSpec(disjointDs.data);
-    assert.strictEqual((specDisjoint.layer as any[])[0].encoding.y.field, '_single_row');
+    const disjointDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tags_disjoint_noconf');
+    assert.ok(disjointDs, 'interval_tags_disjoint_noconf must exist');
+    const specDisjoint: any = buildBoppVegaLiteSpec(disjointDs.data);
+    const layersDisjoint = specDisjoint.vconcat ? specDisjoint.vconcat[0].layer : specDisjoint.layer;
+    assert.strictEqual(layersDisjoint[0].encoding.y.field, '_single_row');
 
-    const overlapDs = SAMPLE_DATASETS.find(d => d.id === 'tags_overlapping_instruments');
-    assert.ok(overlapDs, 'tags_overlapping_instruments must exist');
-    const specOverlap = buildBoppVegaLiteSpec(overlapDs.data);
-    assert.strictEqual((specOverlap.layer as any[])[0].encoding.y.field, 'value');
+    const overlapDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tags_overlapping_likelihood');
+    assert.ok(overlapDs, 'interval_tags_overlapping_likelihood must exist');
+    const specOverlap: any = buildBoppVegaLiteSpec(overlapDs.data);
+    const layersOverlap = specOverlap.vconcat ? specOverlap.vconcat[0].layer : specOverlap.layer;
+    assert.strictEqual(layersOverlap[0].encoding.y.field, 'value');
   });
 
   await t.test('9. Key mode time interval annotations use disjoint single-row vs overlapping multi-row logic', () => {
     // Disjoint modal progression -> single row track
-    const disjointKeyDs = SAMPLE_DATASETS.find(d => d.id === 'modal_key_time');
-    assert.ok(disjointKeyDs, 'modal_key_time must exist');
+    const disjointKeyDs = SAMPLE_DATASETS.find(d => d.id === 'interval_key_noconf');
+    assert.ok(disjointKeyDs, 'interval_key_noconf must exist');
     const analysisDisjoint = analyzeIntervalAnnotation(disjointKeyDs.data);
     assert.strictEqual(analysisDisjoint.isDisjoint, true);
     assert.strictEqual(analysisDisjoint.shouldUseSingleRow, true);
 
-    const specDisjoint = buildBoppVegaLiteSpec(disjointKeyDs.data);
-    const layer0 = (specDisjoint.layer as any[])[0];
-    assert.strictEqual(layer0.encoding.y.field, '_single_row', 'Disjoint key mode intervals must render on single row');
+    const specDisjoint: any = buildBoppVegaLiteSpec(disjointKeyDs.data);
+    const layers = specDisjoint.vconcat ? specDisjoint.vconcat[0].layer : specDisjoint.layer;
+    assert.strictEqual(layers[0].encoding.y.field, '_single_row', 'Disjoint key mode intervals must render on single row');
     const compiledDisjoint = vl.compile(specDisjoint as any);
     assert.ok(compiledDisjoint.spec, 'Disjoint key mode spec must compile cleanly');
 
@@ -316,28 +320,28 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
     assert.strictEqual(analysisOverlap.isDisjoint, false);
     assert.strictEqual(analysisOverlap.shouldUseSingleRow, false);
 
-    const specOverlap = buildBoppVegaLiteSpec(overlappingKeyDoc);
-    const layer0Overlap = (specOverlap.layer as any[])[0];
-    assert.strictEqual(layer0Overlap.encoding.y.field, 'value', 'Overlapping key mode must use multi-row value field');
+    const specOverlap: any = buildBoppVegaLiteSpec(overlappingKeyDoc);
+    const layersOverlap = specOverlap.vconcat ? specOverlap.vconcat[0].layer : specOverlap.layer;
+    assert.strictEqual(layersOverlap[0].encoding.y.field, 'value', 'Overlapping key mode must use multi-row value field');
     const compiledOverlap = vl.compile(specOverlap as any);
     assert.ok(compiledOverlap.spec, 'Overlapping polytonal key spec must compile cleanly');
   });
 
   await t.test('10. Modal key split coloring displays tonic on top/outer and relative major on bottom/inner in static and time-varying cases', () => {
-    const staticDs = SAMPLE_DATASETS.find(d => d.id === 'modal_key_global');
-    assert.ok(staticDs, 'modal_key_global dataset must exist');
-    const specStatic = buildBoppVegaLiteSpec(staticDs.data);
+    const staticDs = SAMPLE_DATASETS.find(d => d.id === 'global_key_noconf');
+    assert.ok(staticDs, 'global_key_noconf dataset must exist');
+    const specStatic: any = buildBoppVegaLiteSpec(staticDs.data);
     const compiledStatic = vl.compile(specStatic as any);
     assert.ok(compiledStatic.spec, 'Static modal key spec must compile cleanly');
 
-    const timeDs = SAMPLE_DATASETS.find(d => d.id === 'modal_key_time');
-    assert.ok(timeDs, 'modal_key_time dataset must exist');
-    const specTime = buildBoppVegaLiteSpec(timeDs.data);
+    const timeDs = SAMPLE_DATASETS.find(d => d.id === 'interval_key_noconf');
+    assert.ok(timeDs, 'interval_key_noconf dataset must exist');
+    const specTime: any = buildBoppVegaLiteSpec(timeDs.data);
     const compiledTime = vl.compile(specTime as any);
     assert.ok(compiledTime.spec, 'Time-varying modal key spec must compile cleanly');
 
     // Verify split patches are included in layers
-    const timeLayers = specTime.layer as any[];
+    const timeLayers = (specTime.vconcat ? specTime.vconcat[0].layer : specTime.layer) as any[];
     assert.ok(timeLayers.length >= 4, 'Must contain base, top half, bottom half, and label layers');
   });
 });

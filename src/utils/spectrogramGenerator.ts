@@ -140,10 +140,13 @@ export interface SpectrogramRenderOptions {
   fftSize?: number;
   hopSize?: number;
   colormap?: SpectrogramColormap;
+  startTimeSec?: number;
+  endTimeSec?: number;
 }
 
 /**
- * Computes STFT spectrogram and renders it directly onto an HTML5 Canvas
+ * Computes STFT spectrogram and renders it directly onto an HTML5 Canvas,
+ * calibrated to exact startTimeSec, endTimeSec, minFreqHz, and maxFreqHz.
  */
 export function renderAudioSpectrogram(
   audioBuffer: AudioBuffer,
@@ -158,9 +161,14 @@ export function renderAudioSpectrogram(
   const minFreq = Math.max(0, options.minFreqHz || 0);
   const colormap = options.colormap || 'magma';
 
-  const numFrames = Math.floor((pcm.length - fftSize) / hopSize);
-  if (numFrames <= 0) return;
+  const audioDuration = audioBuffer.duration || pcm.length / sampleRate;
+  const startTime = typeof options.startTimeSec === 'number' ? Math.max(0, options.startTimeSec) : 0;
+  const endTime = typeof options.endTimeSec === 'number' && options.endTimeSec > startTime
+    ? options.endTimeSec
+    : audioDuration;
+  const timeSpan = Math.max(0.1, endTime - startTime);
 
+  const totalFrames = Math.max(1, Math.floor((timeSpan * sampleRate) / hopSize));
   const numBins = fftSize / 2;
   const binFreqStep = sampleRate / fftSize;
   const minBin = Math.max(0, Math.floor(minFreq / binFreqStep));
@@ -168,7 +176,7 @@ export function renderAudioSpectrogram(
   const activeBins = Math.max(1, maxBin - minBin);
 
   // Set canvas dimensions
-  const targetWidth = options.width || Math.min(1600, Math.max(400, numFrames));
+  const targetWidth = options.width || Math.min(1600, Math.max(400, totalFrames));
   const targetHeight = options.height || 320;
   canvas.width = targetWidth;
   canvas.height = targetHeight;
@@ -186,13 +194,17 @@ export function renderAudioSpectrogram(
   const imag = new Float32Array(fftSize);
 
   // Compute magnitudes and track peak dB
-  const magnitudes = new Float32Array(numFrames * activeBins);
+  const magnitudes = new Float32Array(totalFrames * activeBins);
   let peakDb = -Infinity;
 
-  for (let f = 0; f < numFrames; f++) {
-    const startIdx = f * hopSize;
+  const startSampleOffset = Math.floor(startTime * sampleRate);
+
+  for (let f = 0; f < totalFrames; f++) {
+    const startIdx = startSampleOffset + f * hopSize;
     for (let i = 0; i < fftSize; i++) {
-      real[i] = pcm[startIdx + i] * windowWeights[i];
+      const sIdx = startIdx + i;
+      const sVal = (sIdx >= 0 && sIdx < pcm.length) ? pcm[sIdx] : 0;
+      real[i] = sVal * windowWeights[i];
       imag[i] = 0;
     }
 
@@ -214,19 +226,19 @@ export function renderAudioSpectrogram(
 
   // Create image data buffer
   const offscreen = document.createElement('canvas');
-  offscreen.width = numFrames;
+  offscreen.width = totalFrames;
   offscreen.height = activeBins;
   const offCtx = offscreen.getContext('2d');
   if (!offCtx) return;
 
-  const imgData = offCtx.createImageData(numFrames, activeBins);
+  const imgData = offCtx.createImageData(totalFrames, activeBins);
   const data = imgData.data;
 
   // Fill image data (Y is inverted: lowest frequency at bottom, highest frequency at top)
-  for (let f = 0; f < numFrames; f++) {
+  for (let f = 0; f < totalFrames; f++) {
     for (let b = 0; b < activeBins; b++) {
       const y = activeBins - 1 - b; // invert Y
-      const pixelIdx = (y * numFrames + f) * 4;
+      const pixelIdx = (y * totalFrames + f) * 4;
       const db = magnitudes[f * activeBins + b];
       const norm = Math.max(0, Math.min(1, (db - floorDb) / dynamicRangeDb));
 

@@ -510,7 +510,7 @@ export function computeSummaryStats(annotation: BoppAnnotation, records: Tabular
   return {
     rowCount,
     timeRange: minTime !== null && maxTime !== null ? [minTime, maxTime] : null,
-    duration: minTime !== null && maxTime !== null ? maxTime - minTime : null,
+    duration: maxTime !== null ? Math.max(0, maxTime) : null,
     extentType: annotation.extent?.extent_type || 'none (global)',
     payloadType: annotation.payload.payload_type,
     confidenceType: annotation.confidence?.confidence_type || null,

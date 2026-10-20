@@ -277,8 +277,12 @@ const NOTE_HZ_PIANOROLL_DATA: BoppAnnotation = {
   bopp_version: "1.0",
   metadata: {
     metadata_type: "algorithm",
-    annotator_id: "pyin_f0_segmenter",
-    tool: "audio_note_extractor"
+    algorithm_id: "pyin_f0_segmenter",
+    version: "1.0.2",
+    parameters: {
+      fmin: 65.4,
+      fmax: 1046.5,
+    },
   },
   sandbox: {
     piece: "Acoustic Note Segments in Hz (Log Frequency Pitch Axis)",
@@ -1184,6 +1188,7 @@ const CHORD_OVERLAPPING_DATA: BoppAnnotation = {
   metadata: {
     metadata_type: "human",
     annotator_id: "jazz_theorist",
+    tool: "jazz_lead_sheet_transcriber",
   },
   sandbox: {
     description: "Concurrent overlapping rhythm section chords rendered across multiple rows",
@@ -1252,6 +1257,7 @@ const SCORE_QUARTER_POINTS_NOCONF: BoppAnnotation = {
   metadata: {
     metadata_type: "human",
     annotator_id: "theorist",
+    tool: "musescore_score_annotator",
   },
   sandbox: {
     description: "Instantaneous score quarter beat locations without duration (extent: score_quarter, no confidence)",

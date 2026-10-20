@@ -93,6 +93,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const isPlayingRef = useRef<boolean>(false);
   isPlayingRef.current = isPlaying;
   const [currentTime, setCurrentTime] = useState<number>(0);
+  const currentTimeRef = useRef<number>(0);
+  const lastUiUpdateTimeRef = useRef<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [linkedMedia, setLinkedMedia] = useState<LinkedMedia | null>(null);
   const [activeMediaTab, setActiveMediaTab] = useState<'chart' | 'overlay'>('chart');
@@ -169,19 +171,38 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
   // Playhead updater ref to decouple playback ticks from Vega view lifecycle
   const updatePlayheadRef = useRef<(t?: number) => void>(() => {});
+  // Spectrogram updater ref to synchronize zoom/pan with audio FFT
+  const updateSpectrogramRef = useRef<() => void>(() => {});
 
   // Update playhead overlay position smoothly across detail and overview tracks
   const updatePlayhead = useCallback((tSec?: number) => {
     if (!vegaResultRef.current?.view) return;
     const view = vegaResultRef.current.view;
-    const embedEl = chartContainerRef.current?.querySelector('.vega-embed') as HTMLElement | null;
+    const root = chartContainerRef.current;
+    if (!root) return;
+    const embedEl = (root.classList.contains('vega-embed') ? root : (root.querySelector('.vega-embed') as HTMLElement | null)) || root;
     const svg = embedEl?.querySelector('.bopp-playhead-overlay') as SVGSVGElement | null;
     if (!svg) return;
 
-    const targetTime = typeof tSec === 'number' ? tSec : currentTime;
     const detailLine = svg.querySelector('.bopp-detail-playhead-line') as SVGLineElement | null;
     const detailHandle = svg.querySelector('.bopp-detail-playhead-handle') as SVGPolygonElement | null;
     const overviewLine = svg.querySelector('.bopp-overview-playhead-line') as SVGLineElement | null;
+
+    const hasTimeline = Boolean(
+      extentType?.includes('time') ||
+      extentType?.includes('midi') ||
+      extentType?.includes('score') ||
+      canSonify ||
+      linkedMedia?.type === 'audio'
+    );
+    if (!hasTimeline) {
+      if (detailLine) detailLine.style.display = 'none';
+      if (detailHandle) detailHandle.style.display = 'none';
+      if (overviewLine) overviewLine.style.display = 'none';
+      return;
+    }
+
+    const targetTime = typeof tSec === 'number' ? tSec : currentTimeRef.current;
 
     if (targetTime === null || targetTime === undefined || isNaN(targetTime) || targetTime < 0) {
       if (detailLine) detailLine.style.display = 'none';
@@ -198,34 +219,60 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       coordVal = targetTime * 2; // 120 BPM = 2 quarters/s
     }
 
+    const canvas = (embedEl.querySelector('canvas') || embedEl.querySelector('svg:not(.bopp-playhead-overlay)')) as HTMLElement | null;
+    if (canvas) {
+      canvas.style.display = 'block';
+    }
+    const canvasOffsetX = canvas ? canvas.offsetLeft : 0;
+    const canvasOffsetY = canvas ? canvas.offsetTop : 0;
+
     const origin = typeof view.origin === 'function' ? view.origin() : [0, 0];
     const originX = origin[0] || 0;
     const originY = origin[1] || 0;
 
     const scaleNames = Object.keys((view as any)._runtime?.scales || {});
-    const detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+    // Support vconcat, single view, and hconcat (like time_mood_trajectory_variance where concat_1_x is the timeline)
+    let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+    if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
+      const s0 = view.scale('concat_0_x');
+      const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
+      // If concat_0_x is a non-time scale with negative values (e.g. mood valence [-1.2, 1.2])
+      if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
+        detailScaleName = 'concat_1_x';
+      }
+    }
     if (!detailScaleName) return;
 
     const detailScale = view.scale(detailScaleName);
-    if (!detailScale) return;
+    if (!detailScale || typeof detailScale !== 'function') return;
 
     const sgRoot = (view as any).scenegraph?.()?.root?.items?.[0];
-    const isVConcat = sgRoot?.items && sgRoot.items.length >= 2;
-    const detailGroup = isVConcat ? sgRoot.items[0] : sgRoot;
-    const overviewGroup = isVConcat ? sgRoot.items[1] : null;
+    const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
+    const detailGroup = isVConcat
+      ? (sgRoot?.items?.[0]?.items?.[0] || sgRoot?.items?.[0])
+      : detailScaleName === 'concat_1_x'
+      ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1])
+      : sgRoot;
+    const overviewGroup = isVConcat ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1]) : null;
 
-    const detailWidth = detailGroup?.width ?? (typeof view.width === 'function' ? view.width() : containerWidth);
-    const detailHeight = detailGroup?.height ?? (typeof view.height === 'function' ? view.height() : 300);
-    const detailGroupX = originX + (detailGroup?.x ?? 0);
-    const detailGroupY = originY + (detailGroup?.y ?? 0);
+    const detailWidth = detailGroup?.width ?? (typeof view.width === 'function' && view.width() > 0 ? view.width() : containerWidth);
+    const detailHeight = detailGroup?.height ?? (isVConcat ? 220 : typeof view.height === 'function' && view.height() > 0 ? view.height() : 300);
+    const detailGroupX = canvasOffsetX + originX + (detailGroup?.x ?? 0);
+    const detailGroupY = canvasOffsetY + originY + (detailGroup?.y ?? 0);
+
+    const dom = typeof detailScale.domain === 'function' ? detailScale.domain() : null;
+    const minDomain = dom && typeof dom[0] === 'number' ? dom[0] : 0;
+    const maxDomain = dom && typeof dom[1] === 'number' ? dom[1] : Infinity;
 
     const detailRelX = detailScale(coordVal);
-    const isInsideDetail = typeof detailRelX === 'number' && !isNaN(detailRelX) && detailRelX >= 0 && detailRelX <= detailWidth;
+    const isInsideDomain = coordVal >= minDomain - 0.0001 && coordVal <= maxDomain + 0.0001;
+    const isInsideDetail = isInsideDomain && typeof detailRelX === 'number' && !isNaN(detailRelX) && detailRelX >= -0.5 && detailRelX <= detailWidth + 0.5;
 
-    if (isInsideDetail && (isPlaying || targetTime > 0)) {
-      const lineX = Math.round(detailGroupX + detailRelX);
+    if (isInsideDetail && targetTime >= 0) {
+      const clampedRelX = Math.max(0, Math.min(detailWidth, detailRelX));
+      const lineX = Math.round(detailGroupX + clampedRelX);
       const topY = Math.round(detailGroupY);
-      const botY = Math.round(detailGroupY + detailHeight);
+      const botY = Math.round(topY + detailHeight);
 
       if (detailLine) {
         detailLine.style.display = 'block';
@@ -236,7 +283,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       }
       if (detailHandle) {
         detailHandle.style.display = 'block';
-        detailHandle.setAttribute('points', `${lineX - 5},${topY} ${lineX + 5},${topY} ${lineX},${topY + 7}`);
+        detailHandle.setAttribute('points', `${lineX - 5},${topY} ${lineX + 5},${topY} ${lineX},${topY + 6}`);
       }
     } else {
       if (detailLine) detailLine.style.display = 'none';
@@ -245,15 +292,19 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
     // Overview track playhead
     const overviewScaleName = ['concat_1_x', ...scaleNames.filter(k => k.includes('concat_1') && k.endsWith('_x'))].find(k => scaleNames.includes(k));
-    if (overviewGroup && overviewScaleName && (isPlaying || targetTime > 0)) {
+    if (overviewGroup && overviewScaleName && targetTime >= 0) {
       const overviewScale = view.scale(overviewScaleName);
-      if (overviewScale) {
+      if (overviewScale && typeof overviewScale === 'function') {
+        const oDom = typeof overviewScale.domain === 'function' ? overviewScale.domain() : null;
+        const oMin = oDom && typeof oDom[0] === 'number' ? oDom[0] : 0;
+        const oMax = oDom && typeof oDom[1] === 'number' ? oDom[1] : Infinity;
         const overviewRelX = overviewScale(coordVal);
         const overviewWidth = overviewGroup?.width ?? detailWidth;
         const overviewHeight = overviewGroup?.height ?? 56;
-        if (typeof overviewRelX === 'number' && !isNaN(overviewRelX) && overviewRelX >= 0 && overviewRelX <= overviewWidth) {
-          const lineX = Math.round(originX + (overviewGroup.x ?? 0) + overviewRelX);
-          const topY = Math.round(originY + (overviewGroup.y ?? 0));
+        if (coordVal >= oMin - 0.0001 && coordVal <= oMax + 0.0001 && typeof overviewRelX === 'number' && !isNaN(overviewRelX)) {
+          const clampedOverviewRelX = Math.max(0, Math.min(overviewWidth, overviewRelX));
+          const lineX = Math.round(canvasOffsetX + originX + (overviewGroup.x ?? 0) + clampedOverviewRelX);
+          const topY = Math.round(canvasOffsetY + originY + (overviewGroup.y ?? 0));
           const botY = Math.round(topY + overviewHeight);
 
           if (overviewLine) {
@@ -270,15 +321,17 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     } else if (overviewLine) {
       overviewLine.style.display = 'none';
     }
-  }, [currentTime, isPlaying, extentType, containerWidth]);
+  }, [extentType, containerWidth]);
 
   useEffect(() => {
     updatePlayheadRef.current = updatePlayhead;
   }, [updatePlayhead]);
 
-  // Sync playhead when currentTime state or isPlaying changes
+  // Sync playhead when currentTime state or isPlaying changes (only when idle/paused/scrubbed to prevent tug-of-war)
   useEffect(() => {
-    updatePlayhead(currentTime);
+    if (!isPlaying) {
+      updatePlayhead(currentTime);
+    }
   }, [currentTime, isPlaying, updatePlayhead]);
 
   // Initialize Audio Player
@@ -287,12 +340,22 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     audioPlayerRef.current = player;
 
     player.onTimeUpdate(t => {
-      setCurrentTime(t);
+      currentTimeRef.current = t;
+      // Direct 60fps DOM playhead update with zero React scheduling latency
       updatePlayheadRef.current(t);
+
+      // Throttle React state updates to ~12fps to avoid saturating React fiber scheduler
+      const now = performance.now();
+      if (now - lastUiUpdateTimeRef.current > 75) {
+        lastUiUpdateTimeRef.current = now;
+        setCurrentTime(t);
+      }
     });
 
     player.onEnded(() => {
       setIsPlaying(false);
+      currentTimeRef.current = 0;
+      setCurrentTime(0);
       updatePlayheadRef.current(0);
     });
 
@@ -306,28 +369,62 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     if (audioPlayerRef.current) {
       audioPlayerRef.current.loadAnnotation(annotation, tabularData);
       setIsPlaying(false);
+      currentTimeRef.current = 0;
       setCurrentTime(0);
       updatePlayheadRef.current(0);
     }
   }, [annotation, tabularData]);
 
-  // Render spectrogram when audio is linked and time-frequency is active, aligned to plotBounds
-  useEffect(() => {
+  // Render spectrogram when audio is linked and time-frequency is active, aligned to plotBounds and current scale domain
+  const updateSpectrogram = useCallback(() => {
     if (
-      linkedMedia?.audioBuffer &&
-      isTimeFrequency &&
-      spectrogramCanvasRef.current &&
-      plotBounds
+      !linkedMedia?.audioBuffer ||
+      !isTimeFrequency ||
+      !spectrogramCanvasRef.current ||
+      !plotBounds
     ) {
-      renderAudioSpectrogram(linkedMedia.audioBuffer, spectrogramCanvasRef.current, {
-        width: plotBounds.width,
-        height: plotBounds.height,
-        maxFreqHz: 8000,
-        minFreqHz: 0,
-        colormap: 'magma',
-      });
+      return;
     }
-  }, [linkedMedia?.audioBuffer, isTimeFrequency, plotBounds]);
+    const view = vegaResultRef.current?.view;
+    let startT = 0;
+    let endT = linkedMedia.duration || 12;
+    let minF = 0;
+    let maxF = 8000;
+
+    if (view) {
+      const scaleNames = Object.keys((view as any)._runtime?.scales || {});
+      const detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+      const scX = detailScaleName ? view.scale(detailScaleName) : null;
+      if (scX && typeof scX.domain === 'function') {
+        const dom = scX.domain();
+        if (dom && typeof dom[0] === 'number') startT = dom[0];
+        if (dom && typeof dom[1] === 'number') endT = dom[1];
+      }
+
+      const detailYScaleName = ['concat_0_y', 'y', 'layer_0_y', ...scaleNames.filter(k => k.endsWith('_y'))].find(k => scaleNames.includes(k));
+      const scY = detailYScaleName ? view.scale(detailYScaleName) : null;
+      if (scY && typeof scY.domain === 'function') {
+        const yDom = scY.domain();
+        if (yDom && typeof yDom[0] === 'number') minF = yDom[0];
+        if (yDom && typeof yDom[1] === 'number') maxF = yDom[1];
+      }
+    }
+
+    renderAudioSpectrogram(linkedMedia.audioBuffer, spectrogramCanvasRef.current, {
+      width: plotBounds.width,
+      height: plotBounds.height,
+      maxFreqHz: maxF,
+      minFreqHz: minF,
+      startTimeSec: startT,
+      endTimeSec: endT,
+      colormap: 'magma',
+    });
+  }, [linkedMedia?.audioBuffer, linkedMedia?.duration, isTimeFrequency, plotBounds]);
+
+  useEffect(() => {
+    updateSpectrogramRef.current = updateSpectrogram;
+    updateSpectrogram();
+  }, [updateSpectrogram]);
 
   // Handle Play/Pause
   const togglePlay = () => {
@@ -335,6 +432,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     if (isPlaying) {
       audioPlayerRef.current.pause();
       setIsPlaying(false);
+      setCurrentTime(currentTimeRef.current);
+      updatePlayheadRef.current(currentTimeRef.current);
     } else {
       audioPlayerRef.current.play();
       setIsPlaying(true);
@@ -343,6 +442,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
   const handleSeek = (newTime: number) => {
     const clamped = Math.max(0, Math.min(duration, newTime));
+    currentTimeRef.current = clamped;
     setCurrentTime(clamped);
     audioPlayerRef.current?.seek(clamped);
     updatePlayheadRef.current(clamped);
@@ -351,6 +451,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const handleResetPlayback = () => {
     audioPlayerRef.current?.stop();
     setIsPlaying(false);
+    currentTimeRef.current = 0;
     setCurrentTime(0);
     updatePlayheadRef.current(0);
   };
@@ -372,9 +473,34 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         try { view.signal('grid', {}); } catch {}
       }
 
+      const actualXField = extentType?.includes('tick') || extentType?.includes('midi')
+        ? 'tick'
+        : extentType?.includes('quarter') || extentType?.includes('score')
+        ? 'quarter'
+        : 'time';
+
       const brushStore = view.data('brush_store');
-      const minX = 0;
-      const maxX = duration || 100;
+      let minX = 0;
+      let maxX = typeof duration === 'number' && duration > 0 ? duration : 10;
+      if (tabularData && tabularData.length > 0) {
+        const startVals = tabularData
+          .map(d => typeof d[actualXField] === 'number' ? (d[actualXField] as number) : null)
+          .filter((v): v is number => v !== null);
+        const endVals = tabularData
+          .map(d => {
+            const s = typeof d[actualXField] === 'number' ? (d[actualXField] as number) : null;
+            if (s === null) return null;
+            const dur = typeof d.duration === 'number' ? (d.duration as number) : 0;
+            return s + dur;
+          })
+          .filter((v): v is number => v !== null);
+        if (startVals.length > 0 && endVals.length > 0) {
+          minX = Math.min(0, ...startVals);
+          maxX = Math.max(...endVals);
+          if (maxX <= minX) maxX = minX + 1;
+        }
+      }
+
       let cStart = minX;
       let cEnd = maxX;
 
@@ -382,6 +508,15 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         const val = brushStore[0].values[0];
         if (typeof val[0] === 'number') cStart = val[0];
         if (typeof val[1] === 'number') cEnd = val[1];
+      } else {
+        try {
+          const currentBrushSig = typeof view.signal === 'function' ? (view.signal('brush') as any) : null;
+          if (currentBrushSig && currentBrushSig[actualXField] && Array.isArray(currentBrushSig[actualXField])) {
+            const [bs, be] = currentBrushSig[actualXField];
+            if (typeof bs === 'number') cStart = bs;
+            if (typeof be === 'number') cEnd = be;
+          }
+        } catch {}
       }
 
       const span = Math.max(0.5, cEnd - cStart);
@@ -411,13 +546,9 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         nextStart = Math.max(minX, nextEnd - span);
       }
 
-      const unit = brushStore?.[0]?.unit || 'concat_1';
-      const actualXField = extentType?.includes('tick') || extentType?.includes('midi')
-        ? 'tick'
-        : extentType?.includes('quarter') || extentType?.includes('score')
-        ? 'quarter'
-        : 'time';
-      const fields = brushStore?.[0]?.fields || [{ field: actualXField, channel: 'x', type: 'R' }];
+      const storeField = brushStore?.[0]?.fields?.[0]?.field || actualXField;
+      const unit = brushStore?.[0]?.unit || 'concat_1_layer_0';
+      const fields = brushStore?.[0]?.fields || [{ field: storeField, channel: 'x', type: 'R' }];
       const cs = vega.changeset().remove(() => true).insert([{
         unit,
         fields,
@@ -425,10 +556,17 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       }]);
       view.change('brush_store', cs);
       try {
-        view.signal('brush', { [actualXField]: [nextStart, nextEnd] });
+        view.signal('brush', { [storeField]: [nextStart, nextEnd] });
+      } catch {}
+      try {
+        const xSc = (view as any).scale?.('concat_1_x');
+        if (typeof xSc === 'function') {
+          view.signal('brush_x', [xSc(nextStart), xSc(nextEnd)]);
+        }
       } catch {}
       view.runAsync().then(() => {
         updatePlayheadRef.current();
+        updateSpectrogramRef.current();
       });
     } catch (e) {
       console.warn('Zoom preset error:', e);
@@ -513,7 +651,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         vegaResultRef.current = res;
 
         // Attach high-performance SVG playhead overlay to .vega-embed container
-        const embedContainer = chartContainerRef.current?.querySelector('.vega-embed') as HTMLElement | null;
+        const root = chartContainerRef.current;
+        const embedContainer = root ? ((root.classList.contains('vega-embed') ? root : (root.querySelector('.vega-embed') as HTMLElement | null)) || root) : null;
         if (embedContainer) {
           embedContainer.style.position = 'relative';
           let svgOverlay = embedContainer.querySelector('.bopp-playhead-overlay') as SVGSVGElement | null;
@@ -561,11 +700,30 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         // Measure exact inner plot area bounds for precision spectrogram overlay
         try {
           const origin = typeof res.view.origin === 'function' ? res.view.origin() : [0, 0];
-          const w = typeof res.view.width === 'function' ? res.view.width() : containerWidth;
-          const h = typeof res.view.height === 'function' ? res.view.height() : 340;
+          const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
+          let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+          if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
+            const s0 = res.view.scale('concat_0_x');
+            const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
+            if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
+              detailScaleName = 'concat_1_x';
+            }
+          }
+          const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
+          const sgRoot = (res.view as any).scenegraph?.()?.root?.items?.[0];
+          const detailGroup = isVConcat
+            ? (sgRoot?.items?.[0]?.items?.[0] || sgRoot?.items?.[0])
+            : detailScaleName === 'concat_1_x'
+            ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1])
+            : sgRoot;
+          const w = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
+          const h = detailGroup?.height ?? (typeof res.view.height === 'function' && res.view.height() > 0 ? res.view.height() : 240);
+          const canvas = (embedContainer?.querySelector('canvas') || embedContainer?.querySelector('svg:not(.bopp-playhead-overlay)')) as HTMLElement | null;
+          const canvasOffsetX = canvas ? canvas.offsetLeft : 0;
+          const canvasOffsetY = canvas ? canvas.offsetTop : 0;
           const nextBounds = {
-            left: Math.round(origin[0]),
-            top: Math.round(origin[1]),
+            left: Math.round(canvasOffsetX + origin[0] + (detailGroup?.x ?? 0)),
+            top: Math.round(canvasOffsetY + origin[1] + (detailGroup?.y ?? 0)),
             width: Math.round(w),
             height: Math.round(h),
           };
@@ -585,9 +743,16 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
         // Listen for brush signal updates so playhead moves along with interactive zooms/pans in real time
         try {
-          res.view.addSignalListener('brush', () => {
-            updatePlayheadRef.current();
-          });
+          const onBrushChange = () => {
+            requestAnimationFrame(() => {
+              updatePlayheadRef.current();
+              updateSpectrogramRef.current();
+            });
+          };
+          res.view.addSignalListener('brush', onBrushChange);
+          try {
+            res.view.addDataListener('brush_store', onBrushChange);
+          } catch {}
         } catch {}
 
         // Initial playhead position render
@@ -602,50 +767,82 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
           if (item && item.datum) {
             setActiveItem(item.datum as TabularRecord);
-            let itemSec: number | null = null;
-            if (typeof item.datum.time === 'number') {
-              itemSec = item.datum.time;
-            } else if (typeof item.datum.tick === 'number') {
-              itemSec = item.datum.tick / 960; // 480 PPQ @ 120 BPM
-            } else if (typeof item.datum.quarter === 'number') {
-              itemSec = item.datum.quarter * 0.5; // 120 BPM
-            }
-            if (itemSec !== null && !isNaN(itemSec)) {
-              handleSeek(itemSec);
-              return;
-            }
           }
 
-          // Also calculate time if clicked anywhere on empty canvas in detail view
+          // Calculate exact clicked time anywhere in the detail plot
           try {
-            const viewAny = res.view as any;
-            if (typeof viewAny.mouse === 'function') {
-              const [, my] = viewAny.mouse(event);
-              // Detail view height: if click is in bottom overview navigator, skip seek to preserve brush interactions!
-              const detailH = (vegaSpec as any)?.vconcat?.[0]?.height ?? (optimalChartHeight - 80);
-              if (my >= detailH && (vegaSpec as any)?.vconcat?.length) {
-                return;
+            const canvas = (root?.querySelector('canvas') as HTMLCanvasElement | null) || (root?.querySelector('svg:not(.bopp-playhead-overlay)') as SVGElement | null);
+            if (canvas && event && typeof event.clientX === 'number') {
+              const rect = canvas.getBoundingClientRect();
+              const mx = event.clientX - rect.left;
+              const my = event.clientY - rect.top;
+              const origin = typeof res.view.origin === 'function' ? res.view.origin() : [0, 0];
+              const originX = origin[0] || 0;
+              const originY = origin[1] || 0;
+
+              const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
+              let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+              if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
+                const s0 = res.view.scale('concat_0_x');
+                const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
+                if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
+                  detailScaleName = 'concat_1_x';
+                }
               }
-            }
-            const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
-            const candidate = ['x', 'concat_0_x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
-            if (candidate) {
-              const sc = res.view.scale(candidate);
-              if (sc && typeof sc.invert === 'function' && typeof viewAny.mouse === 'function') {
-                const [mx] = viewAny.mouse(event);
-                const origin = typeof viewAny.origin === 'function' ? viewAny.origin() : [0, 0];
-                let clickedTime = sc.invert(mx - origin[0]);
-                if (typeof clickedTime === 'number' && !isNaN(clickedTime)) {
-                  if (candidate.includes('tick') || extentType?.includes('tick') || extentType?.includes('midi')) {
-                    clickedTime = clickedTime / 960;
-                  } else if (candidate.includes('quarter') || extentType?.includes('quarter') || extentType?.includes('score')) {
-                    clickedTime = clickedTime * 0.5;
+
+              const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
+              const sgRoot = (res.view as any).scenegraph?.()?.root?.items?.[0];
+              const detailGroup = isVConcat
+                ? (sgRoot?.items?.[0]?.items?.[0] || sgRoot?.items?.[0])
+                : detailScaleName === 'concat_1_x'
+                ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1])
+                : sgRoot;
+              const detailWidth = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
+              const detailHeight = detailGroup?.height ?? (isVConcat ? 220 : typeof res.view.height === 'function' && res.view.height() > 0 ? res.view.height() : 300);
+              const detailGroupX = originX + (detailGroup?.x ?? 0);
+              const detailGroupY = originY + (detailGroup?.y ?? 0);
+
+              // Only seek if clicked within the detail plot bounds
+              if (
+                mx >= detailGroupX &&
+                mx <= detailGroupX + detailWidth &&
+                my >= detailGroupY &&
+                my <= detailGroupY + detailHeight
+              ) {
+                if (detailScaleName) {
+                  const sc = res.view.scale(detailScaleName);
+                  if (sc && typeof sc.invert === 'function') {
+                    const clickedCoord = sc.invert(mx - detailGroupX);
+                    if (typeof clickedCoord === 'number' && !isNaN(clickedCoord)) {
+                      let clickedTime = clickedCoord;
+                      if (detailScaleName.includes('tick') || extentType?.includes('tick') || extentType?.includes('midi')) {
+                        clickedTime = clickedCoord / 960;
+                      } else if (detailScaleName.includes('quarter') || extentType?.includes('quarter') || extentType?.includes('score')) {
+                        clickedTime = clickedCoord * 0.5;
+                      }
+                      handleSeek(clickedTime);
+                      return;
+                    }
                   }
-                  handleSeek(clickedTime);
                 }
               }
             }
           } catch {}
+
+          // Fallback to item datum start time if exact mouse coordinates could not be inverted
+          if (item && item.datum) {
+            let itemSec: number | null = null;
+            if (typeof item.datum.time === 'number') {
+              itemSec = item.datum.time;
+            } else if (typeof item.datum.tick === 'number') {
+              itemSec = item.datum.tick / 960;
+            } else if (typeof item.datum.quarter === 'number') {
+              itemSec = item.datum.quarter * 0.5;
+            }
+            if (itemSec !== null && !isNaN(itemSec)) {
+              handleSeek(itemSec);
+            }
+          }
         });
       })
       .catch(err => {
@@ -1064,75 +1261,77 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             ref={plotCardRef}
             className="w-full flex-1 bg-white dark:bg-neutral-950 rounded-lg border border-slate-300 dark:border-neutral-800 p-4 flex flex-col justify-start overflow-x-auto min-h-[420px] shadow-2xs relative"
           >
-            <div className="relative inline-block mx-auto min-w-full">
-              {/* Underlying Spectrogram Overlay / Placeholder (positioned directly behind the plot marks) */}
-              {isTimeFrequency && showSpectrogram && plotBounds && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: `${plotBounds.left}px`,
-                    top: `${plotBounds.top}px`,
-                    width: `${plotBounds.width}px`,
-                    height: `${plotBounds.height}px`,
-                    zIndex: 1,
-                    pointerEvents: linkedMedia?.audioBuffer ? 'none' : 'auto',
-                  }}
-                  className="overflow-hidden rounded-xs"
-                >
-                  {linkedMedia?.audioBuffer ? (
-                    <div className="w-full h-full relative">
-                      <canvas
-                        ref={spectrogramCanvasRef}
-                        width={plotBounds.width}
-                        height={plotBounds.height}
-                        className="w-full h-full block opacity-85"
-                      />
-                      <div className="absolute bottom-1 right-1.5 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-mono text-white/90 backdrop-blur-xs flex items-center gap-1">
-                        <Radio className="w-3 h-3 text-emerald-400" />
-                        <span>STFT Spectrogram (0–8,000 Hz)</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="w-full h-full relative pointer-events-none">
-                      {/* Compact Corner Hint Badge - leaves plot data 100% visible */}
-                      <div className="absolute top-2.5 right-2.5 pointer-events-auto bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border border-slate-200/90 dark:border-neutral-700/90 shadow-md rounded-lg p-2.5 max-w-[270px] text-left transition-all z-20">
-                        <div className="flex items-center gap-1.5 mb-1 text-blue-600 dark:text-blue-400">
-                          <Radio className="w-3.5 h-3.5" />
-                          <span className="font-bold text-[11px] tracking-wide text-slate-800 dark:text-slate-200">
-                            Spectrogram Overlay
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mb-2">
-                          Link an audio recording to compute and align the STFT spectrogram behind these bounds.
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => mediaInputRef.current?.click()}
-                            className="px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-100 transition-colors flex items-center gap-1 cursor-pointer"
-                          >
-                            <Upload className="w-2.5 h-2.5" />
-                            <span>Link Audio</span>
-                          </button>
-                          <button
-                            onClick={handleLoadDemoAudio}
-                            className="px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 rounded hover:bg-emerald-100 transition-colors flex items-center gap-1 cursor-pointer"
-                          >
-                            <Sparkles className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
-                            <span>Demo Audio</span>
-                          </button>
+            <div className="w-full flex items-center justify-start md:justify-center">
+              <div className="relative inline-block">
+                {/* Underlying Spectrogram Overlay / Placeholder (positioned directly behind the plot marks) */}
+                {isTimeFrequency && showSpectrogram && plotBounds && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: `${plotBounds.left}px`,
+                      top: `${plotBounds.top}px`,
+                      width: `${plotBounds.width}px`,
+                      height: `${plotBounds.height}px`,
+                      zIndex: 1,
+                      pointerEvents: linkedMedia?.audioBuffer ? 'none' : 'auto',
+                    }}
+                    className="overflow-hidden rounded-xs"
+                  >
+                    {linkedMedia?.audioBuffer ? (
+                      <div className="w-full h-full relative">
+                        <canvas
+                          ref={spectrogramCanvasRef}
+                          width={plotBounds.width}
+                          height={plotBounds.height}
+                          className="w-full h-full block opacity-85"
+                        />
+                        <div className="absolute bottom-1 right-1.5 px-1.5 py-0.5 rounded bg-black/60 text-[10px] font-mono text-white/90 backdrop-blur-xs flex items-center gap-1">
+                          <Radio className="w-3 h-3 text-emerald-400" />
+                          <span>STFT Spectrogram (0–8,000 Hz)</span>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
+                    ) : (
+                      <div className="w-full h-full relative pointer-events-none">
+                        {/* Compact Corner Hint Badge - leaves plot data 100% visible */}
+                        <div className="absolute top-2.5 right-2.5 pointer-events-auto bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border border-slate-200/90 dark:border-neutral-700/90 shadow-md rounded-lg p-2.5 max-w-[270px] text-left transition-all z-20">
+                          <div className="flex items-center gap-1.5 mb-1 text-blue-600 dark:text-blue-400">
+                            <Radio className="w-3.5 h-3.5" />
+                            <span className="font-bold text-[11px] tracking-wide text-slate-800 dark:text-slate-200">
+                              Spectrogram Overlay
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mb-2">
+                            Link an audio recording to compute and align the STFT spectrogram behind these bounds.
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => mediaInputRef.current?.click()}
+                              className="px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 rounded hover:bg-blue-100 transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <Upload className="w-2.5 h-2.5" />
+                              <span>Link Audio</span>
+                            </button>
+                            <button
+                              onClick={handleLoadDemoAudio}
+                              className="px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 rounded hover:bg-emerald-100 transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <Sparkles className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                              <span>Demo Audio</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
 
-              {/* Primary Vega-Lite Chart Canvas */}
-              <div
-                ref={chartContainerRef}
-                style={{ position: 'relative', zIndex: 10 }}
-                className="w-full flex items-center justify-start md:justify-center overflow-visible"
-              />
+                {/* Primary Vega-Lite Chart Canvas */}
+                <div
+                  ref={chartContainerRef}
+                  style={{ position: 'relative', zIndex: 10 }}
+                  className="overflow-visible inline-block"
+                />
+              </div>
             </div>
           </div>
 

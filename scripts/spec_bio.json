@@ -1,0 +1,1072 @@
+=== isDark=false ===
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "__index": 0,
+        "time": 0.4,
+        "duration": 0.8,
+        "freq_min": 1800,
+        "freq_max": 4200,
+        "value": "Robin Chirp",
+        "confidence_type": "likelihood",
+        "confidence": 0.94,
+        "confidence_pct": 94,
+        "confidence_label": "94%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.752
+      },
+      {
+        "__index": 1,
+        "time": 1.5,
+        "duration": 1.2,
+        "freq_min": 2200,
+        "freq_max": 5800,
+        "value": "Cardinal Song",
+        "confidence_type": "likelihood",
+        "confidence": 0.89,
+        "confidence_pct": 89,
+        "confidence_label": "89%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 1.068
+      },
+      {
+        "__index": 2,
+        "time": 3.1,
+        "duration": 0.6,
+        "freq_min": 3500,
+        "freq_max": 7200,
+        "value": "Warbler Trill",
+        "confidence_type": "likelihood",
+        "confidence": 0.96,
+        "confidence_pct": 96,
+        "confidence_label": "96%",
+        "confidence_meter": "██████████",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.576
+      },
+      {
+        "__index": 3,
+        "time": 4.2,
+        "duration": 1.5,
+        "freq_min": 1200,
+        "freq_max": 3100,
+        "value": "Sparrow Call",
+        "confidence_type": "likelihood",
+        "confidence": 0.82,
+        "confidence_pct": 82,
+        "confidence_label": "82%",
+        "confidence_meter": "████████░░",
+        "confidence_grade": "medium",
+        "confidence_color": "#cbd5e1",
+        "confidence_duration": 1.23
+      },
+      {
+        "__index": 4,
+        "time": 6,
+        "duration": 0.9,
+        "freq_min": 2100,
+        "freq_max": 4900,
+        "value": "Cardinal Song",
+        "confidence_type": "likelihood",
+        "confidence": 0.91,
+        "confidence_pct": 91,
+        "confidence_label": "91%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.819
+      },
+      {
+        "__index": 5,
+        "time": 7.5,
+        "duration": 1.1,
+        "freq_min": 3400,
+        "freq_max": 6800,
+        "value": "Warbler Trill",
+        "confidence_type": "likelihood",
+        "confidence": 0.93,
+        "confidence_pct": 93,
+        "confidence_label": "93%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 1.023
+      },
+      {
+        "__index": 6,
+        "time": 9,
+        "duration": 0.7,
+        "freq_min": 1900,
+        "freq_max": 4100,
+        "value": "Robin Chirp",
+        "confidence_type": "likelihood",
+        "confidence": 0.88,
+        "confidence_pct": 88,
+        "confidence_label": "88%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.616
+      },
+      {
+        "__index": 7,
+        "time": 10.2,
+        "duration": 1.8,
+        "freq_min": 800,
+        "freq_max": 2400,
+        "value": "Owl Hoot",
+        "confidence_type": "likelihood",
+        "confidence": 0.97,
+        "confidence_pct": 97,
+        "confidence_label": "97%",
+        "confidence_meter": "██████████",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 1.746
+      }
+    ]
+  },
+  "transform": [
+    {
+      "calculate": "datum.time + (datum.duration != null ? datum.duration : 0)",
+      "as": "_calc_end"
+    }
+  ],
+  "config": {
+    "autosize": {
+      "type": "pad",
+      "contains": "padding"
+    },
+    "padding": {
+      "left": 28,
+      "right": 28,
+      "top": 16,
+      "bottom": 16
+    },
+    "background": "transparent",
+    "axis": {
+      "domainColor": "#94a3b8",
+      "tickColor": "#94a3b8",
+      "labelColor": "#f8fafc",
+      "titleColor": "#f8fafc",
+      "gridColor": "#1e293b",
+      "labelFont": "system-ui, -apple-system, sans-serif",
+      "titleFont": "system-ui, -apple-system, sans-serif",
+      "labelFontSize": 11,
+      "titleFontSize": 12,
+      "titleFontWeight": "bold",
+      "titlePadding": 10,
+      "labelPadding": 6
+    },
+    "legend": {
+      "labelColor": "#f8fafc",
+      "titleColor": "#f8fafc",
+      "labelFont": "system-ui, -apple-system, sans-serif",
+      "titleFont": "system-ui, -apple-system, sans-serif",
+      "orient": "top"
+    },
+    "view": {
+      "stroke": "#334155",
+      "fill": "transparent"
+    }
+  },
+  "vconcat": [
+    {
+      "width": 700,
+      "height": 226,
+      "title": {
+        "text": "BOPP Time-Frequency Bounding Boxes: sensor:xeno_canto_record_4821",
+        "color": "#f8fafc"
+      },
+      "layer": [
+        {
+          "mark": {
+            "type": "rect",
+            "fillOpacity": 0.45,
+            "strokeWidth": 2,
+            "cornerRadius": 2
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "title": "Time (seconds)",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "x2": {
+              "field": "_calc_end"
+            },
+            "y": {
+              "field": "freq_min",
+              "type": "quantitative",
+              "title": "Frequency (Hz)",
+              "scale": {
+                "domain": [
+                  0,
+                  8000
+                ],
+                "zero": true
+              }
+            },
+            "y2": {
+              "field": "freq_max"
+            },
+            "color": {
+              "field": "value",
+              "type": "nominal",
+              "title": "Event / Sound Class",
+              "scale": {
+                "range": [
+                  "#f2695a",
+                  "#5a60f2",
+                  "#f2eb5a",
+                  "#d55af2",
+                  "#5af2c0",
+                  "#f25a8c",
+                  "#5aa1f2",
+                  "#f2aa5a",
+                  "#945af2",
+                  "#5af27f",
+                  "#f25acd",
+                  "#5ae2f2"
+                ]
+              }
+            },
+            "stroke": {
+              "field": "value",
+              "type": "nominal",
+              "scale": {
+                "range": [
+                  "#f2695a",
+                  "#5a60f2",
+                  "#f2eb5a",
+                  "#d55af2",
+                  "#5af2c0",
+                  "#f25a8c",
+                  "#5aa1f2",
+                  "#f2aa5a",
+                  "#945af2",
+                  "#5af27f",
+                  "#f25acd",
+                  "#5ae2f2"
+                ]
+              }
+            },
+            "tooltip": [
+              {
+                "field": "value",
+                "type": "nominal",
+                "title": "Class"
+              },
+              {
+                "field": "time",
+                "type": "quantitative",
+                "format": ".3f",
+                "title": "Start Time (s)"
+              },
+              {
+                "field": "duration",
+                "type": "quantitative",
+                "format": ".3f",
+                "title": "Duration (s)"
+              },
+              {
+                "field": "freq_min",
+                "type": "quantitative",
+                "format": ".1f",
+                "title": "Freq Min (Hz)"
+              },
+              {
+                "field": "freq_max",
+                "type": "quantitative",
+                "format": ".1f",
+                "title": "Freq Max (Hz)"
+              },
+              {
+                "field": "confidence",
+                "type": "quantitative",
+                "format": ".3f",
+                "title": "Confidence"
+              }
+            ]
+          }
+        },
+        {
+          "transform": [
+            {
+              "calculate": "datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)",
+              "as": "_tf_meter_bottom"
+            }
+          ],
+          "mark": {
+            "type": "rect",
+            "fill": "rgba(0,0,0,0.6)",
+            "cornerRadius": 1
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "x2": {
+              "field": "_calc_end"
+            },
+            "y": {
+              "field": "_tf_meter_bottom",
+              "type": "quantitative"
+            },
+            "y2": {
+              "field": "freq_max"
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "calculate": "datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)",
+              "as": "_tf_meter_bottom"
+            },
+            {
+              "calculate": "datum.time + (datum.duration != null ? datum.duration * (datum.confidence != null ? datum.confidence : 1.0) : 0)",
+              "as": "_tf_conf_end"
+            }
+          ],
+          "mark": {
+            "type": "rect",
+            "cornerRadius": 1
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "x2": {
+              "field": "_tf_conf_end"
+            },
+            "y": {
+              "field": "_tf_meter_bottom",
+              "type": "quantitative"
+            },
+            "y2": {
+              "field": "freq_max"
+            },
+            "color": {
+              "field": "confidence",
+              "type": "quantitative",
+              "scale": {
+                "domain": [
+                  0,
+                  0.65,
+                  0.85,
+                  1
+                ],
+                "range": [
+                  "#64748b",
+                  "#94a3b8",
+                  "#e2e8f0",
+                  "#ffffff"
+                ]
+              },
+              "legend": null
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "calculate": "datum.value + (datum.confidence != null ? ' (' + round(datum.confidence * 100) + '%)' : '')",
+              "as": "_tf_label"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "align": "left",
+            "baseline": "bottom",
+            "dx": 4,
+            "dy": -2,
+            "fontSize": 10,
+            "fontWeight": "bold",
+            "fill": "#f8fafc"
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "y": {
+              "field": "freq_max",
+              "type": "quantitative"
+            },
+            "text": {
+              "field": "_tf_label",
+              "type": "nominal"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 700,
+      "height": 56,
+      "title": {
+        "text": "🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window",
+        "color": "#94a3b8",
+        "fontSize": 10.5,
+        "fontWeight": "bold"
+      },
+      "params": [
+        {
+          "name": "brush",
+          "select": {
+            "type": "interval",
+            "encodings": [
+              "x"
+            ],
+            "mark": {
+              "fill": "#38bdf8",
+              "fillOpacity": 0.38,
+              "stroke": "#38bdf8",
+              "strokeWidth": 3
+            },
+            "zoom": true,
+            "clear": false
+          },
+          "value": {
+            "time": [
+              0,
+              13
+            ]
+          }
+        }
+      ],
+      "layer": [
+        {
+          "mark": {
+            "type": "rect",
+            "fillOpacity": 0.5,
+            "strokeWidth": 1
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "title": "Time (seconds)",
+              "scale": {
+                "domain": [
+                  0,
+                  13
+                ]
+              }
+            },
+            "x2": {
+              "field": "_calc_end"
+            },
+            "y": {
+              "field": "freq_min",
+              "type": "quantitative",
+              "scale": {
+                "domain": [
+                  0,
+                  8000
+                ],
+                "zero": true
+              },
+              "axis": null
+            },
+            "y2": {
+              "field": "freq_max"
+            },
+            "color": {
+              "field": "value",
+              "type": "nominal",
+              "scale": {
+                "range": [
+                  "#f2695a",
+                  "#5a60f2",
+                  "#f2eb5a",
+                  "#d55af2",
+                  "#5af2c0",
+                  "#f25a8c",
+                  "#5aa1f2",
+                  "#f2aa5a",
+                  "#945af2",
+                  "#5af27f",
+                  "#f25acd",
+                  "#5ae2f2"
+                ]
+              },
+              "legend": null
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "resolve": {
+    "scale": {
+      "color": "independent"
+    }
+  }
+}
+=== isDark=true ===
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": {
+    "values": [
+      {
+        "__index": 0,
+        "time": 0.4,
+        "duration": 0.8,
+        "freq_min": 1800,
+        "freq_max": 4200,
+        "value": "Robin Chirp",
+        "confidence_type": "likelihood",
+        "confidence": 0.94,
+        "confidence_pct": 94,
+        "confidence_label": "94%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.752
+      },
+      {
+        "__index": 1,
+        "time": 1.5,
+        "duration": 1.2,
+        "freq_min": 2200,
+        "freq_max": 5800,
+        "value": "Cardinal Song",
+        "confidence_type": "likelihood",
+        "confidence": 0.89,
+        "confidence_pct": 89,
+        "confidence_label": "89%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 1.068
+      },
+      {
+        "__index": 2,
+        "time": 3.1,
+        "duration": 0.6,
+        "freq_min": 3500,
+        "freq_max": 7200,
+        "value": "Warbler Trill",
+        "confidence_type": "likelihood",
+        "confidence": 0.96,
+        "confidence_pct": 96,
+        "confidence_label": "96%",
+        "confidence_meter": "██████████",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.576
+      },
+      {
+        "__index": 3,
+        "time": 4.2,
+        "duration": 1.5,
+        "freq_min": 1200,
+        "freq_max": 3100,
+        "value": "Sparrow Call",
+        "confidence_type": "likelihood",
+        "confidence": 0.82,
+        "confidence_pct": 82,
+        "confidence_label": "82%",
+        "confidence_meter": "████████░░",
+        "confidence_grade": "medium",
+        "confidence_color": "#cbd5e1",
+        "confidence_duration": 1.23
+      },
+      {
+        "__index": 4,
+        "time": 6,
+        "duration": 0.9,
+        "freq_min": 2100,
+        "freq_max": 4900,
+        "value": "Cardinal Song",
+        "confidence_type": "likelihood",
+        "confidence": 0.91,
+        "confidence_pct": 91,
+        "confidence_label": "91%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.819
+      },
+      {
+        "__index": 5,
+        "time": 7.5,
+        "duration": 1.1,
+        "freq_min": 3400,
+        "freq_max": 6800,
+        "value": "Warbler Trill",
+        "confidence_type": "likelihood",
+        "confidence": 0.93,
+        "confidence_pct": 93,
+        "confidence_label": "93%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 1.023
+      },
+      {
+        "__index": 6,
+        "time": 9,
+        "duration": 0.7,
+        "freq_min": 1900,
+        "freq_max": 4100,
+        "value": "Robin Chirp",
+        "confidence_type": "likelihood",
+        "confidence": 0.88,
+        "confidence_pct": 88,
+        "confidence_label": "88%",
+        "confidence_meter": "█████████░",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 0.616
+      },
+      {
+        "__index": 7,
+        "time": 10.2,
+        "duration": 1.8,
+        "freq_min": 800,
+        "freq_max": 2400,
+        "value": "Owl Hoot",
+        "confidence_type": "likelihood",
+        "confidence": 0.97,
+        "confidence_pct": 97,
+        "confidence_label": "97%",
+        "confidence_meter": "██████████",
+        "confidence_grade": "high",
+        "confidence_color": "#ffffff",
+        "confidence_duration": 1.746
+      }
+    ]
+  },
+  "transform": [
+    {
+      "calculate": "datum.time + (datum.duration != null ? datum.duration : 0)",
+      "as": "_calc_end"
+    }
+  ],
+  "config": {
+    "autosize": {
+      "type": "pad",
+      "contains": "padding"
+    },
+    "padding": {
+      "left": 28,
+      "right": 28,
+      "top": 16,
+      "bottom": 16
+    },
+    "background": "transparent",
+    "axis": {
+      "domainColor": "#94a3b8",
+      "tickColor": "#94a3b8",
+      "labelColor": "#f8fafc",
+      "titleColor": "#f8fafc",
+      "gridColor": "#1e293b",
+      "labelFont": "system-ui, -apple-system, sans-serif",
+      "titleFont": "system-ui, -apple-system, sans-serif",
+      "labelFontSize": 11,
+      "titleFontSize": 12,
+      "titleFontWeight": "bold",
+      "titlePadding": 10,
+      "labelPadding": 6
+    },
+    "legend": {
+      "labelColor": "#f8fafc",
+      "titleColor": "#f8fafc",
+      "labelFont": "system-ui, -apple-system, sans-serif",
+      "titleFont": "system-ui, -apple-system, sans-serif",
+      "orient": "top"
+    },
+    "view": {
+      "stroke": "#334155",
+      "fill": "transparent"
+    }
+  },
+  "vconcat": [
+    {
+      "width": 700,
+      "height": 226,
+      "title": {
+        "text": "BOPP Time-Frequency Bounding Boxes: sensor:xeno_canto_record_4821",
+        "color": "#f8fafc"
+      },
+      "layer": [
+        {
+          "mark": {
+            "type": "rect",
+            "fillOpacity": 0.45,
+            "strokeWidth": 2,
+            "cornerRadius": 2
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "title": "Time (seconds)",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "x2": {
+              "field": "_calc_end"
+            },
+            "y": {
+              "field": "freq_min",
+              "type": "quantitative",
+              "title": "Frequency (Hz)",
+              "scale": {
+                "domain": [
+                  0,
+                  8000
+                ],
+                "zero": true
+              }
+            },
+            "y2": {
+              "field": "freq_max"
+            },
+            "color": {
+              "field": "value",
+              "type": "nominal",
+              "title": "Event / Sound Class",
+              "scale": {
+                "range": [
+                  "#f2695a",
+                  "#5a60f2",
+                  "#f2eb5a",
+                  "#d55af2",
+                  "#5af2c0",
+                  "#f25a8c",
+                  "#5aa1f2",
+                  "#f2aa5a",
+                  "#945af2",
+                  "#5af27f",
+                  "#f25acd",
+                  "#5ae2f2"
+                ]
+              }
+            },
+            "stroke": {
+              "field": "value",
+              "type": "nominal",
+              "scale": {
+                "range": [
+                  "#f2695a",
+                  "#5a60f2",
+                  "#f2eb5a",
+                  "#d55af2",
+                  "#5af2c0",
+                  "#f25a8c",
+                  "#5aa1f2",
+                  "#f2aa5a",
+                  "#945af2",
+                  "#5af27f",
+                  "#f25acd",
+                  "#5ae2f2"
+                ]
+              }
+            },
+            "tooltip": [
+              {
+                "field": "value",
+                "type": "nominal",
+                "title": "Class"
+              },
+              {
+                "field": "time",
+                "type": "quantitative",
+                "format": ".3f",
+                "title": "Start Time (s)"
+              },
+              {
+                "field": "duration",
+                "type": "quantitative",
+                "format": ".3f",
+                "title": "Duration (s)"
+              },
+              {
+                "field": "freq_min",
+                "type": "quantitative",
+                "format": ".1f",
+                "title": "Freq Min (Hz)"
+              },
+              {
+                "field": "freq_max",
+                "type": "quantitative",
+                "format": ".1f",
+                "title": "Freq Max (Hz)"
+              },
+              {
+                "field": "confidence",
+                "type": "quantitative",
+                "format": ".3f",
+                "title": "Confidence"
+              }
+            ]
+          }
+        },
+        {
+          "transform": [
+            {
+              "calculate": "datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)",
+              "as": "_tf_meter_bottom"
+            }
+          ],
+          "mark": {
+            "type": "rect",
+            "fill": "rgba(0,0,0,0.6)",
+            "cornerRadius": 1
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "x2": {
+              "field": "_calc_end"
+            },
+            "y": {
+              "field": "_tf_meter_bottom",
+              "type": "quantitative"
+            },
+            "y2": {
+              "field": "freq_max"
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "calculate": "datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)",
+              "as": "_tf_meter_bottom"
+            },
+            {
+              "calculate": "datum.time + (datum.duration != null ? datum.duration * (datum.confidence != null ? datum.confidence : 1.0) : 0)",
+              "as": "_tf_conf_end"
+            }
+          ],
+          "mark": {
+            "type": "rect",
+            "cornerRadius": 1
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "x2": {
+              "field": "_tf_conf_end"
+            },
+            "y": {
+              "field": "_tf_meter_bottom",
+              "type": "quantitative"
+            },
+            "y2": {
+              "field": "freq_max"
+            },
+            "color": {
+              "field": "confidence",
+              "type": "quantitative",
+              "scale": {
+                "domain": [
+                  0,
+                  0.65,
+                  0.85,
+                  1
+                ],
+                "range": [
+                  "#64748b",
+                  "#94a3b8",
+                  "#e2e8f0",
+                  "#ffffff"
+                ]
+              },
+              "legend": null
+            }
+          }
+        },
+        {
+          "transform": [
+            {
+              "calculate": "datum.value + (datum.confidence != null ? ' (' + round(datum.confidence * 100) + '%)' : '')",
+              "as": "_tf_label"
+            }
+          ],
+          "mark": {
+            "type": "text",
+            "align": "left",
+            "baseline": "bottom",
+            "dx": 4,
+            "dy": -2,
+            "fontSize": 10,
+            "fontWeight": "bold",
+            "fill": "#f8fafc"
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "scale": {
+                "domain": {
+                  "param": "brush"
+                }
+              }
+            },
+            "y": {
+              "field": "freq_max",
+              "type": "quantitative"
+            },
+            "text": {
+              "field": "_tf_label",
+              "type": "nominal"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 700,
+      "height": 56,
+      "title": {
+        "text": "🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window",
+        "color": "#94a3b8",
+        "fontSize": 10.5,
+        "fontWeight": "bold"
+      },
+      "params": [
+        {
+          "name": "brush",
+          "select": {
+            "type": "interval",
+            "encodings": [
+              "x"
+            ],
+            "mark": {
+              "fill": "#38bdf8",
+              "fillOpacity": 0.38,
+              "stroke": "#38bdf8",
+              "strokeWidth": 3
+            },
+            "zoom": true,
+            "clear": false
+          },
+          "value": {
+            "time": [
+              0,
+              13
+            ]
+          }
+        }
+      ],
+      "layer": [
+        {
+          "mark": {
+            "type": "rect",
+            "fillOpacity": 0.5,
+            "strokeWidth": 1
+          },
+          "encoding": {
+            "x": {
+              "field": "time",
+              "type": "quantitative",
+              "title": "Time (seconds)",
+              "scale": {
+                "domain": [
+                  0,
+                  13
+                ]
+              }
+            },
+            "x2": {
+              "field": "_calc_end"
+            },
+            "y": {
+              "field": "freq_min",
+              "type": "quantitative",
+              "scale": {
+                "domain": [
+                  0,
+                  8000
+                ],
+                "zero": true
+              },
+              "axis": null
+            },
+            "y2": {
+              "field": "freq_max"
+            },
+            "color": {
+              "field": "value",
+              "type": "nominal",
+              "scale": {
+                "range": [
+                  "#f2695a",
+                  "#5a60f2",
+                  "#f2eb5a",
+                  "#d55af2",
+                  "#5af2c0",
+                  "#f25a8c",
+                  "#5aa1f2",
+                  "#f2aa5a",
+                  "#945af2",
+                  "#5af27f",
+                  "#f25acd",
+                  "#5ae2f2"
+                ]
+              },
+              "legend": null
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "resolve": {
+    "scale": {
+      "color": "independent"
+    }
+  }
+}

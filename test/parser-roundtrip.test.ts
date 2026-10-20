@@ -33,7 +33,7 @@ test('BOPP Parser & Serialization Test Suite', async (t) => {
   });
 
   await t.test('3. Tabular conversion extracts correct column metrics', () => {
-    const chordDs = SAMPLE_DATASETS.find(d => d.id === 'drive_bopp')!;
+    const chordDs = SAMPLE_DATASETS.find(d => d.id.includes('drive'))!;
     const rows = annotationToTabular(chordDs.data);
 
     assert.strictEqual(rows.length, chordDs.data.extent.time.length);
