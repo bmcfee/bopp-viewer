@@ -21,8 +21,9 @@
     "prelint": "node scripts/generate_types.mjs",
     "dev": "vite --port=3000 --host=0.0.0.0",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js jupyterlab_bopp/labextension lib .core-meta",
+    "clean": "rm -rf dist build server.js jupyterlab_bopp/labextension jupyterlab_bopp/standalone/standalone.js lib .core-meta src/types/generated install.json jupyterlab_bopp/install.json jupyterlab_bopp/package.json .pnp.* .yarn yarn.lock jupyterlab_bopp/.yarn __pycache__ jupyterlab_bopp/__pycache__",
     "lint": "node scripts/generate_types.mjs && tsc --noEmit",
+    "pretest": "node scripts/generate_types.mjs",
     "test": "node scripts/generate_types.mjs && tsx --test test/*.test.ts",
     "test:ci": "npm run build && tsx --test test/*.test.ts"
   },

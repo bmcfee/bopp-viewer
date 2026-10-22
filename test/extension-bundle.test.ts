@@ -44,8 +44,12 @@ test('JupyterLab Extension Bundle & Manifest Verification', async (t) => {
     assert.ok(pyproject.includes('ensured-targets = [\n    "jupyterlab_bopp/labextension/package.json"'));
   });
 
-  await t.test('4. lib/index.js bundled extension exists and contains extension identifier', () => {
+  await t.test('4. lib/index.js bundled extension exists and contains extension identifier', async () => {
     const libIndexPath = path.resolve(rootDir, 'lib/index.js');
+    if (!fs.existsSync(libIndexPath)) {
+      const { execSync } = await import('node:child_process');
+      execSync('npm run build', { cwd: rootDir, stdio: 'inherit' });
+    }
     assert.ok(fs.existsSync(libIndexPath), 'lib/index.js must exist after build');
     const libContent = fs.readFileSync(libIndexPath, 'utf8');
 
@@ -137,5 +141,21 @@ test('JupyterLab Extension Bundle & Manifest Verification', async (t) => {
     assert.ok(helpOutput.includes('--port'), 'CLI help must mention --port option');
     assert.ok(helpOutput.includes('--no-browser'), 'CLI help must mention --no-browser option');
   });
+
+  await t.test('9. .gitignore excludes all build artifacts, bundles, and environment caches', () => {
+    const gitignorePath = path.resolve(rootDir, '.gitignore');
+    assert.ok(fs.existsSync(gitignorePath), '.gitignore must exist');
+    const gitignore = fs.readFileSync(gitignorePath, 'utf8');
+
+    assert.ok(gitignore.includes('jupyterlab_bopp/labextension/'), '.gitignore must ignore jupyterlab_bopp/labextension/');
+    assert.ok(gitignore.includes('jupyterlab_bopp/standalone/standalone.js'), '.gitignore must ignore standalone.js');
+    assert.ok(gitignore.includes('lib/'), '.gitignore must ignore lib/');
+    assert.ok(gitignore.includes('src/types/generated/'), '.gitignore must ignore src/types/generated/');
+    assert.ok(gitignore.includes('.pnp.*'), '.gitignore must ignore .pnp.*');
+    assert.ok(gitignore.includes('.yarn/'), '.gitignore must ignore .yarn/');
+    assert.ok(gitignore.includes('yarn.lock'), '.gitignore must ignore yarn.lock');
+    assert.ok(gitignore.includes('__pycache__/'), '.gitignore must ignore __pycache__/');
+  });
 });
+
 

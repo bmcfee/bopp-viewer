@@ -1,8 +1,62 @@
+# Dependencies
 node_modules/
-build/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+yarn.lock
+package-lock.json.bak
+*/.yarn/
+
+# Build outputs and bundles
 dist/
-coverage/
-.DS_Store
-*.log
+build/
+lib/
+.core-meta/
+
+# Prebuilt JupyterLab extension assets and standalone CLI bundle
+# Generated at build time by npm run build / hatch-jupyter-builder
+jupyterlab_bopp/labextension/
+jupyterlab_bopp/standalone/standalone.js
+jupyterlab_bopp/package.json
+jupyterlab_bopp/install.json
+install.json
+
+# Auto-generated TypeScript schema types
+src/types/generated/
+
+# Python artifacts and caches
+__pycache__/
+*/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+.eggs/
+*.whl
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
 .env*
 !.env.example
+
+# Testing and coverage
+coverage/
+.nyc_output/
+*.log
+
+# System & OS files
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
