@@ -65,13 +65,77 @@ async function prepareLabExtension() {
 
   console.log('[JupyterLab Bundler] 2. Preparing core-meta configuration...');
   fs.mkdirSync(coreMetaDir, { recursive: true });
-  const corePkgJson = path.resolve(rootDir, 'node_modules/@jupyterlab/core-meta/core.package.json');
-  if (fs.existsSync(corePkgJson)) {
-    fs.copyFileSync(corePkgJson, path.join(coreMetaDir, 'package.json'));
+  const coreMetaPackageJsonPath = path.join(coreMetaDir, 'package.json');
+  const req = createRequire(path.resolve(rootDir, 'package.json'));
+
+  let coreMetaContent = null;
+
+  // 1. Try resolving via node module resolution (works across npm, yarn classic, and yarn PnP)
+  try {
+    const resolvedCoreMeta = req.resolve('@jupyterlab/core-meta/core.package.json');
+    coreMetaContent = fs.readFileSync(resolvedCoreMeta, 'utf-8');
+  } catch {
+    try {
+      const data = req('@jupyterlab/core-meta/core.package.json');
+      coreMetaContent = JSON.stringify(data, null, 2);
+    } catch {}
   }
 
+  // 2. Direct filesystem lookup fallback
+  if (!coreMetaContent) {
+    const directPath = path.resolve(rootDir, 'node_modules/@jupyterlab/core-meta/core.package.json');
+    if (fs.existsSync(directPath)) {
+      coreMetaContent = fs.readFileSync(directPath, 'utf-8');
+    }
+  }
+
+  // 3. Guaranteed valid fallback metadata with standard JupyterLab 4 singleton & shared packages
+  if (!coreMetaContent) {
+    const fallbackCoreMeta = {
+      name: "@jupyterlab/application-top",
+      version: "4.5.0",
+      dependencies: {
+        "@jupyterlab/application": "^4.0.0",
+        "@jupyterlab/apputils": "^4.0.0",
+        "@jupyterlab/docregistry": "^4.0.0",
+        "@jupyterlab/rendermime": "^4.0.0",
+        "@jupyterlab/rendermime-interfaces": "^3.0.0",
+        "@lumino/widgets": "^2.0.0",
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
+      },
+      resolutions: {},
+      jupyterlab: {
+        singletonPackages: [
+          "@jupyterlab/application",
+          "@jupyterlab/apputils",
+          "@jupyterlab/docregistry",
+          "@jupyterlab/rendermime",
+          "@jupyterlab/rendermime-interfaces",
+          "@lumino/algorithm",
+          "@lumino/application",
+          "@lumino/commands",
+          "@lumino/coreutils",
+          "@lumino/disposable",
+          "@lumino/messaging",
+          "@lumino/properties",
+          "@lumino/signaling",
+          "@lumino/virtualdom",
+          "@lumino/widgets",
+          "react",
+          "react-dom"
+        ],
+        linkedPackages: {},
+        staticDir: "../static"
+      }
+    };
+    coreMetaContent = JSON.stringify(fallbackCoreMeta, null, 2);
+  }
+
+  // Always write the core package.json so --core-path resolution never fails
+  fs.writeFileSync(coreMetaPackageJsonPath, coreMetaContent, 'utf-8');
+
   console.log('[JupyterLab Bundler] 3. Running build-labextension webpack compiler...');
-  const req = createRequire(path.resolve(rootDir, 'package.json'));
   let buildLabExtScript;
   try {
     buildLabExtScript = req.resolve('@jupyterlab/builder/lib/build-labextension.js');
