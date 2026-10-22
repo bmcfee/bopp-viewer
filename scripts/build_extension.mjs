@@ -104,6 +104,12 @@ async function prepareLabExtension() {
     JSON.stringify(installJson, null, 2) + '\n',
     'utf-8'
   );
+  fs.writeFileSync(
+    path.join(pyPkgDir, 'install.json'),
+    JSON.stringify(installJson, null, 2) + '\n',
+    'utf-8'
+  );
+
 
   const pyPkgPackageJson = {
     name: 'jupyterlab-bopp',
