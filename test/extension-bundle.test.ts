@@ -88,4 +88,54 @@ test('JupyterLab Extension Bundle & Manifest Verification', async (t) => {
     const remoteEntry = staticFiles.find(f => f.startsWith('remoteEntry') && f.endsWith('.js'));
     assert.ok(remoteEntry, 'Webpack Module Federation remoteEntry.*.js must be present in labextension/static');
   });
+
+  await t.test('6. boppview console script is configured in pyproject.toml and setup.cfg', () => {
+    const pyproject = fs.readFileSync(path.resolve(rootDir, 'pyproject.toml'), 'utf8');
+    assert.ok(
+      pyproject.includes('boppview = "jupyterlab_bopp.cli:main"'),
+      'pyproject.toml must declare boppview in [project.scripts]'
+    );
+    assert.ok(
+      pyproject.includes('"jupyterlab_bopp/standalone"'),
+      'pyproject.toml must include standalone directory in sdist artifacts'
+    );
+
+    const setupCfg = fs.readFileSync(path.resolve(rootDir, 'setup.cfg'), 'utf8');
+    assert.ok(
+      setupCfg.includes('boppview = jupyterlab_bopp.cli:main'),
+      'setup.cfg must declare boppview under [options.entry_points]'
+    );
+    assert.ok(
+      setupCfg.includes('standalone/**'),
+      'setup.cfg must include standalone/** under [options.package_data]'
+    );
+  });
+
+  await t.test('7. jupyterlab_bopp/cli.py and standalone assets exist', () => {
+    const cliPath = path.resolve(rootDir, 'jupyterlab_bopp/cli.py');
+    assert.ok(fs.existsSync(cliPath), 'jupyterlab_bopp/cli.py must exist');
+    const cliContent = fs.readFileSync(cliPath, 'utf8');
+    assert.ok(cliContent.includes('def main('), 'cli.py must define main()');
+    assert.ok(cliContent.includes('prog="boppview"'), 'cli.py must configure boppview program name');
+
+    const mainPyPath = path.resolve(rootDir, 'jupyterlab_bopp/__main__.py');
+    assert.ok(fs.existsSync(mainPyPath), 'jupyterlab_bopp/__main__.py must exist');
+
+    const standaloneIndex = path.resolve(rootDir, 'jupyterlab_bopp/standalone/index.html');
+    assert.ok(fs.existsSync(standaloneIndex), 'jupyterlab_bopp/standalone/index.html must exist');
+
+    const standaloneJs = path.resolve(rootDir, 'jupyterlab_bopp/standalone/standalone.js');
+    assert.ok(fs.existsSync(standaloneJs), 'jupyterlab_bopp/standalone/standalone.js must exist');
+    const jsSize = fs.statSync(standaloneJs).size;
+    assert.ok(jsSize > 100000, 'standalone.js must be a substantial bundle (>100KB)');
+  });
+
+  await t.test('8. boppview CLI --help and execution test', async () => {
+    const { execSync } = await import('node:child_process');
+    const helpOutput = execSync('python3 -m jupyterlab_bopp --help', { cwd: rootDir, encoding: 'utf8' });
+    assert.ok(helpOutput.includes('boppview'), 'CLI help must mention boppview');
+    assert.ok(helpOutput.includes('--port'), 'CLI help must mention --port option');
+    assert.ok(helpOutput.includes('--no-browser'), 'CLI help must mention --no-browser option');
+  });
 });
+

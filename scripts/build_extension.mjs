@@ -131,6 +131,30 @@ async function prepareLabExtension() {
     'utf-8'
   );
 
+  console.log('[JupyterLab Bundler] 5. Bundling standalone boppview CLI viewer to jupyterlab_bopp/standalone/standalone.js...');
+  const standaloneDir = path.resolve(pyPkgDir, 'standalone');
+  fs.mkdirSync(standaloneDir, { recursive: true });
+  const standaloneEntry = path.resolve(rootDir, 'src/standalone/index.ts');
+  const standaloneOutput = path.resolve(standaloneDir, 'standalone.js');
+
+  try {
+    const esbuild = await import('esbuild');
+    await esbuild.build({
+      entryPoints: [standaloneEntry],
+      bundle: true,
+      minify: true,
+      platform: 'browser',
+      format: 'iife',
+      define: {
+        'process.env.NODE_ENV': '"production"',
+      },
+      outfile: standaloneOutput,
+    });
+    console.log('[JupyterLab Bundler] Standalone boppview bundle created successfully');
+  } catch (err) {
+    console.error('[JupyterLab Bundler] Warning: Failed to bundle standalone script via esbuild import:', err?.message || err);
+  }
+
   console.log('[JupyterLab Bundler] Build complete! Extension ready in jupyterlab_bopp/labextension');
 }
 
@@ -138,3 +162,4 @@ prepareLabExtension().catch(err => {
   console.error('[JupyterLab Bundler] Build failed:', err);
   process.exit(1);
 });
+
