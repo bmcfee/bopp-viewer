@@ -409,6 +409,69 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
       parseVega(compiled.spec);
     }, 'Vega parser failed for global tags badge spec');
   });
+
+  await t.test('13. Bidirectional confidence filter supports min and max ranges to isolate low or high confidence regions', () => {
+    const chordDs = SAMPLE_DATASETS.find(d => d.id === 'interval_chord_overlapping_likelihood')!;
+    const tabular = annotationToTabular(chordDs.data);
+
+    // Test low-confidence isolation: min 0.0, max 0.4
+    const lowConfSpec = buildBoppVegaLiteSpec(chordDs.data, tabular, {
+      chartWidth: 700,
+      minConfidenceFilter: 0,
+      maxConfidenceFilter: 0.4,
+    }) as any;
+
+    assert.ok(lowConfSpec.transform, 'Spec must contain transforms');
+    const lowFilter = lowConfSpec.transform.find((tr: any) => typeof tr.filter === 'string' && tr.filter.includes('datum.confidence'));
+    assert.ok(lowFilter, 'Must have confidence filter transform');
+    assert.ok(lowFilter.filter.includes('<= 0.4'), 'Must filter upper bound <= 0.4');
+
+    // Test mid-confidence slice: min 0.3, max 0.7
+    const midConfSpec = buildBoppVegaLiteSpec(chordDs.data, tabular, {
+      chartWidth: 700,
+      minConfidenceFilter: 0.3,
+      maxConfidenceFilter: 0.7,
+    }) as any;
+
+    const midFilter = midConfSpec.transform.find((tr: any) => typeof tr.filter === 'string' && tr.filter.includes('datum.confidence'));
+    assert.ok(midFilter, 'Must have confidence filter transform');
+    assert.ok(midFilter.filter.includes('>= 0.3'), 'Must filter lower bound >= 0.3');
+    assert.ok(midFilter.filter.includes('<= 0.7'), 'Must filter upper bound <= 0.7');
+
+    // Compilation check
+    assert.doesNotThrow(() => {
+      const c = vl.compile(midConfSpec);
+      parseVega(c.spec);
+    }, 'Bidirectional confidence filter must compile cleanly in Vega');
+  });
+
+  await t.test('14. Confidence presentation is pinned to supported data encodings', () => {
+    // 1. Continuous pitch with variance pins to error whiskers
+    const vocalDs = SAMPLE_DATASETS.find(d => d.id === 'time_f0_puccini_variance')!;
+    const vocalSpec = buildBoppVegaLiteSpec(vocalDs.data, annotationToTabular(vocalDs.data), { chartWidth: 700 }) as any;
+    const vocalLayers = vocalSpec.vconcat ? vocalSpec.vconcat[0].layer : vocalSpec.layer;
+    const ruleLayer = vocalLayers?.find((l: any) => l.mark?.type === 'rule' && l.encoding?.y2);
+    assert.ok(ruleLayer, 'Continuous pitch contour with variance must include error bar whiskers');
+
+    // 2. Interval extents with likelihood pin to horizontal meter layers
+    const chordDs = SAMPLE_DATASETS.find(d => d.id === 'interval_chord_overlapping_likelihood')!;
+    const chordSpec = buildBoppVegaLiteSpec(chordDs.data, annotationToTabular(chordDs.data), { chartWidth: 700 }) as any;
+    const detailView = chordSpec.vconcat ? chordSpec.vconcat[0] : chordSpec;
+    const meterLayer = detailView.layer?.find((l: any) => l.mark?.type === 'rect' && l.mark?.height <= 4);
+    assert.ok(meterLayer, 'Interval with likelihood must include horizontal meter layer');
+  });
+
+  await t.test('15. Visualizer titles, subtitles, and legends do not include redundant mir_eval Circle of Fifths commentary', () => {
+    for (const sample of SAMPLE_DATASETS) {
+      const tabular = annotationToTabular(sample.data);
+      const spec = buildBoppVegaLiteSpec(sample.data, tabular, { chartWidth: 700 }) as any;
+      const jsonStr = JSON.stringify(spec);
+
+      // Verify that "mir_eval Circle of Fifths" does not appear in user-facing texts
+      assert.ok(!jsonStr.includes('mir_eval Circle of Fifths'), `Spec for ${sample.id} should not explain 'mir_eval Circle of Fifths'`);
+      assert.ok(!jsonStr.includes('mir_eval Pitch Class Colors'), `Spec for ${sample.id} should not mention 'mir_eval Pitch Class Colors'`);
+    }
+  });
 });
 
 

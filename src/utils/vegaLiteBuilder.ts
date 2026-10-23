@@ -50,6 +50,7 @@ export interface VegaLiteBuilderOptions {
   colorScheme?: string;
   confidenceChannel?: ConfidenceChannelMode;
   minConfidenceFilter?: number;
+  maxConfidenceFilter?: number;
   enableOverviewBrush?: boolean;
   enableZoomPan?: boolean;
   showLabels?: boolean;
@@ -186,6 +187,7 @@ export function buildBoppVegaLiteSpec(
     colorScheme = 'mir_eval_fifths',
     confidenceChannel = 'meter',
     minConfidenceFilter = 0,
+    maxConfidenceFilter = 1,
     enableOverviewBrush = true,
     enableZoomPan = true,
     showLabels = true,
@@ -248,12 +250,24 @@ export function buildBoppVegaLiteSpec(
     },
   };
 
-  // Base data transform (e.g. filter by confidence)
+  // Base data transform (bidirectional confidence filtering)
   const transforms: Record<string, unknown>[] = [];
-  if (hasConfidence && minConfidenceFilter > 0) {
-    transforms.push({
-      filter: `datum.confidence == null || datum.confidence >= ${minConfidenceFilter}`,
-    });
+  if (hasConfidence) {
+    const hasMin = typeof minConfidenceFilter === 'number' && minConfidenceFilter > 0;
+    const hasMax = typeof maxConfidenceFilter === 'number' && maxConfidenceFilter < 1;
+    if (hasMin && hasMax) {
+      transforms.push({
+        filter: `datum.confidence == null || (datum.confidence >= ${minConfidenceFilter} && datum.confidence <= ${maxConfidenceFilter})`,
+      });
+    } else if (hasMin) {
+      transforms.push({
+        filter: `datum.confidence == null || datum.confidence >= ${minConfidenceFilter}`,
+      });
+    } else if (hasMax) {
+      transforms.push({
+        filter: `datum.confidence == null || datum.confidence <= ${maxConfidenceFilter}`,
+      });
+    }
   }
 
   // Pre-calculate time domain if applicable without assuming injected time_end
@@ -819,7 +833,7 @@ export function buildBoppVegaLiteSpec(
         ? `Tonic: ${primaryCandidate.root} (${sameTonicCandidates.length} modes estimated)`
         : hasMultipleCandidates
         ? `${otherCount} other candidate${otherCount > 1 ? 's' : ''}`
-        : 'Circle of Fifths';
+        : '';
 
       const centerData = [
         {
@@ -835,8 +849,8 @@ export function buildBoppVegaLiteSpec(
         height: wheelSize,
         title: {
           text: hasMultipleCandidates
-            ? `Global Key Candidates (Concentric Circle of Fifths)`
-            : `Global Key: ${primaryCandidate.label} (Concentric Circle of Fifths)`,
+            ? `Global Key Candidates`
+            : `Global Key: ${primaryCandidate.label}`,
           subtitle: `Outer Donut: Major · Inner Donut: Minor · Outer Rim Arcs: Confidence Meters · ${annotation.media_id}`,
           color: textColor,
           subtitleColor: axisColor,
@@ -1546,13 +1560,7 @@ export function buildBoppVegaLiteSpec(
     const uniqueChords = Array.from(new Set(enrichedChordData.map(d => d._display_value))).filter(Boolean);
     const chordColorScale = resolveColorScale(colorScheme, 'chord', uniqueChords);
 
-    const isMirEvalFifths = colorScheme === 'mir_eval_fifths' || colorScheme === 'fifths';
-    const isMirEvalPitch = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
-    const colorLegendTitle = isMirEvalFifths
-      ? 'Chord (mir_eval Circle of Fifths)'
-      : isMirEvalPitch
-      ? 'Chord (mir_eval Chromatic Pitch)'
-      : 'Chord (Harte)';
+    const colorLegendTitle = 'Chord';
 
     const isPointExtent = extentType === 'score_quarter' || extentType === 'midi_tick' || extentType === 'time';
     const isInstantaneous = isPointExtent && data.every(d => d.duration === undefined || d.duration === null || d.duration === 0);
@@ -2458,7 +2466,7 @@ export function buildBoppVegaLiteSpec(
       text: `BOPP Key & Mode: ${annotation.media_id}`,
       subtitle: useSingleRow
         ? 'Disjoint Interval Track (1 Row) · Modal Split Colors: Top = Tonic, Bottom = Relative Major Tonic'
-        : 'Overlapping Multi-Row Key Tracks · mir_eval Circle of Fifths colors with Modal Split Patches',
+        : 'Overlapping Multi-Row Key Tracks · Modal Split Patches',
       color: textColor,
       subtitleColor: axisColor,
     };
@@ -2933,7 +2941,7 @@ export function buildBoppVegaLiteSpec(
       text: payloadType === 'note_hz'
         ? `BOPP Note Piano Roll (Hz / Log Pitch): ${annotation.media_id}`
         : `BOPP MIDI Piano Roll: ${annotation.media_id}`,
-      subtitle: 'Numerical Pitch Axis (Semitone Spacing / Log Frequency) · mir_eval Pitch Class Colors',
+      subtitle: 'Numerical Pitch Axis (Semitone Spacing / Log Frequency)',
       color: textColor,
       subtitleColor: axisColor,
     };

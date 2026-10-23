@@ -37,7 +37,6 @@ import {
 } from 'lucide-react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import { buildBoppVegaLiteSpec, VegaLiteBuilderOptions } from '../utils/vegaLiteBuilder';
-import { ConfidenceChannelMode } from '../utils/confidenceGrammar';
 import { BoppAudioPlayer, isSonifiablePayload } from '../utils/audioSynthesizer';
 import { computeSummaryStats } from '../utils/boppParser';
 import { analyzeIntervalAnnotation } from '../utils/intervalOverlap';
@@ -78,13 +77,9 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     height: number;
   } | null>(null);
 
-  // Vega-Lite composition states
-  const [colorScheme, setColorScheme] = useState<string>('mir_eval_fifths');
-  const [confidenceChannel, setConfidenceChannel] = useState<ConfidenceChannelMode>('meter');
+  // Vega-Lite composition states: bidirectional confidence filter
   const [minConfidenceFilter, setMinConfidenceFilter] = useState<number>(0);
-  const [enableOverviewBrush, setEnableOverviewBrush] = useState<boolean>(true);
-  const [showLabels, setShowLabels] = useState<boolean>(true);
-  const [enableZoomPan, setEnableZoomPan] = useState<boolean>(true);
+  const [maxConfidenceFilter, setMaxConfidenceFilter] = useState<number>(1);
   const [userMultiRowOverride, setUserMultiRowOverride] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -124,6 +119,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       setPlotBounds(null);
       setUserMultiRowOverride(null);
       setBadgeSearchQuery('');
+      setMinConfidenceFilter(0);
+      setMaxConfidenceFilter(1);
     }
   }, [annotationUniqueKey, linkedMedia]);
 
@@ -634,12 +631,13 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const vegaSpec = useMemo(() => {
     const options: VegaLiteBuilderOptions = {
       theme,
-      colorScheme,
-      confidenceChannel,
+      colorScheme: 'mir_eval_fifths',
+      confidenceChannel: 'meter',
       minConfidenceFilter,
-      enableOverviewBrush,
-      enableZoomPan,
-      showLabels,
+      maxConfidenceFilter,
+      enableOverviewBrush: true,
+      enableZoomPan: true,
+      showLabels: true,
       currentTime: null, // Playhead cursor is rendered via high-performance SVG overlay for glitch-free timeline zooming during playback
       chartWidth: containerWidth,
       chartHeight: optimalChartHeight,
@@ -652,12 +650,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     filteredTabularData,
     tabularData,
     theme,
-    colorScheme,
-    confidenceChannel,
     minConfidenceFilter,
-    enableOverviewBrush,
-    enableZoomPan,
-    showLabels,
+    maxConfidenceFilter,
     containerWidth,
     optimalChartHeight,
     effectiveMultiRow,
@@ -1052,36 +1046,6 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     link.href = url;
     link.click();
     URL.revokeObjectURL(url);
-  };
-
-  // Palette color preview swatches
-  const getPalettePreviewColors = (scheme: string): string[] => {
-    switch (scheme) {
-      case 'mir_eval_pitch':
-        // Chromatic C, C#, D, D#, E, F
-        return ['#f2695a', '#f2aa5a', '#f2eb5a', '#5af27f', '#5af2c0', '#5ae2f2'];
-      case 'mir_eval_fifths':
-        // Circle of fifths C, G, D, A, E, B
-        return ['#f2695a', '#f2aa5a', '#f2eb5a', '#5af27f', '#5af2c0', '#5ae2f2'];
-      case 'tableau10':
-        return ['#4e79a7', '#f28e2b', '#e1575c', '#76b7b2', '#59a14f', '#edc948'];
-      case 'category10':
-        return ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b'];
-      case 'viridis':
-        return ['#440154', '#414487', '#2a788e', '#22a884', '#7ad151', '#fde725'];
-      case 'plasma':
-        return ['#0d0887', '#6a00a8', '#b12a90', '#e16462', '#fca636', '#f0f921'];
-      case 'magma':
-        return ['#000004', '#3b0f70', '#8c2981', '#de4968', '#fe9f6d', '#fcfdbf'];
-      case 'turbo':
-        return ['#30123b', '#4686fb', '#1ae4b6', '#a2fc3c', '#fbb41a', '#7a0403'];
-      case 'dark2':
-        return ['#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#66a61e', '#e6ab02'];
-      case 'paired':
-        return ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c'];
-      default:
-        return ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-    }
   };
 
   return (
@@ -1503,124 +1467,75 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
           )}
 
           {/* Composition Controls Bar */}
+          {/* Composition Controls Bar */}
           <div className="mt-3 p-3 bg-white dark:bg-neutral-900 border border-slate-300 dark:border-neutral-800 rounded-lg flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
-            {/* Color Scheme Switcher */}
-            <div className="flex items-center gap-2">
-              <span className="text-slate-800 dark:text-slate-200 font-bold">Palette:</span>
-              <select
-                value={colorScheme}
-                onChange={e => setColorScheme(e.target.value)}
-                className="px-2.5 py-1 bg-slate-50 dark:bg-neutral-800 border border-slate-300 dark:border-neutral-700 rounded text-slate-900 dark:text-slate-100 font-medium focus:outline-none focus:ring-1 focus:ring-blue-500"
-              >
-                <option value="mir_eval_fifths">mir_eval Circle of Fifths</option>
-                <option value="mir_eval_pitch">mir_eval Chromatic Pitch</option>
-                <option value="tableau10">Tableau 10</option>
-                <option value="category10">Category 10</option>
-                <option value="viridis">Viridis</option>
-                <option value="plasma">Plasma</option>
-                <option value="magma">Magma</option>
-                <option value="turbo">Turbo</option>
-                <option value="dark2">Dark 2</option>
-                <option value="paired">Paired</option>
-              </select>
+            {/* Bidirectional Confidence Filter */}
+            {Boolean(stats.confidenceType && (stats.minConfidence !== null || tabularData.some(d => typeof d.confidence === 'number'))) && (
+              <div className="flex items-center gap-2.5 bg-slate-100 dark:bg-neutral-800/80 px-2.5 py-1.5 rounded-md border border-slate-200 dark:border-neutral-700">
+                <Filter className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-slate-700 dark:text-slate-300 font-semibold text-[11px]">
+                  {stats.confidenceType === 'agreement' ? 'Agreement:' : 'Confidence:'}
+                </span>
 
-              {/* Dynamic Color Palette Swatch Chips */}
-              <span className="hidden sm:inline-flex items-center gap-1 ml-1" title={`${colorScheme} color swatches`}>
-                {getPalettePreviewColors(colorScheme).map((c, i) => (
-                  <span
-                    key={i}
-                    className="w-3 h-3 rounded-full inline-block border border-slate-400"
-                    style={{ backgroundColor: c }}
-                  />
-                ))}
-              </span>
-            </div>
-
-            {/* Grammar of Graphics: Confidence Rating Channel Selector */}
-            {stats.confidenceType && (
-              <div className="flex items-center gap-3 bg-slate-100 dark:bg-neutral-800/80 px-2 py-1 rounded-md border border-slate-200 dark:border-neutral-700">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-700 dark:text-slate-300 font-semibold text-[11px] flex items-center gap-1">
-                    {stats.confidenceType === 'agreement' ? '👥 Agreement:' : stats.confidenceType === 'variance' ? '📊 Variance:' : '🎯 Confidence:'}
-                  </span>
-                  <div className="inline-flex rounded-md shadow-2xs">
-                    {(['meter', 'height', 'opacity', 'none'] as ConfidenceChannelMode[]).map(mode => (
-                      <button
-                        key={mode}
-                        onClick={() => setConfidenceChannel(mode)}
-                        className={`px-2 py-0.5 text-[11px] font-medium transition-colors first:rounded-l last:rounded-r border border-slate-300 dark:border-neutral-600 ${
-                          confidenceChannel === mode
-                            ? 'bg-blue-600 text-white font-bold border-blue-600'
-                            : 'bg-white dark:bg-neutral-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700'
-                        }`}
-                        title={
-                          mode === 'meter'
-                            ? 'Horizontal meter overlay on intervals/boxes, confidence pins on points, error bars on variance'
-                            : mode === 'height'
-                            ? 'Proportional vertical height fill'
-                            : mode === 'opacity'
-                            ? 'Opacity binding (0.35–1.0)'
-                            : 'Disable confidence overlays'
-                        }
-                      >
-                        {mode === 'meter' ? 'Meter' : mode === 'height' ? 'Height' : mode === 'opacity' ? 'Opacity' : 'Off'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Threshold filter */}
-                <div className="flex items-center gap-1.5">
-                  <Filter className="w-3 h-3 text-slate-500" />
-                  <span className="text-slate-600 dark:text-slate-400 font-medium">Min:</span>
+                <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Min:</span>
                   <input
                     type="range"
                     min={0}
                     max={1}
                     step={0.05}
                     value={minConfidenceFilter}
-                    onChange={e => setMinConfidenceFilter(parseFloat(e.target.value))}
-                    className="w-16 h-1 bg-slate-200 dark:bg-neutral-700 rounded appearance-none accent-blue-600"
+                    onChange={e => {
+                      const val = parseFloat(e.target.value);
+                      setMinConfidenceFilter(Math.min(val, maxConfidenceFilter));
+                    }}
+                    className="w-16 h-1 bg-slate-200 dark:bg-neutral-700 rounded appearance-none accent-blue-600 cursor-pointer"
+                    title={`Minimum confidence: ${minConfidenceFilter.toFixed(2)}`}
                   />
-                  <span className="font-mono tabular-nums text-slate-900 dark:text-slate-100 font-semibold text-[11px]">
+                  <span className="tabular-nums font-semibold text-slate-800 dark:text-slate-200 w-7">
                     {minConfidenceFilter.toFixed(2)}
                   </span>
                 </div>
+
+                <span className="text-slate-400 dark:text-slate-600">–</span>
+
+                <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">Max:</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={maxConfidenceFilter}
+                    onChange={e => {
+                      const val = parseFloat(e.target.value);
+                      setMaxConfidenceFilter(Math.max(val, minConfidenceFilter));
+                    }}
+                    className="w-16 h-1 bg-slate-200 dark:bg-neutral-700 rounded appearance-none accent-blue-600 cursor-pointer"
+                    title={`Maximum confidence: ${maxConfidenceFilter.toFixed(2)}`}
+                  />
+                  <span className="tabular-nums font-semibold text-slate-800 dark:text-slate-200 w-7">
+                    {maxConfidenceFilter.toFixed(2)}
+                  </span>
+                </div>
+
+                {(minConfidenceFilter > 0 || maxConfidenceFilter < 1) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMinConfidenceFilter(0);
+                      setMaxConfidenceFilter(1);
+                    }}
+                    className="ml-1 text-[10px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline cursor-pointer"
+                    title="Reset confidence range to 0.00 – 1.00"
+                  >
+                    Reset
+                  </button>
+                )}
               </div>
             )}
 
-            {/* Toggle Switches */}
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={showLabels}
-                  onChange={e => setShowLabels(e.target.checked)}
-                  className="rounded border-slate-300 text-blue-600"
-                />
-                <span>Labels</span>
-              </label>
-
-              <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={enableOverviewBrush}
-                  onChange={e => setEnableOverviewBrush(e.target.checked)}
-                  className="rounded border-slate-300 text-blue-600"
-                />
-                <span>Brush Zoom</span>
-              </label>
-
-              <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={enableZoomPan}
-                  onChange={e => setEnableZoomPan(e.target.checked)}
-                  className="rounded border-slate-300 text-blue-600"
-                />
-                <span>Pan & Zoom</span>
-              </label>
-
+            <div className="flex items-center gap-2.5 ml-auto">
               {/* Interval Layout Continuity Badge & Toggle Button */}
               {intervalAnalysis.isIntervalExtent && (
                 <button
@@ -1649,60 +1564,48 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 </button>
               )}
 
-              {enableOverviewBrush && (
-                <div className="flex items-center gap-1 bg-slate-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-slate-300 dark:border-neutral-700 shadow-2xs">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mr-0.5">Timeline:</span>
-                  <button
-                    onClick={() => handleZoomPreset('all')}
-                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
-                    title="Zoom out to show entire piece (100%)"
-                  >
-                    <Maximize2 className="w-2.5 h-2.5" />
-                    <span>All</span>
-                  </button>
-                  <button
-                    onClick={() => handleZoomPreset('in')}
-                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
-                    title="Zoom in 2x"
-                  >
-                    <ZoomIn className="w-2.5 h-2.5" />
-                    <span>In</span>
-                  </button>
-                  <button
-                    onClick={() => handleZoomPreset('out')}
-                    className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
-                    title="Zoom out 2x"
-                  >
-                    <ZoomOut className="w-2.5 h-2.5" />
-                    <span>Out</span>
-                  </button>
-                  <button
-                    onClick={() => handleZoomPreset('left')}
-                    className="p-0.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
-                    title="Pan window left"
-                  >
-                    <ChevronLeft className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => handleZoomPreset('right')}
-                    className="p-0.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
-                    title="Pan window right"
-                  >
-                    <ChevronRight className="w-3 h-3" />
-                  </button>
-                </div>
-              )}
-
-              {enableZoomPan && !enableOverviewBrush && (
+              {/* Timeline Zoom Presets */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-slate-300 dark:border-neutral-700 shadow-2xs">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mr-0.5">Timeline:</span>
                 <button
-                  onClick={handleResetZoom}
-                  className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded border border-slate-300 dark:border-neutral-700 transition-colors shadow-2xs"
-                  title="Reset zoom to full dataset domain"
+                  onClick={() => handleZoomPreset('all')}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                  title="Zoom out to show entire piece (100%)"
                 >
-                  <RotateCcw className="w-3 h-3 text-slate-500" />
-                  <span>Reset Zoom</span>
+                  <Maximize2 className="w-2.5 h-2.5" />
+                  <span>All</span>
                 </button>
-              )}
+                <button
+                  onClick={() => handleZoomPreset('in')}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                  title="Zoom in 2x"
+                >
+                  <ZoomIn className="w-2.5 h-2.5" />
+                  <span>In</span>
+                </button>
+                <button
+                  onClick={() => handleZoomPreset('out')}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                  title="Zoom out 2x"
+                >
+                  <ZoomOut className="w-2.5 h-2.5" />
+                  <span>Out</span>
+                </button>
+                <button
+                  onClick={() => handleZoomPreset('left')}
+                  className="p-0.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                  title="Pan window left"
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                </button>
+                <button
+                  onClick={() => handleZoomPreset('right')}
+                  className="p-0.5 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-white dark:hover:bg-neutral-700 rounded transition-colors"
+                  title="Pan window right"
+                >
+                  <ChevronRight className="w-3 h-3" />
+                </button>
+              </div>
 
               {isTimeFrequency && (
                 <label className="flex items-center gap-1.5 cursor-pointer font-medium text-slate-700 dark:text-slate-300">
