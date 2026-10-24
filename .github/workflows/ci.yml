@@ -77,7 +77,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.13', '3.14', '3.15']
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -86,6 +86,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
           cache: 'pip'
 
       - name: Set up Node.js
@@ -124,6 +125,6 @@ jobs:
           jupyter labextension list
           jupyter labextension list 2>&1 | grep -E "jupyterlab-bopp.*OK" || (echo "jupyterlab-bopp extension not recognized as OK" && exit 1)
 
-      - name: Verify extension status with jupyter labextension check
+      - name: Verify standalone boppview CLI executable and help
         run: |
-          jupyter labextension check --debug jupyterlab-bopp
+          boppview --help

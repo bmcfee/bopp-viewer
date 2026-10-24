@@ -11,8 +11,8 @@ This project renders BOPP JSON (`.bopp`, `.bopp.json`) and binary MessagePack (`
 | Component | Description | Prerequisites |
 | :--- | :--- | :--- |
 | **1. Web Demo App** | Interactive SPA with 24 built-in sample datasets, live Vega-Lite spec editor, schema validator, and audio/image media linking. | Node.js ≥ 20, npm ≥ 9 |
-| **2. JupyterLab 4 Extension (`jupyterlab-bopp`)** | Kernel-free file viewer for `.bopp` / `.msgpack` files and notebook cell MIME renderer (`application/vnd.bopp+json`, `application/vnd.bopp+msgpack`). | Python ≥ 3.8, JupyterLab ≥ 4.0 *(+ Node.js ≥ 20 & npm ≥ 9 if building from source)* |
-| **3. Standalone CLI (`boppview`)** | Zero-configuration terminal utility that serves any local BOPP file in the browser without launching JupyterLab. | Python ≥ 3.8 *(installed automatically with `jupyterlab-bopp`)* |
+| **2. JupyterLab 4 Extension (`jupyterlab-bopp`)** | Kernel-free file viewer for `.bopp` / `.msgpack` files and notebook cell MIME renderer (`application/vnd.bopp+json`, `application/vnd.bopp+msgpack`). | Python ≥ 3.13, JupyterLab ≥ 4.0 *(+ Node.js ≥ 20 & npm ≥ 9 if building from source)* |
+| **3. Standalone CLI (`boppview`)** | Zero-configuration terminal utility that serves any local BOPP file in the browser without launching JupyterLab. | Python ≥ 3.13 *(installed automatically with `jupyterlab-bopp`)* |
 
 ---
 
@@ -44,7 +44,7 @@ Installing the Python package provides **both** the prebuilt JupyterLab 4 extens
 
 ### Option A: Install from Source (Local Use or Development)
 
-Requires Python ≥ 3.8, `jupyterlab>=4.0.0`, `hatch-jupyter-builder>=0.5`, Node.js ≥ 20, and `npm`:
+Requires Python ≥ 3.13, `jupyterlab>=4.0.0`, `hatch-jupyter-builder>=0.5`, Node.js ≥ 20, and `npm`:
 
 ```bash
 # 1. Install frontend dependencies and build extension & standalone bundles
@@ -73,7 +73,7 @@ To build a self-contained `.whl` that can be installed on machines **without** N
 # Build sdist and prebuilt wheel in dist/
 python -m build
 
-# Install the wheel into any Python >= 3.8 environment
+# Install the wheel into any Python >= 3.13 environment
 pip install dist/jupyterlab_bopp-1.0.0-py3-none-any.whl
 ```
 
