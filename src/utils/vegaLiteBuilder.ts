@@ -27,6 +27,7 @@ import {
 import {
   type ConfidenceChannelMode,
   buildIntervalConfidenceLayers,
+  buildEmbeddedConfidenceMeterLayers,
   buildInstantaneousConfidenceLayers,
   buildVarianceErrorBarLayers,
   getAgreementGlyph,
@@ -97,6 +98,164 @@ export function getScaleRangeSpan(scale: any, fallbackWidth: number): number {
 }
 
 /**
+ * Resolves the active timeline scale and scenegraph group items from a live Vega View instance.
+ * Supports single-view specs, vconcat (detail + overview brush), and hconcat (e.g. dynamic mood trajectory).
+ */
+export function resolveVegaTimelineScaleInfo(view: any): {
+  scaleNames: string[];
+  detailScaleName: string | undefined;
+  detailYScaleName: string | undefined;
+  overviewScaleName: string | undefined;
+  isVConcat: boolean;
+  detailGroup: any;
+  overviewGroup: any;
+} {
+  const scaleNames = Object.keys(view?._runtime?.scales || {});
+  let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k =>
+    scaleNames.includes(k)
+  );
+  if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
+    const s0 = typeof view?.scale === 'function' ? view.scale('concat_0_x') : null;
+    const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
+    // If concat_0_x is a non-time scale with negative values (e.g. mood valence [-1.2, 1.2])
+    if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
+      detailScaleName = 'concat_1_x';
+    }
+  }
+
+  const detailYScaleName = ['concat_0_y', 'y', 'layer_0_y', ...scaleNames.filter(k => k.endsWith('_y'))].find(k =>
+    scaleNames.includes(k)
+  );
+  const overviewScaleName = ['concat_1_x', ...scaleNames.filter(k => k.includes('concat_1') && k.endsWith('_x'))].find(
+    k => scaleNames.includes(k)
+  );
+  const isVConcat = Boolean(
+    scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x'
+  );
+  const sgRoot = view?.scenegraph?.()?.root?.items?.[0];
+  const detailGroup = isVConcat
+    ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
+    : detailScaleName === 'concat_1_x'
+    ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
+    : sgRoot;
+  const overviewGroup = isVConcat ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1) : null;
+
+  return {
+    scaleNames,
+    detailScaleName,
+    detailYScaleName,
+    overviewScaleName,
+    isVConcat,
+    detailGroup,
+    overviewGroup,
+  };
+}
+
+/**
+ * Computes the optimal default chart height for a BOPP annotation across both the React viewer and JupyterLab widget.
+ */
+export function computeOptimalChartHeight(
+  annotation: BoppAnnotation,
+  rowCount: number,
+  options: {
+    effectiveMultiRow?: boolean;
+    isGlobalNoConfGenres?: boolean;
+    filteredRowCount?: number;
+    containerWidth?: number;
+  } = {}
+): number {
+  const {
+    effectiveMultiRow = false,
+    isGlobalNoConfGenres = false,
+    filteredRowCount = rowCount,
+    containerWidth = 760,
+  } = options;
+  const pType = annotation.payload?.payload_type as string | undefined;
+  const eType = annotation.extent?.extent_type as string | undefined;
+
+  if (pType === 'key_mode') {
+    if (eType?.includes('interval')) {
+      return effectiveMultiRow ? 340 : 220;
+    }
+    return 540;
+  }
+  if (pType === 'note_midi' || pType === 'piano_roll') return 460;
+  if (pType === 'chord') return effectiveMultiRow ? 420 : 320;
+  if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') {
+    if (!eType || eType === 'none') {
+      if (isGlobalNoConfGenres) {
+        const numCols = Math.max(1, Math.min(filteredRowCount, Math.floor((containerWidth - 80) / 194)));
+        const numRows = Math.ceil(filteredRowCount / numCols);
+        return Math.max(120, numRows * 50 + 70);
+      }
+      return Math.max(180, Math.min(420, rowCount * 44 + 80));
+    }
+    return effectiveMultiRow ? 360 : 240;
+  }
+  if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
+  if (!eType || eType === 'none') return 440;
+  return effectiveMultiRow ? 420 : 340;
+}
+
+export interface ResolvedExtentAxis {
+  isMidi: boolean;
+  isScore: boolean;
+  isTime: boolean;
+  isInterval: boolean;
+  isInstantaneous: boolean;
+  xField: 'time' | 'tick' | 'quarter' | '__index';
+  xTitle: string;
+  xFormat: string;
+}
+
+/**
+ * Resolves the horizontal extent axis field, title, format, and interval/instantaneous flags for a BOPP annotation.
+ */
+export function resolveExtentAxis(
+  extentType: string | undefined,
+  data: TabularRecord[],
+  options: { scoreTitle?: string } = {}
+): ResolvedExtentAxis {
+  const isMidi = Boolean(
+    extentType?.includes('midi') ||
+      extentType?.includes('tick') ||
+      (data.length > 0 && typeof data[0].tick === 'number')
+  );
+  const isScore = Boolean(
+    extentType?.includes('score') ||
+      extentType?.includes('quarter') ||
+      (data.length > 0 && typeof data[0].quarter === 'number')
+  );
+  const isTime = Boolean(extentType?.includes('time') || (data.length > 0 && typeof data[0].time === 'number'));
+  const isInterval = Boolean(
+    isIntervalExtentType(extentType) || data.some(d => typeof d.duration === 'number')
+  );
+  const isInstantaneous = Boolean(
+    extentType === 'time_instantaneous' ||
+      extentType === 'midi_tick' ||
+      extentType === 'score_quarter' ||
+      !isInterval
+  );
+  const xField: 'time' | 'tick' | 'quarter' | '__index' = isMidi
+    ? 'tick'
+    : isScore
+    ? 'quarter'
+    : isTime
+    ? 'time'
+    : '__index';
+  const xTitle = isMidi
+    ? 'MIDI Tick'
+    : isScore
+    ? options.scoreTitle || 'Score Time (Quarter Notes)'
+    : isTime
+    ? 'Time (seconds)'
+    : 'Observation Index';
+  const xFormat = isMidi ? 'd' : '.2f';
+
+  return { isMidi, isScore, isTime, isInterval, isInstantaneous, xField, xTitle, xFormat };
+}
+
+/**
  * Safely resolves a color scale specification for Vega-Lite.
  * Guarantees that Vega will NEVER fail with "Unrecognized scheme name".
  * Honors palette switcher for chords and all nominal payloads.
@@ -108,6 +267,8 @@ export function resolveColorScale(
 ): Record<string, unknown> {
   const isMirEvalFifths = schemeName === 'mir_eval_fifths' || schemeName === 'fifths';
   const isMirEvalPitch = schemeName === 'mir_eval_pitch' || schemeName === 'pitch';
+  const isMirEval = isMirEvalFifths || isMirEvalPitch;
+  const mirPalette = isMirEvalPitch ? MIR_EVAL_COLORMAPS.pitch : MIR_EVAL_COLORMAPS.fifths;
 
   const validVegaSchemes = new Set([
     'tableau10', 'tableau20', 'category10', 'category20', 'category20b', 'category20c',
@@ -115,91 +276,58 @@ export function resolveColorScale(
     'viridis', 'magma', 'inferno', 'plasma', 'cividis', 'blues', 'tealblues', 'greens',
     'purples', 'reds', 'oranges', 'spectral', 'warm', 'cool', 'turbo'
   ]);
+  const normalizedScheme = schemeName.toLowerCase();
+  const isStandardVegaScheme = validVegaSchemes.has(normalizedScheme);
 
   if (payloadType === 'chord') {
-    if (isMirEvalFifths || isMirEvalPitch) {
+    if (isMirEval) {
       const mode = isMirEvalPitch ? 'pitch' : 'fifths';
-      if (uniqueValues && uniqueValues.length > 0) {
-        return {
-          domain: uniqueValues,
-          range: uniqueValues.map(c => chordToMirEvalColor(c, mode)),
-        };
-      }
-      return { range: isMirEvalPitch ? MIR_EVAL_COLORMAPS.pitch : MIR_EVAL_COLORMAPS.fifths };
+      return uniqueValues && uniqueValues.length > 0
+        ? { domain: uniqueValues, range: uniqueValues.map(c => chordToMirEvalColor(c, mode)) }
+        : { range: mirPalette };
     }
-    // If the user selected an alternative palette in the switcher (Tableau10, Viridis, etc.)
-    if (validVegaSchemes.has(schemeName.toLowerCase())) {
-      return { scheme: schemeName.toLowerCase() };
-    }
-    return { range: MIR_EVAL_COLORMAPS.fifths };
+    return isStandardVegaScheme ? { scheme: normalizedScheme } : { range: MIR_EVAL_COLORMAPS.fifths };
   }
 
-  if (payloadType === 'note_midi' || payloadType === 'note_hz' || payloadType === 'hz' || payloadType === 'pitch_contour' || payloadType === 'piano_roll') {
-    if (isMirEvalPitch) {
-      if (uniqueValues && uniqueValues.length > 0) {
-        return {
-          domain: uniqueValues,
-          range: uniqueValues.map(v => {
-            const num = Number(v);
-            const pc = isNaN(num) ? 0 : ((Math.round(num) % 12) + 12) % 12;
-            return MIR_EVAL_COLORMAPS.pitch[pc];
-          }),
-        };
-      }
-      return { range: MIR_EVAL_COLORMAPS.pitch };
-    }
-    if (isMirEvalFifths) {
+  const isPitchPayload =
+    payloadType === 'note_midi' ||
+    payloadType === 'note_hz' ||
+    payloadType === 'hz' ||
+    payloadType === 'pitch_contour' ||
+    payloadType === 'piano_roll';
+
+  if (isPitchPayload) {
+    if (isMirEval) {
       if (uniqueValues && uniqueValues.length > 0) {
         return {
           domain: uniqueValues,
           range: uniqueValues.map(v => {
             const num = Number(v);
             const pc = isNaN(num) ? 0 : ((Math.round(num) % 12) + 12) % 12;
-            return MIR_EVAL_COLORMAPS.fifths[pc];
+            return mirPalette[pc];
           }),
         };
       }
-      return { range: MIR_EVAL_COLORMAPS.fifths };
+      return { range: mirPalette };
     }
-    if (validVegaSchemes.has(schemeName.toLowerCase())) {
-      return { scheme: schemeName.toLowerCase() };
-    }
-    return { range: MIR_EVAL_COLORMAPS.fifths };
+    return isStandardVegaScheme ? { scheme: normalizedScheme } : { range: MIR_EVAL_COLORMAPS.fifths };
   }
 
-  if (isMirEvalFifths) {
-    if (uniqueValues && uniqueValues.length > 0) {
-      return {
-        domain: uniqueValues,
-        range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.fifths[i % 12]),
-      };
-    }
-    return { range: MIR_EVAL_COLORMAPS.fifths };
-  }
-  if (isMirEvalPitch) {
-    if (uniqueValues && uniqueValues.length > 0) {
-      return {
-        domain: uniqueValues,
-        range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.pitch[i % 12]),
-      };
-    }
-    return { range: MIR_EVAL_COLORMAPS.pitch };
+  if (isMirEval) {
+    return uniqueValues && uniqueValues.length > 0
+      ? { domain: uniqueValues, range: uniqueValues.map((_, i) => mirPalette[i % 12]) }
+      : { range: mirPalette };
   }
 
-  if (validVegaSchemes.has(schemeName.toLowerCase())) {
-    if (uniqueValues && uniqueValues.length > 0) {
-      return { domain: uniqueValues, scheme: schemeName.toLowerCase() };
-    }
-    return { scheme: schemeName.toLowerCase() };
+  if (isStandardVegaScheme) {
+    return uniqueValues && uniqueValues.length > 0
+      ? { domain: uniqueValues, scheme: normalizedScheme }
+      : { scheme: normalizedScheme };
   }
 
-  if (uniqueValues && uniqueValues.length > 0) {
-    return {
-      domain: uniqueValues,
-      range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.fifths[i % 12]),
-    };
-  }
-  return { range: MIR_EVAL_COLORMAPS.fifths };
+  return uniqueValues && uniqueValues.length > 0
+    ? { domain: uniqueValues, range: uniqueValues.map((_, i) => MIR_EVAL_COLORMAPS.fifths[i % 12]) }
+    : { range: MIR_EVAL_COLORMAPS.fifths };
 }
 
 /**
@@ -209,6 +337,669 @@ export function resolveColorScale(
 function getBaseChordLabel(chord: string): string {
   if (!chord) return '';
   return chord.replace(/\/[a-zA-Z0-9#b_]+$/, '');
+}
+
+/**
+ * Composable helper that builds centered text labels (with optional high-contrast dark halo)
+ * inside horizontal interval patches, automatically clipping to the rendered patch pixel width.
+ */
+function buildIntervalCenteredLabelLayers(params: {
+  xField: string;
+  endField?: string;
+  midField?: string;
+  fallbackHalfDur?: number;
+  minDuration?: number;
+  minPixelWidth?: number;
+  paddingPx?: number;
+  yEncoding: Record<string, unknown>;
+  fgYEncoding?: Record<string, unknown>;
+  textField: string;
+  font?: string;
+  fontSize?: number;
+  textColor?: string;
+  withHalo?: boolean;
+}): Record<string, unknown>[] {
+  const {
+    xField,
+    endField = '_calc_end',
+    midField = 'x_mid',
+    fallbackHalfDur = 0,
+    minDuration,
+    minPixelWidth = 10,
+    paddingPx = 4,
+    yEncoding,
+    fgYEncoding,
+    textField,
+    font = 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize = 11,
+    textColor = '#ffffff',
+    withHalo = true,
+  } = params;
+
+  const pixelWidthExpr = `(scale('concat_0_x', datum.${endField}) != null ? scale('concat_0_x', datum.${endField}) : scale('x', datum.${endField})) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))`;
+  const limitExpr = `max(0.001, ${pixelWidthExpr} - ${paddingPx})`;
+  const testExpr = `(${pixelWidthExpr}) <= ${minPixelWidth}`;
+
+  const labelTransforms: Record<string, unknown>[] = [
+    {
+      calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : ${fallbackHalfDur})`,
+      as: midField,
+    },
+    ...(typeof minDuration === 'number'
+      ? [{ filter: `datum.duration == null || datum.duration >= ${minDuration}` }]
+      : []),
+  ];
+
+  const textEncoding = {
+    condition: {
+      test: testExpr,
+      value: '',
+    },
+    field: textField,
+    type: 'nominal',
+  };
+
+  const out: Record<string, unknown>[] = [];
+  if (withHalo) {
+    out.push({
+      transform: labelTransforms,
+      mark: {
+        type: 'text',
+        align: 'center',
+        baseline: 'middle',
+        fill: 'transparent',
+        stroke: 'rgba(0,0,0,0.85)',
+        strokeWidth: 3,
+        strokeJoin: 'round',
+        fontWeight: 'bold',
+        fontSize,
+        font,
+        clip: true,
+        limit: { expr: limitExpr },
+      },
+      encoding: {
+        x: { field: midField, type: 'quantitative' },
+        y: yEncoding,
+        text: textEncoding,
+      },
+    });
+  }
+
+  out.push({
+    transform: labelTransforms,
+    mark: {
+      type: 'text',
+      align: 'center',
+      baseline: 'middle',
+      fill: textColor,
+      fontWeight: 'bold',
+      fontSize,
+      font,
+      clip: true,
+      limit: { expr: limitExpr },
+    },
+    encoding: {
+      x: { field: midField, type: 'quantitative' },
+      y: fgYEncoding ?? yEncoding,
+      text: textEncoding,
+    },
+  });
+
+  return out;
+}
+
+/**
+ * Composable 2-layer corner label (halo backdrop + crisp white foreground) for 2D bounding boxes
+ * (`time_frequency_box` and `pixel_box`).
+ */
+function buildBoundingBoxCornerLabelLayers(params: {
+  xField: string;
+  yField: string;
+  yScale?: Record<string, unknown>;
+  labelField: string;
+  hasConfidence: boolean;
+}): Record<string, unknown>[] {
+  const { xField, yField, yScale, labelField, hasConfidence } = params;
+  const calcTransform = {
+    calculate: hasConfidence
+      ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
+      : 'datum.value',
+    as: labelField,
+  };
+  const yEnc: Record<string, unknown> = {
+    field: yField,
+    type: 'quantitative',
+    ...(yScale ? { scale: yScale } : {}),
+  };
+
+  return [
+    {
+      transform: [calcTransform],
+      mark: {
+        type: 'text',
+        align: 'left',
+        baseline: 'top',
+        dx: 4,
+        dy: 4,
+        fontSize: 10,
+        fontWeight: 'bold',
+        fill: 'transparent',
+        stroke: 'rgba(0,0,0,0.85)',
+        strokeWidth: 3,
+        strokeJoin: 'round',
+      },
+      encoding: {
+        x: { field: xField, type: 'quantitative' },
+        y: yEnc,
+        text: { field: labelField, type: 'nominal' },
+      },
+    },
+    {
+      transform: [calcTransform],
+      mark: {
+        type: 'text',
+        align: 'left',
+        baseline: 'top',
+        dx: 4,
+        dy: 4,
+        fontSize: 10,
+        fontWeight: 'bold',
+        fill: '#ffffff',
+      },
+      encoding: {
+        x: { field: xField, type: 'quantitative' },
+        y: yEnc,
+        text: { field: labelField, type: 'nominal' },
+      },
+    },
+  ];
+}
+
+/**
+ * Composable quadrant axes and emotion labels for Russell Circumplex 2D affect plots.
+ */
+function buildCircumplexQuadrantLayers(gridColor: string, axisColor: string): Record<string, unknown>[] {
+  return [
+    {
+      data: { values: [{ x: 0 }] },
+      mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
+      encoding: { x: { field: 'x', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
+    },
+    {
+      data: { values: [{ y: 0 }] },
+      mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
+      encoding: { y: { field: 'y', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
+    },
+    {
+      data: {
+        values: [
+          { x: 0.7, y: 0.8, label: 'Happy / Excited' },
+          { x: -0.7, y: 0.8, label: 'Angry / Tense' },
+          { x: -0.7, y: -0.8, label: 'Sad / Depressed' },
+          { x: 0.7, y: -0.8, label: 'Calm / Relaxed' },
+        ],
+      },
+      mark: { type: 'text', fontSize: 10, fill: axisColor, fontWeight: 'bold' },
+      encoding: {
+        x: { field: 'x', type: 'quantitative' },
+        y: { field: 'y', type: 'quantitative' },
+        text: { field: 'label', type: 'nominal' },
+      },
+    },
+  ];
+}
+
+/**
+ * Composable data builder for a 12-sector Circle-of-Fifths donut ring (Major outer ring or Minor inner ring).
+ */
+function buildKeyDonutRingData(params: {
+  isMinorRing: boolean;
+  sortedCandidates: Array<{
+    fullKey: string;
+    root: string;
+    semitone: number;
+    isMinor: boolean;
+    isMode: boolean;
+    parsed: ReturnType<typeof parseKeyMode>;
+    confidence: number | null;
+    tonicColor: string;
+    relMajColor: string;
+    label: string;
+  }>;
+  mode: 'fifths' | 'pitch';
+  isDark: boolean;
+  confidenceChannel: ConfidenceChannelMode;
+}): Record<string, unknown>[] {
+  const { isMinorRing, sortedCandidates, mode, isDark, confidenceChannel } = params;
+  const palette = isMinorRing
+    ? mode === 'pitch'
+      ? MIR_EVAL_COLORMAPS.pitch_dark
+      : MIR_EVAL_COLORMAPS.fifths_dark
+    : mode === 'pitch'
+    ? MIR_EVAL_COLORMAPS.pitch
+    : MIR_EVAL_COLORMAPS.fifths;
+
+  const ringLabel = isMinorRing ? 'Inner (Minor)' : 'Outer (Major)';
+  const modeDefaultLabel = isMinorRing ? 'Minor' : 'Major';
+  const inactiveOpacity = isMinorRing ? (isDark ? 0.25 : 0.35) : isDark ? 0.28 : 0.38;
+
+  return FIFTHS_ORDER_12_ROOTS.map((k, i) => {
+    const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
+    const allMatches = sortedCandidates.filter(c => c.semitone === kSem && Boolean(c.isMinor) === isMinorRing);
+    const matchingCand = allMatches[0];
+    const isActive = Boolean(matchingCand);
+    const isMultiMode = allMatches.length > 1;
+    const candConf = matchingCand?.confidence ?? null;
+
+    const sliceColor = palette[kSem];
+    const isSplit = Boolean(isActive && matchingCand?.isMode);
+    const outerColor = isSplit && matchingCand ? matchingCand.tonicColor : sliceColor;
+    const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
+
+    const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
+    const badgeText = isMultiMode
+      ? allMatches
+          .map(m => (m.confidence !== null ? `${Math.round(m.confidence * 100)}%` : ''))
+          .filter(Boolean)
+          .join('/')
+      : isActive && candConf !== null
+      ? confPct
+      : '';
+
+    const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
+    const theta1 = Math.PI / 12 + i * (Math.PI / 6);
+    const margin = 0.015;
+    const meterStart = theta0 + margin;
+    const meterTrackEnd = theta1 - margin;
+    const totalSpan = meterTrackEnd - meterStart;
+    const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
+    const meterFillEnd = meterStart + confVal * totalSpan;
+    const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
+
+    const multiModeDescription = isMultiMode
+      ? allMatches
+          .map(m => `${m.label} (${m.confidence !== null ? Math.round(m.confidence * 100) + '%' : 'detected'})`)
+          .join(' + ')
+      : candConf !== null
+      ? `${matchingCand?.label} (${confPct})`
+      : `Detected ${matchingCand?.label}`;
+
+    return {
+      key: k,
+      displayKey: isMinorRing ? k.toLowerCase() : k,
+      ring: ringLabel,
+      fifths: i,
+      count: 1,
+      color: sliceColor,
+      outerColor,
+      innerColor,
+      isSplit,
+      isMultiMode,
+      active: isActive,
+      activeOpacity: isActive ? 1.0 : 0.0,
+      activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
+      activeStrokeWidth: isActive ? 3 : 0,
+      stroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : isDark ? '#334155' : '#cbd5e1',
+      strokeWidth: isActive ? 2.5 : 1,
+      opacity: isActive ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45)) : inactiveOpacity,
+      textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : isDark ? '#94a3b8' : '#64748b',
+      fullKey: isMultiMode
+        ? allMatches.map(m => m.fullKey).join(' / ')
+        : matchingCand?.fullKey ?? `${k}:${isMinorRing ? 'min' : 'maj'}`,
+      label: isMultiMode
+        ? allMatches.map(m => m.label).join(' / ')
+        : matchingCand?.label ?? `${k} ${modeDefaultLabel}`,
+      modeName: isMultiMode
+        ? allMatches.map(m => m.parsed?.mode ?? modeDefaultLabel).join(' + ')
+        : matchingCand?.isMode
+        ? matchingCand.parsed?.mode
+        : modeDefaultLabel,
+      confidence: candConf,
+      confPct,
+      badge: badgeText,
+      badgeOpacity: isActive && badgeText ? 1.0 : 0.0,
+      meterStart,
+      meterTrackEnd,
+      meterFillEnd,
+      hasMeter,
+      confVal,
+      status: isActive ? multiModeDescription : `${modeDefaultLabel} Sector`,
+    };
+  });
+}
+
+/**
+ * Composable Vega-Lite layer builder for a single Circle-of-Fifths donut ring
+ * (split tonic/relative-major sectors, perimeter border, active highlight, rim confidence meter, and badge).
+ */
+function buildKeyDonutRingLayers(params: {
+  ringValues: Record<string, unknown>[];
+  innerRadius: number;
+  splitRadius: number;
+  outerRadius: number;
+  meterInnerRadius: number;
+  meterOuterRadius: number;
+  meterCornerRadius: number;
+  badgeRadius: number;
+  badgeFontSize: number;
+  isDark: boolean;
+  trackAlphaDark?: number;
+  trackStrokeAlphaDark?: number;
+}): Record<string, unknown>[] {
+  const {
+    ringValues,
+    innerRadius,
+    splitRadius,
+    outerRadius,
+    meterInnerRadius,
+    meterOuterRadius,
+    meterCornerRadius,
+    badgeRadius,
+    badgeFontSize,
+    isDark,
+    trackAlphaDark = 0.18,
+    trackStrokeAlphaDark = 0.25,
+  } = params;
+
+  const thetaEncoding = {
+    field: 'count',
+    type: 'quantitative',
+    stack: true,
+    scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
+  };
+  const sectorTooltip = [
+    { field: 'ring', type: 'nominal', title: 'Ring' },
+    { field: 'key', type: 'nominal', title: 'Tonic Root' },
+    { field: 'modeName', type: 'nominal', title: 'Mode' },
+    { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
+    { field: 'status', type: 'nominal', title: 'Status' },
+  ];
+  const meterTooltip = [
+    { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
+    { field: 'confPct', type: 'nominal', title: 'Confidence' },
+    { field: 'status', type: 'nominal', title: 'Status' },
+  ];
+
+  return [
+    // Outer 80% of sector (Tonic color)
+    {
+      data: { values: ringValues },
+      encoding: {
+        theta: thetaEncoding,
+        order: { field: 'fifths', type: 'quantitative' },
+        color: { field: 'outerColor', type: 'nominal', scale: null },
+        opacity: { field: 'opacity', type: 'quantitative', scale: null },
+        tooltip: sectorTooltip,
+      },
+      mark: { type: 'arc', innerRadius: splitRadius, outerRadius },
+    },
+    // Inner 20% of sector (Relative Major color for modes, Tonic for simple keys)
+    {
+      data: { values: ringValues },
+      encoding: {
+        theta: thetaEncoding,
+        order: { field: 'fifths', type: 'quantitative' },
+        color: { field: 'innerColor', type: 'nominal', scale: null },
+        opacity: { field: 'opacity', type: 'quantitative', scale: null },
+        tooltip: sectorTooltip,
+      },
+      mark: { type: 'arc', innerRadius, outerRadius: splitRadius },
+    },
+    // Perimeter boundary around entire sector
+    {
+      data: { values: ringValues },
+      encoding: {
+        theta: thetaEncoding,
+        order: { field: 'fifths', type: 'quantitative' },
+        color: { value: 'transparent' },
+        stroke: { field: 'stroke', type: 'nominal', scale: null },
+        strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
+      },
+      mark: { type: 'arc', innerRadius, outerRadius },
+    },
+    // Active candidate accent highlight border
+    {
+      data: { values: ringValues },
+      encoding: {
+        theta: thetaEncoding,
+        order: { field: 'fifths', type: 'quantitative' },
+        color: { value: 'transparent' },
+        opacity: { field: 'activeOpacity', type: 'quantitative', scale: null },
+        stroke: { field: 'activeStroke', type: 'nominal', scale: null },
+        strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
+      },
+      mark: { type: 'arc', innerRadius, outerRadius },
+    },
+    // Confidence meter track along outer rim
+    {
+      data: { values: ringValues },
+      transform: [{ filter: 'datum.hasMeter === true' }],
+      mark: {
+        type: 'arc',
+        innerRadius: meterInnerRadius,
+        outerRadius: meterOuterRadius,
+        cornerRadius: meterCornerRadius,
+      },
+      encoding: {
+        theta: { field: 'meterStart', type: 'quantitative', scale: null },
+        theta2: { field: 'meterTrackEnd' },
+        color: { value: isDark ? `rgba(255,255,255,${trackAlphaDark})` : 'rgba(15,23,42,0.15)' },
+        stroke: { value: isDark ? `rgba(255,255,255,${trackStrokeAlphaDark})` : 'rgba(15,23,42,0.2)' },
+        strokeWidth: { value: 0.8 },
+        tooltip: meterTooltip,
+      },
+    },
+    // Confidence meter fill arc along outer rim
+    {
+      data: { values: ringValues },
+      transform: [{ filter: 'datum.hasMeter === true' }],
+      mark: {
+        type: 'arc',
+        innerRadius: meterInnerRadius,
+        outerRadius: meterOuterRadius,
+        cornerRadius: meterCornerRadius,
+      },
+      encoding: {
+        theta: { field: 'meterStart', type: 'quantitative', scale: null },
+        theta2: { field: 'meterFillEnd' },
+        color: { value: isDark ? '#ffffff' : '#0f172a' },
+        tooltip: meterTooltip,
+      },
+    },
+    // Confidence percentage badge on active slices
+    {
+      data: { values: ringValues },
+      encoding: {
+        theta: thetaEncoding,
+        order: { field: 'fifths', type: 'quantitative' },
+        text: { field: 'badge', type: 'nominal' },
+        opacity: { field: 'badgeOpacity', type: 'quantitative', scale: null },
+      },
+      mark: {
+        type: 'text',
+        radius: badgeRadius,
+        fontSize: badgeFontSize,
+        fontWeight: 'bold',
+        fill: isDark ? '#ffffff' : '#0f172a',
+      },
+    },
+  ];
+}
+
+/**
+ * Composable 80%/20% modal split interval patch builder for `key_mode` intervals
+ * (used for both single-row disjoint tracks and multi-row overlapping tracks).
+ */
+function buildModalSplitIntervalLayers(params: {
+  trackHeight: number;
+  cornerRadius: number;
+  xField: string;
+  xTitle: string;
+  minX: number;
+  maxX: number;
+  durField: string;
+  isMidi: boolean;
+  isDark: boolean;
+  hasConfidence: boolean;
+  confidenceChannel: ConfidenceChannelMode;
+  zoomParams: Record<string, unknown>[];
+  containerYEncoding: Record<string, unknown>;
+  patchYEncoding: Record<string, unknown>;
+  includeRowKeyTooltip?: boolean;
+  includeSingleRowPctBadge?: boolean;
+}): Record<string, unknown>[] {
+  const {
+    trackHeight,
+    cornerRadius,
+    xField,
+    xTitle,
+    minX,
+    maxX,
+    durField,
+    isMidi,
+    isDark,
+    hasConfidence,
+    confidenceChannel,
+    zoomParams,
+    containerYEncoding,
+    patchYEncoding,
+    includeRowKeyTooltip = false,
+    includeSingleRowPctBadge = false,
+  } = params;
+
+  const tonicHeight = Math.round(trackHeight * 0.8);
+  const relMajHeight = trackHeight - tonicHeight;
+  const tonicOffset = -trackHeight / 2 + tonicHeight / 2;
+  const relMajOffset = trackHeight / 2 - relMajHeight / 2;
+
+  const opacityEncoding =
+    hasConfidence && confidenceChannel === 'opacity'
+      ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+      : { value: 1.0 };
+
+  const layers: Record<string, unknown>[] = [
+    // Outer bounding container / border
+    {
+      mark: {
+        type: 'rect',
+        height: trackHeight,
+        stroke: isDark ? '#ffffff' : '#0f172a',
+        strokeWidth: 1.5,
+        cornerRadius,
+        fill: 'transparent',
+      },
+      ...(zoomParams.length ? { params: zoomParams } : {}),
+      encoding: {
+        x: {
+          field: xField,
+          type: 'quantitative',
+          title: xTitle,
+          scale: { domain: [minX, maxX] },
+        },
+        x2: { field: '_calc_end' },
+        y: containerYEncoding,
+        opacity: opacityEncoding,
+        tooltip: [
+          { field: '_display_value', type: 'nominal', title: 'Key / Mode' },
+          { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
+          ...(includeRowKeyTooltip ? [{ field: '_row_key', type: 'nominal', title: 'Tonic Row' }] : []),
+          { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
+          { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
+          ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+        ],
+      },
+    },
+    // Top 80% patch: colored to tonic
+    {
+      mark: {
+        type: 'rect',
+        height: tonicHeight,
+        yOffset: tonicOffset,
+        cornerRadiusTopLeft: cornerRadius,
+        cornerRadiusTopRight: cornerRadius,
+      },
+      encoding: {
+        x: { field: xField, type: 'quantitative' },
+        x2: { field: '_calc_end' },
+        y: patchYEncoding,
+        color: { field: '_color_tonic', type: 'nominal', scale: null },
+        opacity: opacityEncoding,
+      },
+    },
+    // Bottom 20% patch: colored to relative major tonic for modes, or tonic for simple keys
+    {
+      mark: {
+        type: 'rect',
+        height: relMajHeight,
+        yOffset: relMajOffset,
+        cornerRadiusBottomLeft: cornerRadius,
+        cornerRadiusBottomRight: cornerRadius,
+      },
+      encoding: {
+        x: { field: xField, type: 'quantitative' },
+        x2: { field: '_calc_end' },
+        y: patchYEncoding,
+        color: {
+          condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
+          field: '_color_tonic',
+          type: 'nominal',
+          scale: null,
+        },
+        opacity: opacityEncoding,
+      },
+    },
+  ];
+
+  if (hasConfidence && confidenceChannel !== 'none') {
+    layers.push(
+      ...buildEmbeddedConfidenceMeterLayers({
+        xField,
+        endField: '_calc_end',
+        confX2Field: '_conf_end',
+        isDark,
+        trackBackingFill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
+        cornerRadius: 1,
+        yEncoding: patchYEncoding,
+        markProps: {
+          height: 3,
+          yOffset: -trackHeight / 2 + 2.5,
+          stroke: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)',
+          strokeWidth: 0.5,
+        },
+        activeMarkProps: {
+          stroke: isDark ? '#ffffff' : '#09090b',
+          strokeWidth: 0.5,
+        },
+      })
+    );
+
+    if (includeSingleRowPctBadge) {
+      layers.push({
+        transform: [
+          { filter: 'datum.confidence != null && (datum.duration == null || datum.duration >= 8)' },
+          { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
+          { calculate: "round(datum.confidence * 100) + '%'", as: '_conf_pct_str' },
+        ],
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'middle',
+          yOffset: -trackHeight / 2 + 10,
+          fontSize: 9.5,
+          fontWeight: 'bold',
+          fill: isDark ? '#ffffff' : '#0f172a',
+          font: 'ui-monospace, monospace',
+        },
+        encoding: {
+          x: { field: 'x_mid', type: 'quantitative' },
+          y: patchYEncoding,
+          text: { field: '_conf_pct_str', type: 'nominal' },
+        },
+      });
+    }
+  }
+
+  return layers;
 }
 
 export function buildBoppVegaLiteSpec(
@@ -704,151 +1495,21 @@ export function buildBoppVegaLiteSpec(
       // - Inner adjacent patch (inner half of sector) colored to relative major tonic
 
       // 1. Outer Ring: Major Keys & Major Modes (Ionian, Lydian, Mixolydian)
-      const outerRingValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
-        const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
-        const allMatches = sortedCandidates.filter(c => c.semitone === kSem && !c.isMinor);
-        const matchingCand = allMatches[0];
-        const isActive = Boolean(matchingCand);
-        const isMultiMode = allMatches.length > 1;
-        const candConf = matchingCand?.confidence ?? null;
-
-        const sliceColor = mode === 'pitch'
-          ? MIR_EVAL_COLORMAPS.pitch[kSem]
-          : MIR_EVAL_COLORMAPS.fifths[kSem];
-
-        const isSplit = Boolean(isActive && matchingCand?.isMode);
-        const outerColor = isSplit && matchingCand ? matchingCand.tonicColor : sliceColor;
-        const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
-
-        const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
-        const badgeText = isMultiMode
-          ? allMatches.map(m => m.confidence !== null ? `${Math.round(m.confidence * 100)}%` : '').filter(Boolean).join('/')
-          : (isActive && candConf !== null ? confPct : '');
-
-        // Arc meter geometry along outer rim of donut segment
-        const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
-        const theta1 = Math.PI / 12 + i * (Math.PI / 6);
-        const margin = 0.015;
-        const meterStart = theta0 + margin;
-        const meterTrackEnd = theta1 - margin;
-        const totalSpan = meterTrackEnd - meterStart;
-        const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
-        const meterFillEnd = meterStart + confVal * totalSpan;
-        const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
-
-        const multiModeDescription = isMultiMode
-          ? allMatches.map(m => `${m.label} (${m.confidence !== null ? Math.round(m.confidence * 100) + '%' : 'detected'})`).join(' + ')
-          : (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`);
-
-        return {
-          key: k,
-          displayKey: k,
-          ring: 'Outer (Major)',
-          fifths: i,
-          count: 1,
-          color: sliceColor,
-          outerColor,
-          innerColor,
-          isSplit,
-          isMultiMode,
-          active: isActive,
-          activeOpacity: isActive ? 1.0 : 0.0,
-          activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
-          activeStrokeWidth: isActive ? 3 : 0,
-          stroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#334155' : '#cbd5e1'),
-          strokeWidth: isActive ? 2.5 : 1,
-          opacity: isActive
-            ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45))
-            : (isDark ? 0.28 : 0.38),
-          textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: isMultiMode ? allMatches.map(m => m.fullKey).join(' / ') : (matchingCand?.fullKey ?? `${k}:maj`),
-          label: isMultiMode ? allMatches.map(m => m.label).join(' / ') : (matchingCand?.label ?? `${k} Major`),
-          modeName: isMultiMode ? allMatches.map(m => m.parsed?.mode ?? 'Major').join(' + ') : (matchingCand?.isMode ? matchingCand.parsed?.mode : 'Major'),
-          confidence: candConf,
-          confPct,
-          badge: badgeText,
-          badgeOpacity: isActive && badgeText ? 1.0 : 0.0,
-          meterStart,
-          meterTrackEnd,
-          meterFillEnd,
-          hasMeter,
-          confVal,
-          status: isActive ? multiModeDescription : 'Major Sector',
-        };
+      const outerRingValues = buildKeyDonutRingData({
+        isMinorRing: false,
+        sortedCandidates,
+        mode,
+        isDark,
+        confidenceChannel,
       });
 
       // 2. Inner Ring: Minor Keys & Minor Modes (Aeolian, Dorian, Phrygian, Locrian)
-      const innerRingValues = FIFTHS_ORDER_12_ROOTS.map((k, i) => {
-        const kSem = CHROMATIC_ROOT_MAP[k] ?? 0;
-        const allMatches = sortedCandidates.filter(c => c.semitone === kSem && c.isMinor);
-        const matchingCand = allMatches[0];
-        const isActive = Boolean(matchingCand);
-        const isMultiMode = allMatches.length > 1;
-        const candConf = matchingCand?.confidence ?? null;
-
-        const sliceColor = mode === 'pitch'
-          ? MIR_EVAL_COLORMAPS.pitch_dark[kSem]
-          : MIR_EVAL_COLORMAPS.fifths_dark[kSem];
-
-        const isSplit = Boolean(isActive && matchingCand?.isMode);
-        const outerColor = isSplit && matchingCand ? matchingCand.tonicColor : sliceColor;
-        const innerColor = isSplit && matchingCand ? matchingCand.relMajColor : sliceColor;
-
-        const confPct = candConf !== null ? `${Math.round(candConf * 100)}%` : '';
-        const badgeText = isMultiMode
-          ? allMatches.map(m => m.confidence !== null ? `${Math.round(m.confidence * 100)}%` : '').filter(Boolean).join('/')
-          : (isActive && candConf !== null ? confPct : '');
-
-        // Arc meter geometry along outer rim of inner donut segment
-        const theta0 = -Math.PI / 12 + i * (Math.PI / 6);
-        const theta1 = Math.PI / 12 + i * (Math.PI / 6);
-        const margin = 0.015;
-        const meterStart = theta0 + margin;
-        const meterTrackEnd = theta1 - margin;
-        const totalSpan = meterTrackEnd - meterStart;
-        const confVal = typeof candConf === 'number' ? Math.max(0, Math.min(1, candConf)) : 0;
-        const meterFillEnd = meterStart + confVal * totalSpan;
-        const hasMeter = Boolean(isActive && typeof candConf === 'number' && confidenceChannel !== 'none');
-
-        const multiModeDescription = isMultiMode
-          ? allMatches.map(m => `${m.label} (${m.confidence !== null ? Math.round(m.confidence * 100) + '%' : 'detected'})`).join(' + ')
-          : (candConf !== null ? `${matchingCand?.label} (${confPct})` : `Detected ${matchingCand?.label}`);
-
-        return {
-          key: k,
-          displayKey: k.toLowerCase(), // Standard lowercase notation for minor
-          ring: 'Inner (Minor)',
-          fifths: i,
-          count: 1,
-          color: sliceColor,
-          outerColor,
-          innerColor,
-          isSplit,
-          isMultiMode,
-          active: isActive,
-          activeOpacity: isActive ? 1.0 : 0.0,
-          activeStroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : 'transparent',
-          activeStrokeWidth: isActive ? 3 : 0,
-          stroke: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#334155' : '#cbd5e1'),
-          strokeWidth: isActive ? 2.5 : 1,
-          opacity: isActive
-            ? Math.max(0.85, Math.min(1.0, 0.55 + (candConf ?? 1.0) * 0.45))
-            : (isDark ? 0.25 : 0.35),
-          textColor: isActive ? (isDark ? '#ffffff' : '#0f172a') : (isDark ? '#94a3b8' : '#64748b'),
-          fullKey: isMultiMode ? allMatches.map(m => m.fullKey).join(' / ') : (matchingCand?.fullKey ?? `${k}:min`),
-          label: isMultiMode ? allMatches.map(m => m.label).join(' / ') : (matchingCand?.label ?? `${k} Minor`),
-          modeName: isMultiMode ? allMatches.map(m => m.parsed?.mode ?? 'Minor').join(' + ') : (matchingCand?.isMode ? matchingCand.parsed?.mode : 'Minor'),
-          confidence: candConf,
-          confPct,
-          badge: badgeText,
-          badgeOpacity: isActive && badgeText ? 1.0 : 0.0,
-          meterStart,
-          meterTrackEnd,
-          meterFillEnd,
-          hasMeter,
-          confVal,
-          status: isActive ? multiModeDescription : 'Minor Sector',
-        };
+      const innerRingValues = buildKeyDonutRingData({
+        isMinorRing: true,
+        sortedCandidates,
+        mode,
+        isDark,
+        confidenceChannel,
       });
 
       const wheelSize = typeof chartWidth === 'number' ? Math.min(480, Math.max(360, chartWidth - 60)) : 400;
@@ -893,301 +1554,34 @@ export function buildBoppVegaLiteSpec(
         },
         config: baseConfig,
         layer: [
-          // 1A. OUTER DONUT: Outer Half of Sector (Radius 126 - 148, Colored to Tonic)
-          {
-            data: { values: outerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'outerColor', type: 'nominal', scale: null },
-              opacity: { field: 'opacity', type: 'quantitative', scale: null },
-              tooltip: [
-                { field: 'ring', type: 'nominal', title: 'Ring' },
-                { field: 'key', type: 'nominal', title: 'Tonic Root' },
-                { field: 'modeName', type: 'nominal', title: 'Mode' },
-                { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-            mark: { type: 'arc', innerRadius: 114, outerRadius: 148 },
-          },
-          // 1B. OUTER DONUT: Inner Part of Sector (Radius 104 - 114, 20% area: Colored to Relative Major for modes, Tonic for simple keys)
-          {
-            data: { values: outerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'innerColor', type: 'nominal', scale: null },
-              opacity: { field: 'opacity', type: 'quantitative', scale: null },
-              tooltip: [
-                { field: 'ring', type: 'nominal', title: 'Ring' },
-                { field: 'key', type: 'nominal', title: 'Tonic Root' },
-                { field: 'modeName', type: 'nominal', title: 'Mode' },
-                { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-            mark: { type: 'arc', innerRadius: 104, outerRadius: 114 },
-          },
-          // 1C. OUTER DONUT: Perimeter Boundary around Entire Sector (leaves no dividing line between annuli segments)
-          {
-            data: { values: outerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { value: 'transparent' },
-              stroke: { field: 'stroke', type: 'nominal', scale: null },
-              strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
-            },
-            mark: { type: 'arc', innerRadius: 104, outerRadius: 148 },
-          },
-          // 2. OUTER DONUT: Active Candidate Accent Highlight Border
-          {
-            data: { values: outerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { value: 'transparent' },
-              opacity: { field: 'activeOpacity', type: 'quantitative', scale: null },
-              stroke: { field: 'activeStroke', type: 'nominal', scale: null },
-              strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
-            },
-            mark: { type: 'arc', innerRadius: 104, outerRadius: 148 },
-          },
-          // 4A. OUTER DONUT: Confidence Meter Track along Outer Rim (Radius 150 - 156)
-          {
-            data: { values: outerRingValues },
-            transform: [{ filter: 'datum.hasMeter === true' }],
-            mark: {
-              type: 'arc',
-              innerRadius: 150,
-              outerRadius: 156,
-              cornerRadius: 2,
-            },
-            encoding: {
-              theta: { field: 'meterStart', type: 'quantitative', scale: null },
-              theta2: { field: 'meterTrackEnd' },
-              color: { value: isDark ? 'rgba(255,255,255,0.18)' : 'rgba(15,23,42,0.15)' },
-              stroke: { value: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(15,23,42,0.2)' },
-              strokeWidth: { value: 0.8 },
-              tooltip: [
-                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
-                { field: 'confPct', type: 'nominal', title: 'Confidence' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-          },
-          // 4B. OUTER DONUT: Confidence Meter Fill Arc along Outer Rim (Radius 150 - 156)
-          {
-            data: { values: outerRingValues },
-            transform: [{ filter: 'datum.hasMeter === true' }],
-            mark: {
-              type: 'arc',
-              innerRadius: 150,
-              outerRadius: 156,
-              cornerRadius: 2,
-            },
-            encoding: {
-              theta: { field: 'meterStart', type: 'quantitative', scale: null },
-              theta2: { field: 'meterFillEnd' },
-              color: { value: isDark ? '#ffffff' : '#0f172a' },
-              tooltip: [
-                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
-                { field: 'confPct', type: 'nominal', title: 'Confidence' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-          },
-          // 4C. OUTER DONUT: Confidence Badges on Active Slices
-          {
-            data: { values: outerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              text: { field: 'badge', type: 'nominal' },
-              opacity: { field: 'badgeOpacity', type: 'quantitative', scale: null },
-            },
-            mark: {
-              type: 'text',
-              radius: 139,
-              fontSize: 9.5,
-              fontWeight: 'bold',
-              fill: isDark ? '#ffffff' : '#0f172a',
-            },
-          },
-
-          // 5A. INNER DONUT: Outer Half of Sector (Radius 78 - 98, Colored to Tonic)
-          {
-            data: { values: innerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'outerColor', type: 'nominal', scale: null },
-              opacity: { field: 'opacity', type: 'quantitative', scale: null },
-              tooltip: [
-                { field: 'ring', type: 'nominal', title: 'Ring' },
-                { field: 'key', type: 'nominal', title: 'Tonic Root' },
-                { field: 'modeName', type: 'nominal', title: 'Mode' },
-                { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-            mark: { type: 'arc', innerRadius: 68, outerRadius: 98 },
-          },
-          // 5B. INNER DONUT: Inner Part of Sector (Radius 58 - 68, 20% area: Colored to Relative Major for modes, Tonic for simple keys)
-          {
-            data: { values: innerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { field: 'innerColor', type: 'nominal', scale: null },
-              opacity: { field: 'opacity', type: 'quantitative', scale: null },
-              tooltip: [
-                { field: 'ring', type: 'nominal', title: 'Ring' },
-                { field: 'key', type: 'nominal', title: 'Tonic Root' },
-                { field: 'modeName', type: 'nominal', title: 'Mode' },
-                { field: 'fullKey', type: 'nominal', title: 'Chord/Key' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-            mark: { type: 'arc', innerRadius: 58, outerRadius: 68 },
-          },
-          // 5C. INNER DONUT: Perimeter Boundary around Entire Sector (leaves no dividing line between annuli segments)
-          {
-            data: { values: innerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { value: 'transparent' },
-              stroke: { field: 'stroke', type: 'nominal', scale: null },
-              strokeWidth: { field: 'strokeWidth', type: 'quantitative', scale: null },
-            },
-            mark: { type: 'arc', innerRadius: 58, outerRadius: 98 },
-          },
-          // 6. INNER DONUT: Active Candidate Accent Highlight Border
-          {
-            data: { values: innerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              color: { value: 'transparent' },
-              opacity: { field: 'activeOpacity', type: 'quantitative', scale: null },
-              stroke: { field: 'activeStroke', type: 'nominal', scale: null },
-              strokeWidth: { field: 'activeStrokeWidth', type: 'quantitative', scale: null },
-            },
-            mark: { type: 'arc', innerRadius: 58, outerRadius: 98 },
-          },
-          // 8A. INNER DONUT: Confidence Meter Track along Outer Rim (Radius 99.5 - 103.5)
-          {
-            data: { values: innerRingValues },
-            transform: [{ filter: 'datum.hasMeter === true' }],
-            mark: {
-              type: 'arc',
-              innerRadius: 99.5,
-              outerRadius: 103.5,
-              cornerRadius: 1.5,
-            },
-            encoding: {
-              theta: { field: 'meterStart', type: 'quantitative', scale: null },
-              theta2: { field: 'meterTrackEnd' },
-              color: { value: isDark ? 'rgba(255,255,255,0.2)' : 'rgba(15,23,42,0.15)' },
-              stroke: { value: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(15,23,42,0.2)' },
-              strokeWidth: { value: 0.8 },
-              tooltip: [
-                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
-                { field: 'confPct', type: 'nominal', title: 'Confidence' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-          },
-          // 8B. INNER DONUT: Confidence Meter Fill Arc along Outer Rim (Radius 99.5 - 103.5)
-          {
-            data: { values: innerRingValues },
-            transform: [{ filter: 'datum.hasMeter === true' }],
-            mark: {
-              type: 'arc',
-              innerRadius: 99.5,
-              outerRadius: 103.5,
-              cornerRadius: 1.5,
-            },
-            encoding: {
-              theta: { field: 'meterStart', type: 'quantitative', scale: null },
-              theta2: { field: 'meterFillEnd' },
-              color: { value: isDark ? '#ffffff' : '#0f172a' },
-              tooltip: [
-                { field: 'fullKey', type: 'nominal', title: 'Chord / Key' },
-                { field: 'confPct', type: 'nominal', title: 'Confidence' },
-                { field: 'status', type: 'nominal', title: 'Status' },
-              ],
-            },
-          },
-          // 8C. INNER DONUT: Confidence Badges on Active Minor Slices
-          {
-            data: { values: innerRingValues },
-            encoding: {
-              theta: {
-                field: 'count',
-                type: 'quantitative',
-                stack: true,
-                scale: { range: [-Math.PI / 12, 2 * Math.PI - Math.PI / 12] },
-              },
-              order: { field: 'fifths', type: 'quantitative' },
-              text: { field: 'badge', type: 'nominal' },
-              opacity: { field: 'badgeOpacity', type: 'quantitative', scale: null },
-            },
-            mark: {
-              type: 'text',
-              radius: 68,
-              fontSize: 9,
-              fontWeight: 'bold',
-              fill: isDark ? '#ffffff' : '#0f172a',
-            },
-          },
+          ...buildKeyDonutRingLayers({
+            ringValues: outerRingValues,
+            innerRadius: 104,
+            splitRadius: 114,
+            outerRadius: 148,
+            meterInnerRadius: 150,
+            meterOuterRadius: 156,
+            meterCornerRadius: 2,
+            badgeRadius: 139,
+            badgeFontSize: 9.5,
+            isDark,
+            trackAlphaDark: 0.18,
+            trackStrokeAlphaDark: 0.25,
+          }),
+          ...buildKeyDonutRingLayers({
+            ringValues: innerRingValues,
+            innerRadius: 58,
+            splitRadius: 68,
+            outerRadius: 98,
+            meterInnerRadius: 99.5,
+            meterOuterRadius: 103.5,
+            meterCornerRadius: 1.5,
+            badgeRadius: 68,
+            badgeFontSize: 9,
+            isDark,
+            trackAlphaDark: 0.2,
+            trackStrokeAlphaDark: 0.3,
+          }),
 
           // 9. Perimeter Reference Labels Outside Outer Ring
           {
@@ -1573,11 +1967,10 @@ export function buildBoppVegaLiteSpec(
   // Supports all extent types: time_interval, score_interval, midi_interval, etc.
   // =========================================================================
   if (payloadType === 'chord') {
-    const isScore = extentType === 'score_interval' || extentType === 'score_quarter';
-    const isMidi = extentType === 'midi_interval' || extentType === 'midi_tick';
-
-    const xField = isScore ? 'quarter' : isMidi ? 'tick' : 'time';
-    const xTitle = isScore ? 'Musical Time (Quarter Notes)' : isMidi ? 'MIDI Tick' : 'Time (seconds)';
+    const { isMidi, isScore, xField: rawXField, xTitle } = resolveExtentAxis(extentType, data, {
+      scoreTitle: 'Musical Time (Quarter Notes)',
+    });
+    const xField = rawXField === '__index' ? 'time' : rawXField;
     const durField = 'duration';
 
     // Calculate interval end internally in Vega-Lite transform only
@@ -1791,131 +2184,54 @@ export function buildBoppVegaLiteSpec(
       } else if (shouldMultiRow && hasConfidence && confidenceChannel !== 'none') {
         // Multi-row confidence meter strip along top of each chord bar (unified MIDI note style)
         layers.push(
-          // Backing track
-          {
-            transform: [{ filter: 'datum.confidence != null' }],
-            mark: {
-              type: 'rect',
+          ...buildEmbeddedConfidenceMeterLayers({
+            xField,
+            endField: '_calc_end',
+            confX2Field: '_chord_conf_end',
+            isDark,
+            trackBackingFill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
+            cornerRadius: 1,
+            yEncoding: {
+              field: '_chord_row',
+              type: 'nominal',
+              sort: uniqueChordRows,
+              scale: { domain: uniqueChordRows },
+            },
+            markProps: {
               height: 3,
-              cornerRadius: 1,
-              fill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
+              yOffset: 2.5,
               stroke: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)',
               strokeWidth: 0.5,
             },
-            encoding: {
-              x: { field: xField, type: 'quantitative' },
-              x2: { field: '_calc_end' },
-              y: { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } },
-              yOffset: { value: 2.5 },
-            },
-          },
-          // Active meter fill
-          {
-            transform: [
-              { filter: 'datum.confidence != null && datum.confidence > 0' },
-              { calculate: `datum.${xField} + (datum.duration != null ? datum.duration * datum.confidence : 0)`, as: '_chord_conf_end' },
-            ],
-            mark: {
-              type: 'rect',
-              height: 3,
-              cornerRadius: 1,
+            activeMarkProps: {
               stroke: isDark ? '#ffffff' : '#09090b',
               strokeWidth: 0.5,
             },
-            encoding: {
-              x: { field: xField, type: 'quantitative' },
-              x2: { field: '_chord_conf_end' },
-              y: { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } },
-              yOffset: { value: 2.5 },
-              color: {
-                field: 'confidence',
-                type: 'quantitative',
-                scale: {
-                  domain: [0, 0.65, 0.85, 1.0],
-                  range: isDark
-                    ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                    : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-                },
-                legend: null,
-              },
-            },
-          }
+          })
         );
       }
 
       // Chord text label layer with high-contrast halo and strict patch-boundary clipping
       if (showLabels) {
-        const chordLimitExpr = `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)`;
-        const chordTestExpr = `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 10`;
-
         const yTextEncoding = shouldMultiRow
           ? { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } }
           : { value: mainPlotHeight / 2 + 10 };
 
-        // 1. Halo backing layer
-        layers.push({
-          transform: [
-            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
-            { filter: `datum.duration == null || datum.duration >= 0.2` },
-          ],
-          mark: {
-            type: 'text',
-            align: 'center',
-            baseline: 'middle',
-            fill: 'transparent',
-            stroke: 'rgba(0,0,0,0.85)',
-            strokeWidth: 3,
-            strokeJoin: 'round',
-            fontWeight: 'bold',
-            fontSize: 11,
+        layers.push(
+          ...buildIntervalCenteredLabelLayers({
+            xField,
+            endField: '_calc_end',
+            fallbackHalfDur: 0,
+            minDuration: 0.2,
+            minPixelWidth: 10,
+            paddingPx: 4,
+            yEncoding: yTextEncoding,
+            textField: '_display_value',
             font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            clip: true,
-            limit: { expr: chordLimitExpr },
-          },
-          encoding: {
-            x: { field: 'x_mid', type: 'quantitative' },
-            y: yTextEncoding,
-            text: {
-              condition: {
-                test: chordTestExpr,
-                value: '',
-              },
-              field: '_display_value',
-              type: 'nominal',
-            },
-          },
-        });
-
-        // 2. Crisp foreground text layer
-        layers.push({
-          transform: [
-            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0)`, as: 'x_mid' },
-            { filter: `datum.duration == null || datum.duration >= 0.2` },
-          ],
-          mark: {
-            type: 'text',
-            align: 'center',
-            baseline: 'middle',
-            fill: '#ffffff',
-            fontWeight: 'bold',
             fontSize: 11,
-            font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-            clip: true,
-            limit: { expr: chordLimitExpr },
-          },
-          encoding: {
-            x: { field: 'x_mid', type: 'quantitative' },
-            y: yTextEncoding,
-            text: {
-              condition: {
-                test: chordTestExpr,
-                value: '',
-              },
-              field: '_display_value',
-              type: 'nominal',
-            },
-          },
-        });
+            withHalo: true,
+          })
+        );
       }
     }
 
@@ -1973,14 +2289,11 @@ export function buildBoppVegaLiteSpec(
   // Modes use split coloring: top/outer colored to tonic, bottom/inner colored to relative major tonic.
   // =========================================================================
   if (payloadType === 'key_mode') {
-    const isMidi = extentType?.includes('midi') || extentType?.includes('tick') || (data.length > 0 && typeof data[0].tick === 'number');
-    const isScore = extentType?.includes('score') || extentType?.includes('quarter') || (data.length > 0 && typeof data[0].quarter === 'number');
-
-    const xField = isMidi ? 'tick' : isScore ? 'quarter' : 'time';
-    const xTitle = isMidi ? 'MIDI Tick' : isScore ? 'Musical Time (Quarter Notes)' : 'Time (seconds)';
+    const { isMidi, isInterval, xField: rawXField, xTitle } = resolveExtentAxis(extentType, data, {
+      scoreTitle: 'Musical Time (Quarter Notes)',
+    });
+    const xField = rawXField === '__index' ? 'time' : rawXField;
     const durField = 'duration';
-
-    const isInterval = extentType?.includes('interval') || data.some(d => typeof d.duration === 'number');
 
     if (isInterval) {
       transforms.push({
@@ -2105,34 +2418,10 @@ export function buildBoppVegaLiteSpec(
           ],
         },
       });
-    } else if (useSingleRow) {
-      // DISJOINT: Single horizontal track with two adjacent patches for modal annotations (80% Tonic / 20% Rel Maj)
-      const trackHeight = 44;
-      const tonicHeight = Math.round(trackHeight * 0.8); // 35px = 80% area
-      const relMajHeight = trackHeight - tonicHeight;    // 9px  = 20% area
-      const tonicOffset = -trackHeight / 2 + tonicHeight / 2; // -4.5px
-      const relMajOffset = trackHeight / 2 - relMajHeight / 2; // +17.5px
-
-      // Outer bounding container / border
-      layers.push({
-        mark: {
-          type: 'rect',
-          height: trackHeight,
-          stroke: isDark ? '#ffffff' : '#0f172a',
-          strokeWidth: 1.5,
-          cornerRadius: 4,
-          fill: 'transparent',
-        },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-        encoding: {
-          x: {
-            field: xField,
-            type: 'quantitative',
-            title: xTitle,
-            scale: { domain: [minX, maxX] },
-          },
-          x2: { field: '_calc_end' },
-          y: {
+    } else {
+      // Composable 80% Tonic / 20% Relative Major modal split interval patches (for single-row disjoint or multi-row overlapping)
+      const containerYEncoding = useSingleRow
+        ? {
             field: yField,
             type: yType,
             title: yTitle,
@@ -2142,166 +2431,8 @@ export function buildBoppVegaLiteSpec(
               titlePadding: 14,
               minExtent: 80,
             },
-          },
-          opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
-            : { value: 1.0 },
-          tooltip: [
-            { field: '_display_value', type: 'nominal', title: 'Key / Mode' },
-            { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
-            { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
-            { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
-          ],
-        },
-      });
-
-      // Patch 1 (Top adjacent patch - 80% area): colored to tonic
-      layers.push({
-        mark: {
-          type: 'rect',
-          height: tonicHeight,
-          yOffset: tonicOffset,
-          cornerRadiusTopLeft: 4,
-          cornerRadiusTopRight: 4,
-        },
-        encoding: {
-          x: { field: xField, type: 'quantitative' },
-          x2: { field: '_calc_end' },
-          y: { field: yField, type: yType },
-          color: { field: '_color_tonic', type: 'nominal', scale: null },
-          opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
-            : { value: 1.0 },
-        },
-      });
-
-      // Patch 2 (Bottom adjacent patch - 20% area): colored to relative major tonic for modes, or tonic for simple keys
-      layers.push({
-        mark: {
-          type: 'rect',
-          height: relMajHeight,
-          yOffset: relMajOffset,
-          cornerRadiusBottomLeft: 4,
-          cornerRadiusBottomRight: 4,
-        },
-        encoding: {
-          x: { field: xField, type: 'quantitative' },
-          x2: { field: '_calc_end' },
-          y: { field: yField, type: yType },
-          color: {
-            condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
-            field: '_color_tonic',
-            type: 'nominal',
-            scale: null,
-          },
-          opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
-            : { value: 1.0 },
-        },
-      });
-
-      // Top edge confidence meter for single row key intervals (unified MIDI note style)
-      if (hasConfidence && confidenceChannel !== 'none') {
-        layers.push({
-          transform: [{ filter: 'datum.confidence != null' }],
-          mark: {
-            type: 'rect',
-            height: 3,
-            yOffset: -trackHeight / 2 + 2.5,
-            cornerRadius: 1,
-            fill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
-            stroke: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)',
-            strokeWidth: 0.5,
-          },
-          encoding: {
-            x: { field: xField, type: 'quantitative' },
-            x2: { field: '_calc_end' },
-            y: { field: yField, type: yType },
-          },
-        });
-        layers.push({
-          transform: [
-            { filter: 'datum.confidence != null && datum.confidence > 0' },
-            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration : 1) * datum.confidence`, as: '_conf_end' },
-          ],
-          mark: {
-            type: 'rect',
-            height: 3,
-            yOffset: -trackHeight / 2 + 2.5,
-            cornerRadius: 1,
-            stroke: isDark ? '#ffffff' : '#09090b',
-            strokeWidth: 0.5,
-          },
-          encoding: {
-            x: { field: xField, type: 'quantitative' },
-            x2: { field: '_conf_end' },
-            y: { field: yField, type: yType },
-            color: {
-              field: 'confidence',
-              type: 'quantitative',
-              scale: {
-                domain: [0, 0.65, 0.85, 1.0],
-                range: isDark
-                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-              },
-              legend: null,
-            },
-          },
-        });
-        // Numerical percentage badge on key interval
-        layers.push({
-          transform: [
-            { filter: 'datum.confidence != null && (datum.duration == null || datum.duration >= 8)' },
-            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
-            { calculate: "round(datum.confidence * 100) + '%'", as: '_conf_pct_str' },
-          ],
-          mark: {
-            type: 'text',
-            align: 'center',
-            baseline: 'middle',
-            yOffset: -trackHeight / 2 + 10,
-            fontSize: 9.5,
-            fontWeight: 'bold',
-            fill: isDark ? '#ffffff' : '#0f172a',
-            font: 'ui-monospace, monospace',
-          },
-          encoding: {
-            x: { field: 'x_mid', type: 'quantitative' },
-            y: { field: yField, type: yType },
-            text: { field: '_conf_pct_str', type: 'nominal' },
-          },
-        });
-      }
-    } else {
-      // OVERLAPPING INTERVALS: Multi-row vertical axis with two adjacent patches per row (80% Tonic / 20% Rel Maj)
-      const rowHeight = 26;
-      const tonicHeight = Math.round(rowHeight * 0.8); // 21px = 80% area
-      const relMajHeight = rowHeight - tonicHeight;    // 5px  = 20% area
-      const tonicOffset = -rowHeight / 2 + tonicHeight / 2; // -2.5px
-      const relMajOffset = rowHeight / 2 - relMajHeight / 2; // +10.5px
-
-      // Outer bounding container / border per row
-      layers.push({
-        mark: {
-          type: 'rect',
-          height: rowHeight,
-          stroke: isDark ? '#ffffff' : '#0f172a',
-          strokeWidth: 1.5,
-          cornerRadius: 3,
-          fill: 'transparent',
-        },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-        encoding: {
-          x: {
-            field: xField,
-            type: 'quantitative',
-            title: xTitle,
-            scale: { domain: [minX, maxX] },
-          },
-          x2: { field: '_calc_end' },
-          y: {
+          }
+        : {
             field: yField,
             type: 'nominal',
             title: 'Tonic Pitch',
@@ -2314,182 +2445,55 @@ export function buildBoppVegaLiteSpec(
               labelPadding: 8,
               minExtent: 70,
             },
-          },
-          opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
-            : { value: 1.0 },
-          tooltip: [
-            { field: '_display_value', type: 'nominal', title: 'Key / Mode' },
-            { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
-            { field: '_row_key', type: 'nominal', title: 'Tonic Row' },
-            { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
-            { field: durField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Duration' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
-          ],
-        },
-      });
+          };
 
-      // Patch 1 (Top adjacent patch - 80% area): colored to tonic
-      layers.push({
-        mark: {
-          type: 'rect',
-          height: tonicHeight,
-          yOffset: tonicOffset,
-          cornerRadiusTopLeft: 3,
-          cornerRadiusTopRight: 3,
-        },
-        encoding: {
-          x: { field: xField, type: 'quantitative' },
-          x2: { field: '_calc_end' },
-          y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
-          color: { field: '_color_tonic', type: 'nominal', scale: null },
-          opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
-            : { value: 1.0 },
-        },
-      });
+      const patchYEncoding = useSingleRow
+        ? { field: yField, type: yType }
+        : { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } };
 
-      // Patch 2 (Bottom adjacent patch - 20% area): colored to relative major tonic for modes, or tonic for simple keys
-      layers.push({
-        mark: {
-          type: 'rect',
-          height: relMajHeight,
-          yOffset: relMajOffset,
-          cornerRadiusBottomLeft: 3,
-          cornerRadiusBottomRight: 3,
-        },
-        encoding: {
-          x: { field: xField, type: 'quantitative' },
-          x2: { field: '_calc_end' },
-          y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
-          color: {
-            condition: { test: 'datum._is_mode === true', field: '_color_rel', type: 'nominal', scale: null },
-            field: '_color_tonic',
-            type: 'nominal',
-            scale: null,
-          },
-          opacity: hasConfidence && confidenceChannel === 'opacity'
-            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
-            : { value: 1.0 },
-        },
-      });
-
-      // Top edge confidence meter for multi-row key intervals (unified MIDI note style)
-      if (hasConfidence && confidenceChannel !== 'none') {
-        layers.push({
-          transform: [{ filter: 'datum.confidence != null' }],
-          mark: {
-            type: 'rect',
-            height: 3,
-            yOffset: -rowHeight / 2 + 2.5,
-            cornerRadius: 1,
-            fill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
-            stroke: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.15)',
-            strokeWidth: 0.5,
-          },
-          encoding: {
-            x: { field: xField, type: 'quantitative' },
-            x2: { field: '_calc_end' },
-            y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
-          },
-        });
-        layers.push({
-          transform: [
-            { filter: 'datum.confidence != null && datum.confidence > 0' },
-            { calculate: `datum.${xField} + (datum.duration != null ? datum.duration : 1) * datum.confidence`, as: '_conf_end' },
-          ],
-          mark: {
-            type: 'rect',
-            height: 3,
-            yOffset: -rowHeight / 2 + 2.5,
-            cornerRadius: 1,
-            stroke: isDark ? '#ffffff' : '#09090b',
-            strokeWidth: 0.5,
-          },
-          encoding: {
-            x: { field: xField, type: 'quantitative' },
-            x2: { field: '_conf_end' },
-            y: { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
-            color: {
-              field: 'confidence',
-              type: 'quantitative',
-              scale: {
-                domain: [0, 0.65, 0.85, 1.0],
-                range: isDark
-                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-              },
-              legend: null,
-            },
-          },
-        });
-      }
+      layers.push(
+        ...buildModalSplitIntervalLayers({
+          trackHeight: useSingleRow ? 44 : 26,
+          cornerRadius: useSingleRow ? 4 : 3,
+          xField,
+          xTitle,
+          minX,
+          maxX,
+          durField,
+          isMidi: Boolean(isMidi),
+          isDark,
+          hasConfidence,
+          confidenceChannel,
+          zoomParams: makeZoomParam(),
+          containerYEncoding,
+          patchYEncoding,
+          includeRowKeyTooltip: !useSingleRow,
+          includeSingleRowPctBadge: useSingleRow,
+        })
+      );
     }
 
     // Text labels inside patches with high-contrast halo and strict patch-boundary clipping
     if (showLabels && isInterval) {
-      const limitExpr = `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 4)`;
-      const textCondition = {
-        test: `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 10`,
-        value: '',
-      };
-
-      // 1. Halo backing layer for absolute legibility on any palette color
-      layers.push({
-        transform: [
-          { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
-        ],
-        mark: {
-          type: 'text',
-          align: 'center',
-          baseline: 'middle',
-          fill: 'transparent',
-          stroke: 'rgba(0,0,0,0.85)',
-          strokeWidth: 3,
-          strokeJoin: 'round',
-          fontWeight: 'bold',
-          fontSize: 11,
+      layers.push(
+        ...buildIntervalCenteredLabelLayers({
+          xField,
+          endField: '_calc_end',
+          fallbackHalfDur: 0.5,
+          minPixelWidth: 10,
+          paddingPx: 4,
+          yEncoding: useSingleRow
+            ? { field: yField, type: yType }
+            : { field: yField, type: 'nominal', scale: { domain: keyDomain } },
+          fgYEncoding: useSingleRow
+            ? { field: yField, type: yType }
+            : { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
+          textField: '_display_value',
           font: 'system-ui, -apple-system, sans-serif',
-          clip: true,
-          limit: { expr: limitExpr },
-        },
-        encoding: {
-          x: { field: 'x_mid', type: 'quantitative' },
-          y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', scale: { domain: keyDomain } },
-          text: {
-            condition: textCondition,
-            field: '_display_value',
-            type: 'nominal',
-          },
-        },
-      });
-
-      // 2. Crisp foreground text layer
-      layers.push({
-        transform: [
-          { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.5)`, as: 'x_mid' },
-        ],
-        mark: {
-          type: 'text',
-          align: 'center',
-          baseline: 'middle',
-          fill: '#ffffff',
-          fontWeight: 'bold',
           fontSize: 11,
-          font: 'system-ui, -apple-system, sans-serif',
-          clip: true,
-          limit: { expr: limitExpr },
-        },
-        encoding: {
-          x: { field: 'x_mid', type: 'quantitative' },
-          y: useSingleRow ? { field: yField, type: yType } : { field: yField, type: 'nominal', sort: keyDomain, scale: { domain: keyDomain } },
-          text: {
-            condition: textCondition,
-            field: '_display_value',
-            type: 'nominal',
-          },
-        },
-      });
+          withHalo: true,
+        })
+      );
     }
 
     const cursor = makeCursorLayer(xField);
@@ -2727,10 +2731,10 @@ export function buildBoppVegaLiteSpec(
   // Colors matched to mir_eval palette by pitch class (C=0 .. B=11).
   // =========================================================================
   if (payloadType === 'note_midi' || payloadType === 'note_hz' || (payloadType as string) === 'piano_roll') {
-    const isMidi = extentType?.includes('midi') || extentType?.includes('tick') || (data.length > 0 && typeof data[0].tick === 'number');
-    const isScore = extentType?.includes('score') || extentType?.includes('quarter') || (data.length > 0 && typeof data[0].quarter === 'number');
-    const xField = isMidi ? 'tick' : isScore ? 'quarter' : 'time';
-    const xTitle = isMidi ? 'MIDI Tick' : isScore ? 'Musical Quarter Notes' : 'Time (seconds)';
+    const { isMidi, isScore, xField: rawXField, xTitle } = resolveExtentAxis(extentType, data, {
+      scoreTitle: 'Musical Quarter Notes',
+    });
+    const xField = rawXField === '__index' ? 'time' : rawXField;
     
     const isPitchScheme = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
     // mir_eval exact pitch class colors: 12 elements for semitones 0 (C) through 11 (B)
@@ -2891,85 +2895,36 @@ export function buildBoppVegaLiteSpec(
     // Overlay confidence meter along the top edge of each piano note
     if (hasConfidence && confidenceChannel === 'meter') {
       layers.push(
-        // Backing track
-        {
-          transform: [
-            { filter: 'datum.confidence != null' },
-            { calculate: 'datum.value + 0.3', as: '_note_meter_y1' },
-          ],
-          mark: {
-            type: 'rect',
-            fill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
-            cornerRadius: 1,
-          },
-          encoding: {
-            x: { field: xField, type: 'quantitative' },
-            x2: { field: '_calc_end' },
-            y: { field: '_note_meter_y1', type: 'quantitative' },
-            y2: { field: 'y_max' },
-          },
-        },
-        // Active confidence fill
-        {
-          transform: [
-            { filter: 'datum.confidence != null && datum.confidence > 0' },
-            { calculate: 'datum.value + 0.3', as: '_note_meter_y1' },
-            {
-              calculate: `datum.${xField} + (datum.duration != null ? datum.duration * datum.confidence : 0.25 * datum.confidence)`,
-              as: '_note_conf_end',
-            },
-          ],
-          mark: { type: 'rect', cornerRadius: 1 },
-          encoding: {
-            x: { field: xField, type: 'quantitative' },
-            x2: { field: '_note_conf_end' },
-            y: { field: '_note_meter_y1', type: 'quantitative' },
-            y2: { field: 'y_max' },
-            color: {
-              field: 'confidence',
-              type: 'quantitative',
-              scale: {
-                domain: [0, 0.65, 0.85, 1.0],
-                range: isDark
-                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-              },
-              legend: null,
-            },
-          },
-        }
+        ...buildEmbeddedConfidenceMeterLayers({
+          xField,
+          endField: '_calc_end',
+          confX2Field: '_note_conf_end',
+          isDark,
+          trackBackingFill: isDark ? 'rgba(0,0,0,0.65)' : 'rgba(0,0,0,0.25)',
+          cornerRadius: 1,
+          extraTransforms: [{ calculate: 'datum.value + 0.3', as: '_note_meter_y1' }],
+          yEncoding: { field: '_note_meter_y1', type: 'quantitative' },
+          y2Encoding: { field: 'y_max' },
+        })
       );
     }
 
     if (showLabels) {
-      layers.push({
-        transform: [
-          { calculate: `datum.${xField} + (datum.duration != null ? datum.duration / 2 : 0.125)`, as: 'x_mid' },
-          { filter: `datum.duration == null || datum.duration >= 0.15` },
-        ],
-        mark: {
-          type: 'text',
-          align: 'center',
-          baseline: 'middle',
+      layers.push(
+        ...buildIntervalCenteredLabelLayers({
+          xField,
+          endField: '_calc_end',
+          fallbackHalfDur: 0.125,
+          minDuration: 0.15,
+          minPixelWidth: 8,
+          paddingPx: 2,
+          yEncoding: { field: 'value', type: 'quantitative' },
+          textField: 'note_name',
           fontSize: 9,
-          fontWeight: 'bold',
-          fill: '#000000',
-          clip: true,
-          limit: { expr: `max(0.001, (scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField})) - 2)` },
-        },
-        encoding: {
-          x: { field: 'x_mid', type: 'quantitative' },
-          y: { field: 'value', type: 'quantitative' },
-          text: {
-            condition: {
-              test: `((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.${xField}) != null ? scale('concat_0_x', datum.${xField}) : scale('x', datum.${xField}))) <= 8`,
-              value: '',
-            },
-            field: 'note_name',
-            type: 'nominal',
-          },
-        },
-      });
+          textColor: '#000000',
+          withHalo: false,
+        })
+      );
     }
 
     const cursor = makeCursorLayer(xField);
@@ -3277,104 +3232,30 @@ export function buildBoppVegaLiteSpec(
     // Top-edge confidence meter overlay for bounding boxes
     if (hasConfidence && confidenceChannel === 'meter') {
       layers.push(
-        // Backing track along the top border (freq_max)
-        {
-          transform: [
+        ...buildEmbeddedConfidenceMeterLayers({
+          xField: 'time',
+          endField: '_calc_end',
+          confX2Field: '_tf_conf_end',
+          isDark,
+          trackBackingFill: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.25)',
+          cornerRadius: 1,
+          extraTransforms: [
             { calculate: 'datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)', as: '_tf_meter_bottom' },
           ],
-          mark: { type: 'rect', fill: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.25)', cornerRadius: 1 },
-          encoding: {
-            x: { field: 'time', type: 'quantitative' },
-            x2: { field: '_calc_end' },
-            y: { field: '_tf_meter_bottom', type: 'quantitative' },
-            y2: { field: 'freq_max' },
-          },
-        },
-        // Active confidence fill
-        {
-          transform: [
-            { calculate: 'datum.freq_max - max(80, (datum.freq_max - datum.freq_min) * 0.08)', as: '_tf_meter_bottom' },
-            { calculate: 'datum.time + (datum.duration != null ? datum.duration * (datum.confidence != null ? datum.confidence : 1.0) : 0)', as: '_tf_conf_end' },
-          ],
-          mark: { type: 'rect', cornerRadius: 1 },
-          encoding: {
-            x: { field: 'time', type: 'quantitative' },
-            x2: { field: '_tf_conf_end' },
-            y: { field: '_tf_meter_bottom', type: 'quantitative' },
-            y2: { field: 'freq_max' },
-            color: {
-              field: 'confidence',
-              type: 'quantitative',
-              scale: {
-                domain: [0, 0.65, 0.85, 1.0],
-                range: isDark
-                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-              },
-              legend: null,
-            },
-          },
-        }
+          yEncoding: { field: '_tf_meter_bottom', type: 'quantitative' },
+          y2Encoding: { field: 'freq_max' },
+        })
       );
     }
 
     if (showLabels) {
       layers.push(
-        // Halo backdrop for 100% legibility on spectrogram / dark / light backgrounds
-        {
-          transform: [
-            {
-              calculate: hasConfidence
-                ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
-                : "datum.value",
-              as: '_tf_label',
-            },
-          ],
-          mark: {
-            type: 'text',
-            align: 'left',
-            baseline: 'top',
-            dx: 4,
-            dy: 4,
-            fontSize: 10,
-            fontWeight: 'bold',
-            fill: 'transparent',
-            stroke: 'rgba(0,0,0,0.85)',
-            strokeWidth: 3,
-            strokeJoin: 'round',
-          },
-          encoding: {
-            x: { field: 'time', type: 'quantitative' },
-            y: { field: 'freq_max', type: 'quantitative' },
-            text: { field: '_tf_label', type: 'nominal' },
-          },
-        },
-        // Crisp foreground label with classification + confidence percentage
-        {
-          transform: [
-            {
-              calculate: hasConfidence
-                ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
-                : "datum.value",
-              as: '_tf_label',
-            },
-          ],
-          mark: {
-            type: 'text',
-            align: 'left',
-            baseline: 'top',
-            dx: 4,
-            dy: 4,
-            fontSize: 10,
-            fontWeight: 'bold',
-            fill: '#ffffff',
-          },
-          encoding: {
-            x: { field: 'time', type: 'quantitative' },
-            y: { field: 'freq_max', type: 'quantitative' },
-            text: { field: '_tf_label', type: 'nominal' },
-          },
-        }
+        ...buildBoundingBoxCornerLabelLayers({
+          xField: 'time',
+          yField: 'freq_max',
+          labelField: '_tf_label',
+          hasConfidence,
+        })
       );
     }
 
@@ -3454,107 +3335,32 @@ export function buildBoppVegaLiteSpec(
     // Top-edge confidence meter for pixel bounding boxes
     if (hasConfidence && confidenceChannel !== 'none') {
       boxLayers.push(
-        // Meter background track
-        {
-          transform: [
-            { filter: 'datum.confidence != null' },
+        ...buildEmbeddedConfidenceMeterLayers({
+          xField: 'x',
+          endField: 'x2',
+          confX2Field: '_pixel_conf_end',
+          isDark,
+          trackBackingFill: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.75)',
+          cornerRadius: 1,
+          extraTransforms: [
             { calculate: 'datum.x + datum.width', as: 'x2' },
             { calculate: 'datum.y + max(4, min(10, datum.height * 0.15))', as: '_pixel_meter_bottom' },
           ],
-          mark: { type: 'rect', fill: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.75)', cornerRadius: 1 },
-          encoding: {
-            x: { field: 'x', type: 'quantitative' },
-            x2: { field: 'x2' },
-            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
-            y2: { field: '_pixel_meter_bottom' },
-          },
-        },
-        // Active confidence meter fill
-        {
-          transform: [
-            { filter: 'datum.confidence != null' },
-            { calculate: 'datum.x + datum.width * (datum.confidence != null ? datum.confidence : 1.0)', as: '_pixel_conf_end' },
-            { calculate: 'datum.y + max(4, min(10, datum.height * 0.15))', as: '_pixel_meter_bottom' },
-          ],
-          mark: { type: 'rect', cornerRadius: 1 },
-          encoding: {
-            x: { field: 'x', type: 'quantitative' },
-            x2: { field: '_pixel_conf_end' },
-            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
-            y2: { field: '_pixel_meter_bottom' },
-            color: {
-              field: 'confidence',
-              type: 'quantitative',
-              scale: {
-                domain: [0, 0.65, 0.85, 1.0],
-                range: isDark
-                  ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-                  : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-              },
-              legend: null,
-            },
-          },
-        }
+          yEncoding: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+          y2Encoding: { field: '_pixel_meter_bottom' },
+        })
       );
     }
 
     if (showLabels) {
       boxLayers.push(
-        // Halo backdrop for 100% legibility
-        {
-          transform: [
-            {
-              calculate: hasConfidence
-                ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
-                : "datum.value",
-              as: '_box_label',
-            },
-          ],
-          mark: {
-            type: 'text',
-            align: 'left',
-            baseline: 'top',
-            dx: 4,
-            dy: 4,
-            fontSize: 10,
-            fontWeight: 'bold',
-            fill: 'transparent',
-            stroke: 'rgba(0,0,0,0.85)',
-            strokeWidth: 3,
-            strokeJoin: 'round',
-          },
-          encoding: {
-            x: { field: 'x', type: 'quantitative' },
-            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
-            text: { field: '_box_label', type: 'nominal' },
-          },
-        },
-        // Crisp foreground label with classification + confidence percentage
-        {
-          transform: [
-            {
-              calculate: hasConfidence
-                ? "datum.value + (datum.confidence != null ? ' · ' + round(datum.confidence * 100) + '%' : '')"
-                : "datum.value",
-              as: '_box_label',
-            },
-          ],
-          mark: {
-            type: 'text',
-            align: 'left',
-            baseline: 'top',
-            dx: 4,
-            dy: 4,
-            fontSize: 10,
-            fontWeight: 'bold',
-            fill: '#ffffff',
-          },
-          encoding: {
-            x: { field: 'x', type: 'quantitative' },
-            y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
-            text: { field: '_box_label', type: 'nominal' },
-          },
-        }
+        ...buildBoundingBoxCornerLabelLayers({
+          xField: 'x',
+          yField: 'y',
+          yScale: { reverse: true },
+          labelField: '_box_label',
+          hasConfidence,
+        })
       );
     }
 
@@ -3742,34 +3548,7 @@ export function buildBoppVegaLiteSpec(
       ) || annotation.confidence?.confidence_type === 'variance';
 
       // Circumplex Quadrant Background Lines & Quadrant Labels (Matching right-hand circumplex subplot)
-      const quadrantAxes = [
-        {
-          data: { values: [{ x: 0 }] },
-          mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
-          encoding: { x: { field: 'x', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
-        },
-        {
-          data: { values: [{ y: 0 }] },
-          mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
-          encoding: { y: { field: 'y', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
-        },
-        {
-          data: {
-            values: [
-              { x: 0.7, y: 0.8, label: 'Happy / Excited' },
-              { x: -0.7, y: 0.8, label: 'Angry / Tense' },
-              { x: -0.7, y: -0.8, label: 'Sad / Depressed' },
-              { x: 0.7, y: -0.8, label: 'Calm / Relaxed' },
-            ],
-          },
-          mark: { type: 'text', fontSize: 10, fill: axisColor, fontWeight: 'bold' },
-          encoding: {
-            x: { field: 'x', type: 'quantitative' },
-            y: { field: 'y', type: 'quantitative' },
-            text: { field: 'label', type: 'nominal' },
-          },
-        },
-      ];
+      const quadrantAxes = buildCircumplexQuadrantLayers(gridColor, axisColor);
 
       if (hasVariance) {
         // Collect points and variances
@@ -4091,34 +3870,7 @@ export function buildBoppVegaLiteSpec(
           height: chartHeight,
           title: { text: 'Russell Circumplex 2D Space', color: textColor },
           layer: [
-            // Quadrant axes lines
-            {
-              data: { values: [{ x: 0 }] },
-              mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
-              encoding: { x: { field: 'x', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
-            },
-            {
-              data: { values: [{ y: 0 }] },
-              mark: { type: 'rule', stroke: gridColor, strokeWidth: 1.5 },
-              encoding: { y: { field: 'y', type: 'quantitative', scale: { domain: [-1.1, 1.1] } } },
-            },
-            // Quadrant text labels
-            {
-              data: {
-                values: [
-                  { x: 0.7, y: 0.8, label: 'Happy / Excited' },
-                  { x: -0.7, y: 0.8, label: 'Angry / Tense' },
-                  { x: -0.7, y: -0.8, label: 'Sad / Depressed' },
-                  { x: 0.7, y: -0.8, label: 'Calm / Relaxed' },
-                ],
-              },
-              mark: { type: 'text', fontSize: 10, fill: axisColor, fontWeight: 'bold' },
-              encoding: {
-                x: { field: 'x', type: 'quantitative' },
-                y: { field: 'y', type: 'quantitative' },
-                text: { field: 'label', type: 'nominal' },
-              },
-            },
+            ...buildCircumplexQuadrantLayers(gridColor, axisColor),
             // Path trajectory
             {
               mark: { type: 'line', color: '#6366f1', opacity: 0.5, strokeWidth: 1.75 },
@@ -4478,19 +4230,7 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   // 11. GENERAL FALLBACK COMPOSITION (Supports any extent + payload)
   // =========================================================================
-  const isMidi = extentType?.includes('midi') || extentType?.includes('tick') || (data.length > 0 && typeof data[0].tick === 'number');
-  const isScore = extentType?.includes('score') || extentType?.includes('quarter') || (data.length > 0 && typeof data[0].quarter === 'number');
-  const isTime = extentType?.includes('time') || (data.length > 0 && typeof data[0].time === 'number');
-
-  const xField = isTime
-    ? 'time'
-    : isMidi
-    ? 'tick'
-    : isScore
-    ? 'quarter'
-    : '__index';
-
-  const isInterval = isIntervalExtentType(extentType) || data.some(d => typeof d.duration === 'number');
+  const { isMidi, isScore, isTime, isInterval, xField } = resolveExtentAxis(extentType, data);
   const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
   const useSingleRow = Boolean(!forceMultiRow && isInterval && intervalAnalysis?.shouldUseSingleRow);
 

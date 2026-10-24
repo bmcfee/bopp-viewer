@@ -459,28 +459,54 @@ export interface BoppSummaryStats {
   maxConfidence: number | null;
 }
 
+export const MIDI_TICKS_PER_SECOND = 960; // Standard 480 PPQ @ 120 BPM
+export const SCORE_SECONDS_PER_QUARTER = 0.5; // 120 BPM -> 0.5s per quarter note
+
+/**
+ * Resolves the start timestamp of a tabular record in seconds across time, MIDI tick, and score quarter extents.
+ * Returns null if the record has no temporal coordinate.
+ */
+export function getRecordStartSeconds(
+  r: Partial<TabularRecord> | undefined | null,
+  options?: { isMidiExtent?: boolean; isScoreExtent?: boolean }
+): number | null {
+  if (!r) return null;
+  if (typeof r.time === 'number' && Number.isFinite(r.time)) return r.time;
+  if (typeof r.tick === 'number' && Number.isFinite(r.tick)) return r.tick / MIDI_TICKS_PER_SECOND;
+  if (typeof r.quarter === 'number' && Number.isFinite(r.quarter)) return r.quarter * SCORE_SECONDS_PER_QUARTER;
+  if (options?.isMidiExtent || options?.isScoreExtent) return 0;
+  return null;
+}
+
+/**
+ * Resolves the duration of a tabular record in seconds across time, MIDI tick, and score quarter extents.
+ */
+export function getRecordDurationSeconds(
+  r: Partial<TabularRecord> | undefined | null,
+  fallbackSec = 0,
+  options?: { isMidiExtent?: boolean; isScoreExtent?: boolean }
+): number {
+  if (!r || typeof r.duration !== 'number' || !Number.isFinite(r.duration)) {
+    return fallbackSec;
+  }
+  if (typeof r.time === 'number') return r.duration;
+  if (typeof r.tick === 'number' || options?.isMidiExtent) return r.duration / MIDI_TICKS_PER_SECOND;
+  if (typeof r.quarter === 'number' || options?.isScoreExtent) return r.duration * SCORE_SECONDS_PER_QUARTER;
+  return r.duration;
+}
+
 export function computeSummaryStats(annotation: BoppAnnotation, records: TabularRecord[]): BoppSummaryStats {
   const rowCount = records.length;
   let minTime: number | null = null;
   let maxTime: number | null = null;
 
   for (const r of records) {
-    if (typeof r.time === 'number') {
-      minTime = minTime === null ? r.time : Math.min(minTime, r.time);
-      const end = typeof r.duration === 'number' ? r.time + r.duration : r.time;
-      maxTime = maxTime === null ? end : Math.max(maxTime, end);
-    } else if (typeof r.tick === 'number') {
-      // Standard 480 PPQ @ 120 BPM -> 960 ticks per second
-      const startSec = r.tick / 960;
+    const startSec = getRecordStartSeconds(r);
+    if (startSec !== null) {
+      const durSec = getRecordDurationSeconds(r, 0);
+      const endSec = startSec + durSec;
       minTime = minTime === null ? startSec : Math.min(minTime, startSec);
-      const durSec = typeof r.duration === 'number' ? r.duration / 960 : 0;
-      maxTime = maxTime === null ? startSec + durSec : Math.max(maxTime, startSec + durSec);
-    } else if (typeof r.quarter === 'number') {
-      // 120 BPM -> 0.5s per quarter note
-      const startSec = r.quarter * 0.5;
-      minTime = minTime === null ? startSec : Math.min(minTime, startSec);
-      const durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0;
-      maxTime = maxTime === null ? startSec + durSec : Math.max(maxTime, startSec + durSec);
+      maxTime = maxTime === null ? endSec : Math.max(maxTime, endSec);
     }
   }
 

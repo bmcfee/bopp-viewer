@@ -7,6 +7,7 @@
  */
 
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
+import { getRecordStartSeconds, getRecordDurationSeconds } from './boppParser';
 
 /**
  * Standard MIDI timing constants
@@ -119,24 +120,12 @@ export class BoppAudioPlayer {
     // For MIDI ticks at standard 480 PPQ and 120 BPM: 1 tick = 1 / 960 seconds.
     // For Score quarters at 120 BPM: 1 quarter = 0.50 seconds.
     let maxSec = 0;
-    const isMidiExtent = annotation.extent?.extent_type?.includes('midi') || (records.length > 0 && typeof records[0].tick === 'number');
-    const isScoreExtent = annotation.extent?.extent_type?.includes('score') || (records.length > 0 && typeof records[0].quarter === 'number');
+    const isMidiExtent = Boolean(annotation.extent?.extent_type?.includes('midi') || (records.length > 0 && typeof records[0].tick === 'number'));
+    const isScoreExtent = Boolean(annotation.extent?.extent_type?.includes('score') || (records.length > 0 && typeof records[0].quarter === 'number'));
 
     for (const r of records) {
-      let startSec = 0;
-      let durSec = 0;
-
-      if (typeof r.time === 'number') {
-        startSec = r.time;
-        durSec = typeof r.duration === 'number' ? r.duration : 0;
-      } else if (typeof r.tick === 'number' || isMidiExtent) {
-        startSec = (r.tick ?? 0) / 960;
-        durSec = typeof r.duration === 'number' ? r.duration / 960 : 0;
-      } else if (typeof r.quarter === 'number' || isScoreExtent) {
-        startSec = (r.quarter ?? 0) * 0.5;
-        durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0;
-      }
-
+      const startSec = getRecordStartSeconds(r, { isMidiExtent, isScoreExtent }) ?? 0;
+      const durSec = getRecordDurationSeconds(r, 0, { isMidiExtent, isScoreExtent });
       const endSec = startSec + durSec;
       if (endSec > maxSec) {
         maxSec = endSec;
@@ -443,25 +432,12 @@ export class BoppAudioPlayer {
 
     for (let i = 0; i < this.records.length; i++) {
       const r = this.records[i];
-      let tSec: number;
-      let durSec = 0;
-      let hasExplicitDuration = false;
+      const tSec = getRecordStartSeconds(r);
+      if (tSec === null) continue;
 
-      if (typeof r.time === 'number') {
-        tSec = r.time;
-        hasExplicitDuration = typeof r.duration === 'number';
-        durSec = hasExplicitDuration ? (r.duration as number) : 0.5;
-      } else if (typeof r.tick === 'number') {
-        tSec = r.tick / 960;
-        hasExplicitDuration = typeof r.duration === 'number';
-        durSec = hasExplicitDuration ? (r.duration as number) / 960 : 0.25;
-      } else if (typeof r.quarter === 'number') {
-        tSec = r.quarter * 0.5;
-        hasExplicitDuration = typeof r.duration === 'number';
-        durSec = hasExplicitDuration ? (r.duration as number) * 0.5 : 0.5;
-      } else {
-        continue;
-      }
+      const hasExplicitDuration = typeof r.duration === 'number' && Number.isFinite(r.duration);
+      const fallbackDur = typeof r.tick === 'number' ? 0.25 : 0.5;
+      const durSec = getRecordDurationSeconds(r, fallbackDur);
 
       const isOngoingInterval = hasExplicitDuration && tSec <= timeSec && timeSec < tSec + durSec;
       const isExactPoint = !hasExplicitDuration && Math.abs(tSec - timeSec) < 1e-4;
@@ -481,21 +457,11 @@ export class BoppAudioPlayer {
 
     for (let i = 0; i < this.records.length; i++) {
       const r = this.records[i];
-      let tSec: number;
-      let durSec = 0.5;
+      const tSec = getRecordStartSeconds(r);
+      if (tSec === null) continue;
 
-      if (typeof r.time === 'number') {
-        tSec = r.time;
-        durSec = typeof r.duration === 'number' ? r.duration : 0.5;
-      } else if (typeof r.tick === 'number') {
-        tSec = r.tick / 960; // 480 PPQ @ 120 BPM
-        durSec = typeof r.duration === 'number' ? r.duration / 960 : 0.25;
-      } else if (typeof r.quarter === 'number') {
-        tSec = r.quarter * 0.5; // 120 BPM = 0.5s per quarter
-        durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0.5;
-      } else {
-        continue;
-      }
+      const fallbackDur = typeof r.tick === 'number' ? 0.25 : 0.5;
+      const durSec = getRecordDurationSeconds(r, fallbackDur);
 
       const inWindow = inclusiveEnd
         ? tSec >= fromTime && tSec <= toTime

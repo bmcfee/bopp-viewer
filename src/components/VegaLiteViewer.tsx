@@ -38,10 +38,11 @@ import {
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import {
   buildBoppVegaLiteSpec,
-  VegaLiteBuilderOptions,
+  type VegaLiteBuilderOptions,
   getVegaViewPlotOrigin,
-  resolveVegaGroupItem,
   getScaleRangeSpan,
+  resolveVegaTimelineScaleInfo,
+  computeOptimalChartHeight,
 } from '../utils/vegaLiteBuilder';
 import { BoppAudioPlayer, isSonifiablePayload } from '../utils/audioSynthesizer';
 import { computeSummaryStats } from '../utils/boppParser';
@@ -272,31 +273,17 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     const [canvasOffsetX, canvasOffsetY] = getElementOffsetInContainer(canvas, svg);
 
     const [originX, originY] = getVegaViewPlotOrigin(view);
-
-    const scaleNames = Object.keys((view as any)._runtime?.scales || {});
-    // Support vconcat, single view, and hconcat (like time_mood_trajectory_variance where concat_1_x is the timeline)
-    let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
-    if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
-      const s0 = view.scale('concat_0_x');
-      const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
-      // If concat_0_x is a non-time scale with negative values (e.g. mood valence [-1.2, 1.2])
-      if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
-        detailScaleName = 'concat_1_x';
-      }
-    }
+    const {
+      detailScaleName,
+      overviewScaleName,
+      isVConcat,
+      detailGroup,
+      overviewGroup,
+    } = resolveVegaTimelineScaleInfo(view);
     if (!detailScaleName) return;
 
     const detailScale = view.scale(detailScaleName);
     if (!detailScale || typeof detailScale !== 'function') return;
-
-    const sgRoot = (view as any).scenegraph?.()?.root?.items?.[0];
-    const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
-    const detailGroup = isVConcat
-      ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
-      : detailScaleName === 'concat_1_x'
-      ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
-      : sgRoot;
-    const overviewGroup = isVConcat ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1) : null;
 
     const fallbackDetailWidth = detailGroup?.width ?? (typeof view.width === 'function' && view.width() > 0 ? view.width() : containerWidth);
     const detailWidth = getScaleRangeSpan(detailScale, fallbackDetailWidth);
@@ -335,7 +322,6 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     }
 
     // Overview track playhead
-    const overviewScaleName = ['concat_1_x', ...scaleNames.filter(k => k.includes('concat_1') && k.endsWith('_x'))].find(k => scaleNames.includes(k));
     if (overviewGroup && overviewScaleName && targetTime >= 0) {
       const overviewScale = view.scale(overviewScaleName);
       if (overviewScale && typeof overviewScale === 'function') {
@@ -436,8 +422,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     let maxF = 8000;
 
     if (view) {
-      const scaleNames = Object.keys((view as any)._runtime?.scales || {});
-      const detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+      const { detailScaleName, detailYScaleName } = resolveVegaTimelineScaleInfo(view);
       const scX = detailScaleName ? view.scale(detailScaleName) : null;
       if (scX && typeof scX.domain === 'function') {
         const dom = scX.domain();
@@ -445,7 +430,6 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         if (dom && typeof dom[1] === 'number') endT = dom[1];
       }
 
-      const detailYScaleName = ['concat_0_y', 'y', 'layer_0_y', ...scaleNames.filter(k => k.endsWith('_y'))].find(k => scaleNames.includes(k));
       const scY = detailYScaleName ? view.scale(detailYScaleName) : null;
       if (scY && typeof scY.domain === 'function') {
         const yDom = scY.domain();
@@ -617,33 +601,16 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     }
   };
 
-  const optimalChartHeight = useMemo(() => {
-    const pType = annotation.payload?.payload_type as string | undefined;
-    const eType = annotation.extent?.extent_type as string | undefined;
-    if (pType === 'key_mode') {
-      const isInterval = eType?.includes('interval');
-      if (isInterval) {
-        return effectiveMultiRow ? 340 : 220;
-      }
-      return 540;
-    }
-    if (pType === 'note_midi' || pType === 'piano_roll') return 460;
-    if (pType === 'chord') return effectiveMultiRow ? 420 : 320;
-    if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') {
-      if (!eType || eType === 'none') {
-        if (isGlobalNoConfGenres) {
-          const numCols = Math.max(1, Math.min(filteredTabularData.length, Math.floor((containerWidth - 80) / 194)));
-          const numRows = Math.ceil(filteredTabularData.length / numCols);
-          return Math.max(120, numRows * 50 + 70);
-        }
-        return Math.max(180, Math.min(420, tabularData.length * 44 + 80));
-      }
-      return effectiveMultiRow ? 360 : 240;
-    }
-    if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
-    if (!eType || eType === 'none') return 440;
-    return effectiveMultiRow ? 420 : 340;
-  }, [annotation.payload?.payload_type, annotation.extent?.extent_type, isGlobalNoConfGenres, filteredTabularData.length, containerWidth, tabularData.length, effectiveMultiRow]);
+  const optimalChartHeight = useMemo(
+    () =>
+      computeOptimalChartHeight(annotation, tabularData.length, {
+        effectiveMultiRow,
+        isGlobalNoConfGenres,
+        filteredRowCount: filteredTabularData.length,
+        containerWidth,
+      }),
+    [annotation, tabularData.length, effectiveMultiRow, isGlobalNoConfGenres, filteredTabularData.length, containerWidth]
+  );
 
   // Build the Vega-Lite specification - decoupled from currentTime to prevent view re-embedding during playback
   const vegaSpec = useMemo(() => {
@@ -751,22 +718,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         // Measure exact inner plot area bounds for precision spectrogram overlay
         try {
           const [originX, originY] = getVegaViewPlotOrigin(res.view);
-          const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
-          let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
-          if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
-            const s0 = res.view.scale('concat_0_x');
-            const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
-            if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
-              detailScaleName = 'concat_1_x';
-            }
-          }
-          const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
-          const sgRoot = (res.view as any).scenegraph?.()?.root?.items?.[0];
-          const detailGroup = isVConcat
-            ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
-            : detailScaleName === 'concat_1_x'
-            ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
-            : sgRoot;
+          const { detailScaleName, detailGroup } = resolveVegaTimelineScaleInfo(res.view);
           const detailScale = detailScaleName ? res.view.scale(detailScaleName) : null;
           const fallbackW = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
           const w = getScaleRangeSpan(detailScale, fallbackW);
@@ -812,16 +764,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
         // Listen for clicks anywhere on the display to seek playhead
         res.view.addEventListener('click', (event: any, item: any) => {
-          const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
-          let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
-          if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
-            const s0 = res.view.scale('concat_0_x');
-            const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
-            if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
-              detailScaleName = 'concat_1_x';
-            }
-          }
-          const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
+          const { detailScaleName, isVConcat, detailGroup } = resolveVegaTimelineScaleInfo(res.view);
 
           // If clicked within overview navigator or brush window, ignore seek so brush dragging is uninterrupted!
           if (item?.mark?.name?.includes('brush') || (isVConcat && item?.mark?.name?.includes('concat_1'))) {
@@ -841,12 +784,6 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               const my = event.clientY - rect.top;
               const [originX, originY] = getVegaViewPlotOrigin(res.view);
 
-              const sgRoot = (res.view as any).scenegraph?.()?.root?.items?.[0];
-              const detailGroup = isVConcat
-                ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
-                : detailScaleName === 'concat_1_x'
-                ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
-                : sgRoot;
               const sc = detailScaleName ? res.view.scale(detailScaleName) : null;
               const fallbackDetailWidth = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
               const detailWidth = getScaleRangeSpan(sc, fallbackDetailWidth);

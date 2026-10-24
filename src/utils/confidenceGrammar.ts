@@ -149,23 +149,25 @@ export function buildIntervalConfidenceLayers(params: {
   const mH = Math.min(meterHeight, 4);
 
   if (channelMode === 'meter') {
-    // 1. Backing Meter Track along the top edge of each interval patch
-    layers.push({
-      transform: [
-        { filter: 'datum.confidence != null' },
-      ],
-      mark: {
-        type: 'rect',
-        fill: trackBg,
-        stroke: trackBorder,
-        strokeWidth: 0.5,
+    layers.push(
+      ...buildEmbeddedConfidenceMeterLayers({
+        xField,
+        endField,
+        confX2Field: '_conf_meter_end',
+        isDark,
+        confidenceType,
+        trackBackingFill: trackBg,
         cornerRadius: 1,
-      },
-      encoding: {
-        x: { field: xField, type: 'quantitative' },
-        x2: { field: endField },
-        y: { value: yTop },
-        y2: { value: yTop + mH },
+        yEncoding: { value: yTop },
+        y2Encoding: { value: yTop + mH },
+        markProps: {
+          stroke: trackBorder,
+          strokeWidth: 0.5,
+        },
+        activeMarkProps: {
+          stroke: isDark ? '#ffffff' : '#09090b',
+          strokeWidth: 0.5,
+        },
         tooltip: [
           { field: 'value', type: 'nominal', title: 'Annotation' },
           { field: xField, type: 'quantitative', format: '.2f', title: 'Start' },
@@ -180,54 +182,8 @@ export function buildIntervalConfidenceLayers(params: {
             ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }]
             : []),
         ],
-      },
-    });
-
-    // 2. Active Confidence Fill Bar (embedded small within patch, achromatic luminance scale)
-    layers.push({
-      transform: [
-        { filter: 'datum.confidence != null && datum.confidence > 0' },
-        {
-          calculate: `datum.${xField} + (datum.${durField} != null ? datum.${durField} * datum.confidence : 0)`,
-          as: '_conf_meter_end',
-        },
-      ],
-      mark: {
-        type: 'rect',
-        cornerRadius: 1,
-        stroke: isDark ? '#ffffff' : '#09090b',
-        strokeWidth: 0.5,
-      },
-      encoding: {
-        x: { field: xField, type: 'quantitative' },
-        x2: { field: '_conf_meter_end' },
-        y: { value: yTop },
-        y2: { value: yTop + mH },
-        color: {
-          field: 'confidence',
-          type: 'quantitative',
-          scale: {
-            domain: [0, 0.65, 0.85, 1.0],
-            range: isDark
-              ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
-              : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
-          },
-          legend: null,
-        },
-        tooltip: [
-          { field: 'value', type: 'nominal', title: 'Annotation' },
-          {
-            field: 'confidence',
-            type: 'quantitative',
-            format: '.1%',
-            title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence',
-          },
-          ...(confidenceType === 'agreement'
-            ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }]
-            : []),
-        ],
-      },
-    });
+      })
+    );
 
     // 3. Agreement / Confidence Text Glyphs overlay for visible intervals (only if explicitly enabled to prevent cluttering patch tags)
     if (showTextLabels) {
@@ -294,12 +250,7 @@ export function buildIntervalConfidenceLayers(params: {
         color: {
           field: 'confidence',
           type: 'quantitative',
-          scale: {
-            domain: [0, 0.5, 0.8, 1.0],
-            range: isDark
-              ? ['#52525b', '#a1a1aa', '#e4e4e7', '#ffffff']
-              : ['#a1a1aa', '#52525b', '#27272a', '#09090b'],
-          },
+          scale: getAchromaticConfidenceScale(isDark, 'pin'),
           legend: null,
         },
         tooltip: [
@@ -370,12 +321,7 @@ export function buildInstantaneousConfidenceLayers(params: {
         color: {
           field: 'confidence',
           type: 'quantitative',
-          scale: {
-            domain: [0, 0.5, 0.8, 1.0],
-            range: isDark
-              ? ['#52525b', '#a1a1aa', '#e4e4e7', '#ffffff']
-              : ['#a1a1aa', '#52525b', '#27272a', '#09090b'],
-          },
+          scale: getAchromaticConfidenceScale(isDark, 'pin'),
           legend: null,
         },
       },
@@ -402,12 +348,7 @@ export function buildInstantaneousConfidenceLayers(params: {
         color: {
           field: 'confidence',
           type: 'quantitative',
-          scale: {
-            domain: [0, 0.5, 0.8, 1.0],
-            range: isDark
-              ? ['#52525b', '#a1a1aa', '#e4e4e7', '#ffffff']
-              : ['#a1a1aa', '#52525b', '#27272a', '#09090b'],
-          },
+          scale: getAchromaticConfidenceScale(isDark, 'pin'),
           legend: null,
         },
         tooltip: [
@@ -461,6 +402,121 @@ export function buildInstantaneousConfidenceLayers(params: {
   }
 
   return layers;
+}
+
+/**
+ * Returns the standard zero-hue achromatic luminance scale for confidence / agreement rendering.
+ */
+export function getAchromaticConfidenceScale(
+  isDark: boolean,
+  variant: 'meter' | 'pin' = 'meter'
+): { domain: number[]; range: string[] } {
+  if (variant === 'pin') {
+    return {
+      domain: [0, 0.5, 0.8, 1.0],
+      range: isDark
+        ? ['#52525b', '#a1a1aa', '#e4e4e7', '#ffffff']
+        : ['#a1a1aa', '#52525b', '#27272a', '#09090b'],
+    };
+  }
+  return {
+    domain: [0, 0.65, 0.85, 1.0],
+    range: isDark
+      ? ['#64748b', '#94a3b8', '#e2e8f0', '#ffffff']
+      : ['#94a3b8', '#64748b', '#334155', '#0f172a'],
+  };
+}
+
+export interface EmbeddedConfidenceMeterParams {
+  xField: string;
+  endField?: string;
+  confX2Field?: string;
+  isDark: boolean;
+  confidenceType?: string;
+  trackBackingFill?: string;
+  cornerRadius?: number;
+  extraTransforms?: Record<string, unknown>[];
+  yEncoding: Record<string, unknown>;
+  y2Encoding?: Record<string, unknown>;
+  markProps?: Record<string, unknown>;
+  activeMarkProps?: Record<string, unknown>;
+  tooltip?: Record<string, unknown>[];
+}
+
+/**
+ * Composable 2-layer embedded top-edge confidence meter (backing track + proportional achromatic fill).
+ * Supports fixed pixel y/y2 bounds, nominal row y + yOffset, or quantitative y/y2 box bounds.
+ */
+export function buildEmbeddedConfidenceMeterLayers(
+  params: EmbeddedConfidenceMeterParams
+): Record<string, unknown>[] {
+  const {
+    xField,
+    endField = '_calc_end',
+    confX2Field = '_conf_x2',
+    isDark,
+    trackBackingFill,
+    cornerRadius,
+    extraTransforms = [],
+    yEncoding,
+    y2Encoding,
+    markProps = {},
+    activeMarkProps = {},
+    tooltip,
+  } = params;
+
+  const backingFill = trackBackingFill ?? (isDark ? 'rgba(0,0,0,0.55)' : 'rgba(15,23,42,0.22)');
+
+  return [
+    {
+      transform: [
+        { filter: 'datum.confidence != null' },
+        ...extraTransforms,
+      ],
+      mark: {
+        type: 'rect',
+        fill: backingFill,
+        ...(cornerRadius !== undefined ? { cornerRadius } : {}),
+        ...markProps,
+      },
+      encoding: {
+        x: { field: xField, type: 'quantitative' },
+        x2: { field: endField },
+        y: yEncoding,
+        ...(y2Encoding ? { y2: y2Encoding } : {}),
+        ...(tooltip ? { tooltip } : {}),
+      },
+    },
+    {
+      transform: [
+        { filter: 'datum.confidence != null' },
+        ...extraTransforms,
+        {
+          calculate: `datum.${xField} + (datum.${endField} - datum.${xField}) * clamp(datum.confidence, 0, 1)`,
+          as: confX2Field,
+        },
+      ],
+      mark: {
+        type: 'rect',
+        ...(cornerRadius !== undefined ? { cornerRadius } : {}),
+        ...markProps,
+        ...activeMarkProps,
+      },
+      encoding: {
+        x: { field: xField, type: 'quantitative' },
+        x2: { field: confX2Field },
+        y: yEncoding,
+        ...(y2Encoding ? { y2: y2Encoding } : {}),
+        color: {
+          field: 'confidence',
+          type: 'quantitative',
+          scale: getAchromaticConfidenceScale(isDark, 'meter'),
+          legend: null,
+        },
+        ...(tooltip ? { tooltip } : {}),
+      },
+    },
+  ];
 }
 
 /**

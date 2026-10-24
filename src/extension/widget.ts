@@ -15,7 +15,7 @@ import {
   annotationToTabular,
   exportToBoppCsv
 } from '../utils/boppParser';
-import { buildBoppVegaLiteSpec } from '../utils/vegaLiteBuilder';
+import { buildBoppVegaLiteSpec, computeOptimalChartHeight } from '../utils/vegaLiteBuilder';
 import { validateBoppAnnotation } from '../utils/schemaValidator';
 import { createAnnotationMetadataCardDOM } from './metadataCard';
 import type { BoppAnnotation } from '../types/bopp';
@@ -234,35 +234,15 @@ export class BOPPWidget extends DocumentWidget<Widget> {
     const metadataCard = createAnnotationMetadataCardDOM(annotation, isDark, { defaultExpanded: false });
     container.appendChild(metadataCard);
 
-    const payloadType = annotation.payload?.payload_type as string | undefined;
     const extentType = annotation.extent?.extent_type as string | undefined;
-    let optimalHeight = 440;
-
-    if (payloadType === 'key_mode') {
-      const isInterval = extentType?.includes('interval');
-      optimalHeight = isInterval ? 220 : 540;
-    } else if (payloadType === 'note_midi' || payloadType === 'piano_roll') {
-      optimalHeight = 480;
-    } else if (payloadType === 'chord') {
-      optimalHeight = 380;
-    } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
-      if (!extentType || extentType === 'none') {
-        const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
-        if (!hasConf) {
-          const numCols = Math.max(1, Math.min(tabular.length, Math.floor(640 / 194)));
-          const numRows = Math.ceil(tabular.length / numCols);
-          optimalHeight = Math.max(120, numRows * 50 + 70);
-        } else {
-          optimalHeight = Math.max(180, Math.min(420, tabular.length * 44 + 80));
-        }
-      } else {
-        optimalHeight = 260;
-      }
-    } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
-      optimalHeight = 420;
-    } else if (!extentType || extentType === 'none') {
-      optimalHeight = 460;
-    }
+    const payloadType = annotation.payload?.payload_type as string | undefined;
+    const isGlobal = !extentType || extentType === 'none';
+    const isTag = payloadType === 'tag_open' || payloadType === 'genre' || payloadType === 'tag';
+    const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
+    const optimalHeight = computeOptimalChartHeight(annotation, tabular.length, {
+      isGlobalNoConfGenres: isGlobal && isTag && !hasConf,
+      containerWidth: 720,
+    });
 
     const chartDiv = document.createElement('div');
     chartDiv.style.width = '100%';

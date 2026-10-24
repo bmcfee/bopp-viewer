@@ -8,7 +8,12 @@
  */
 
 import type { BoppAnnotation } from '../types/bopp';
-import { noteNameToMidi, annotationToTabular } from './boppParser';
+import {
+  noteNameToMidi,
+  annotationToTabular,
+  getRecordStartSeconds,
+  getRecordDurationSeconds,
+} from './boppParser';
 
 export type LinkedMediaType = 'audio' | 'image' | null;
 
@@ -184,6 +189,52 @@ export function generateDemoSheetMusicUrl(): string {
 }
 
 /**
+ * Encodes a mono 16-bit PCM WAV Blob URL from a sample generator function.
+ */
+function synthesizeMonoWavBlobUrl(
+  durationSec: number,
+  sampleRate: number,
+  sampleFn: (t: number, sampleIndex: number) => number,
+  gainScale = 24000
+): string {
+  const numSamples = Math.max(1, Math.floor(sampleRate * durationSec));
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+
+  let writeOffset = 44;
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    const sampleVal = sampleFn(t, i);
+    const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * gainScale)));
+    view.setInt16(writeOffset, int16, true);
+    writeOffset += 2;
+  }
+
+  const wavBlob = new Blob([buffer], { type: 'audio/wav' });
+  return URL.createObjectURL(wavBlob);
+}
+
+/**
  * Creates a synthesized WAV file demo blob tailored to the current annotation
  * For time-frequency bounding boxes, it synthesizes bird calls at the exact box frequencies!
  * For pitch contour, it synthesizes a vocal glide following the F0 curve!
@@ -194,19 +245,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   const payloadType = annotation.payload.payload_type;
   const records = annotationToTabular(annotation);
 
-  const getRecordStartSec = (r: any): number => {
-    if (typeof r?.time === 'number' && isFinite(r.time)) return r.time;
-    if (typeof r?.tick === 'number' && isFinite(r.tick)) return r.tick / 960;
-    if (typeof r?.quarter === 'number' && isFinite(r.quarter)) return r.quarter * 0.5;
-    return 0;
-  };
-
-  const getRecordExplicitDurSec = (r: any): number => {
-    if (typeof r?.duration !== 'number' || !isFinite(r.duration)) return 0;
-    if (typeof r?.tick === 'number') return r.duration / 960;
-    if (typeof r?.quarter === 'number') return r.duration * 0.5;
-    return r.duration;
-  };
+  const getRecordStartSec = (r: any): number => getRecordStartSeconds(r) ?? 0;
+  const getRecordExplicitDurSec = (r: any): number => getRecordDurationSeconds(r, 0);
 
   let timelineMaxSec = 0;
   for (const r of records) {
@@ -219,35 +259,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   // 1. Time-Frequency Boxes (e.g. Bioacoustics / Birds)
   if (extentType === 'time_frequency_box') {
     const totalDuration = timelineMaxSec > 0 ? timelineMaxSec : 12.0;
-
-    const numSamples = Math.max(1, Math.floor(sampleRate * totalDuration));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
+    const url = synthesizeMonoWavBlobUrl(totalDuration, sampleRate, (t) => {
       let sampleVal = 0;
-
-      // Find any active bird calls at this moment
       for (let k = 0; k < records.length; k++) {
         const r = records[k];
         const boxStart = getRecordStartSec(r);
@@ -257,48 +270,37 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
         const tag = String(r.value ?? '').toLowerCase();
 
         if (t >= boxStart && t < boxStart + boxDur) {
-          const relT = (t - boxStart) / boxDur; // 0 to 1
+          const relT = (t - boxStart) / boxDur;
           const noteT = t - boxStart;
 
           if (tag.includes('trill')) {
-            // Rapid FM trill
             const centerFreq = (boxFmin + boxFmax) / 2;
             const span = (boxFmax - boxFmin) * 0.4;
             const instFreq = centerFreq + span * Math.sin(2 * Math.PI * 28 * noteT);
             const env = Math.sin(Math.PI * relT) * 0.6;
             sampleVal += Math.sin(2 * Math.PI * instFreq * noteT) * env;
           } else if (tag.includes('hoot')) {
-            // Soft pure low tone
             const freq = (boxFmin + boxFmax) / 2;
             const env = Math.sin(Math.PI * relT) * 0.8;
             sampleVal += Math.sin(2 * Math.PI * freq * noteT) * env;
           } else if (tag.includes('drum')) {
-            // Rapid acoustic bursts
             const clicksPerSec = 16;
             const clickPhase = (noteT * clicksPerSec) % 1;
             const burstEnv = clickPhase < 0.25 ? Math.exp(-clickPhase * 30) : 0;
             const freq = (boxFmin + boxFmax) / 2;
             sampleVal += Math.sin(2 * Math.PI * freq * noteT) * burstEnv * 0.7;
           } else {
-            // Robin Chirp: upward pitch sweep inside box
             const instFreq = boxFmin + (boxFmax - boxFmin) * Math.pow(relT, 0.8);
             const env = Math.sin(Math.PI * relT) * 0.7;
             sampleVal += Math.sin(2 * Math.PI * instFreq * noteT) * env;
           }
         }
       }
+      return sampleVal + (Math.random() * 2 - 1) * 0.015;
+    }, 24000);
 
-      // Add gentle ambient background hiss
-      sampleVal += (Math.random() * 2 - 1) * 0.015;
-
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: 'Forest_Bioacoustics_Recording.wav',
       duration: totalDuration,
     };
@@ -307,37 +309,10 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   // 2. Pitch Contour (Continuous Vocal F0) - Strictly Sonifies Voiced Segments
   if (payloadType === 'pitch_contour') {
     const maxT = timelineMaxSec > 0 ? timelineMaxSec : 3.5;
-
-    const numSamples = Math.max(1, Math.floor(sampleRate * maxT));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
     let phase = 0;
     let timePtr = 0;
 
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
-
-      // Find closest time point in records
+    const url = synthesizeMonoWavBlobUrl(maxT, sampleRate, (t) => {
       while (timePtr < records.length - 1 && getRecordStartSec(records[timePtr + 1]) <= t) {
         timePtr++;
       }
@@ -354,23 +329,15 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
         (typeof rawVoicing === 'number' && rawVoicing >= 0.5) ||
         (typeof rawVoicing === 'string' && ['voiced', 'true', '1', 'v'].includes(rawVoicing.toLowerCase().trim()));
 
-      let sampleVal = 0;
       if (isVoiced && freq >= 40 && freq <= 3200) {
         phase += (2 * Math.PI * freq) / sampleRate;
-        // Warm vocal tone with gentle harmonics
-        sampleVal = Math.sin(phase) * 0.6 +
-                    Math.sin(phase * 2) * 0.25 +
-                    Math.sin(phase * 3) * 0.1;
+        return Math.sin(phase) * 0.6 + Math.sin(phase * 2) * 0.25 + Math.sin(phase * 3) * 0.1;
       }
+      return 0;
+    }, 22000);
 
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 22000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: 'Vocal_Melody_Stem.wav',
       duration: maxT,
     };
@@ -397,33 +364,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     }
     const maxNoteEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.max(1, Math.floor(sampleRate * maxNoteEnd));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
+    const url = synthesizeMonoWavBlobUrl(maxNoteEnd, sampleRate, (t) => {
       let sampleVal = 0;
-
       for (const n of notes) {
         if (t >= n.t && t < n.t + n.d) {
           const relT = t - n.t;
@@ -431,15 +373,11 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
           sampleVal += Math.sin(2 * Math.PI * n.freq * relT) * env * 0.5;
         }
       }
+      return sampleVal;
+    }, 24000);
 
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: isMidiTicks ? 'Bach_Invention_MidiStem.wav' : 'Piano_MidiStem.wav',
       duration: maxNoteEnd,
     };
@@ -488,33 +426,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     }
     const maxChordEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.max(1, Math.floor(sampleRate * maxChordEnd));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
+    const url = synthesizeMonoWavBlobUrl(maxChordEnd, sampleRate, (t) => {
       let sampleVal = 0;
-
       for (const c of chordEvents) {
         if (t >= c.t && t < c.t + c.d) {
           const relT = t - c.t;
@@ -524,15 +437,11 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
           }
         }
       }
+      return sampleVal;
+    }, 24000);
 
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: 'Harmonic_Chords_Audio.wav',
       duration: maxChordEnd,
     };
@@ -541,34 +450,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   // 5. Beats (Rhythmic Metronome / Pulse matching exact annotation timestamps)
   if (payloadType === 'beat') {
     const maxBeatEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
-
-    const numSamples = Math.max(1, Math.floor(sampleRate * maxBeatEnd));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
+    const url = synthesizeMonoWavBlobUrl(maxBeatEnd, sampleRate, (t) => {
       let sampleVal = 0;
-
       for (let k = 0; k < records.length; k++) {
         const bTime = getRecordStartSec(records[k]);
         const isDownbeat = records[k].value === 1;
@@ -579,15 +462,11 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
           sampleVal += Math.sin(2 * Math.PI * freq * noteT) * env * (isDownbeat ? 0.7 : 0.4);
         }
       }
+      return sampleVal;
+    }, 24000);
 
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: 'Rhythmic_Beats_Track.wav',
       duration: maxBeatEnd,
     };
@@ -596,34 +475,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   // 6. Onsets (Acoustic Transient Detection Events matching exact timestamps)
   if (payloadType === 'onset') {
     const maxOnsetEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
-
-    const numSamples = Math.max(1, Math.floor(sampleRate * maxOnsetEnd));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
+    const url = synthesizeMonoWavBlobUrl(maxOnsetEnd, sampleRate, (t) => {
       let sampleVal = 0;
-
       for (let k = 0; k < records.length; k++) {
         const oTime = getRecordStartSec(records[k]);
         if (t >= oTime && t < oTime + 0.06) {
@@ -632,15 +485,11 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
           sampleVal += Math.sin(2 * Math.PI * 1200 * noteT) * env * 0.6;
         }
       }
+      return sampleVal;
+    }, 24000);
 
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: 'Onsets_Click_Track.wav',
       duration: maxOnsetEnd,
     };
@@ -649,34 +498,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   // 7. Tone Frequencies in Hz
   if (payloadType === 'note_hz' || (payloadType as string) === 'hz') {
     const maxToneEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
-
-    const numSamples = Math.max(1, Math.floor(sampleRate * maxToneEnd));
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-    };
-
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    let writeOffset = 44;
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
+    const url = synthesizeMonoWavBlobUrl(maxToneEnd, sampleRate, (t) => {
       let sampleVal = 0;
-
       for (let k = 0; k < records.length; k++) {
         const start = getRecordStartSec(records[k]);
         const dur = getRecordExplicitDurSec(records[k]) || 0.5;
@@ -687,15 +510,11 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
           sampleVal += Math.sin(2 * Math.PI * f * relT) * env * 0.5;
         }
       }
+      return sampleVal;
+    }, 24000);
 
-      const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 24000)));
-      view.setInt16(writeOffset, int16, true);
-      writeOffset += 2;
-    }
-
-    const wavBlob = new Blob([buffer], { type: 'audio/wav' });
     return {
-      url: URL.createObjectURL(wavBlob),
+      url,
       name: 'Tones_Audio_Track.wav',
       duration: maxToneEnd,
     };
@@ -703,28 +522,6 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
   // 8. Fallback / Default: Mozart Piano Sonata Motif
   const durationSec = timelineMaxSec > 0 ? timelineMaxSec : 11.8;
-  const numSamples = Math.floor(sampleRate * durationSec);
-  const buffer = new ArrayBuffer(44 + numSamples * 2);
-  const view = new DataView(buffer);
-
-  const writeString = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-  };
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + numSamples * 2, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeString(36, 'data');
-  view.setUint32(40, numSamples * 2, true);
-
   const notes = [
     { t: 0.0, d: 0.9, freq: 523.25 }, // C5
     { t: 1.0, d: 0.45, freq: 329.63 }, // E4
@@ -744,28 +541,19 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     { t: 10.0, d: 1.8, freq: 261.63 }, // C4
   ];
 
-  let writeOffset = 44;
-  for (let i = 0; i < numSamples; i++) {
-    const timeSec = i / sampleRate;
+  const url = synthesizeMonoWavBlobUrl(durationSec, sampleRate, (timeSec) => {
     const activeNote = notes.find(n => timeSec >= n.t && timeSec < n.t + n.d);
+    if (!activeNote) return 0;
+    const noteTime = timeSec - activeNote.t;
+    const env = Math.exp(-noteTime * 2.5);
+    const wave =
+      Math.sin(2 * Math.PI * activeNote.freq * noteTime) * 0.75 +
+      Math.sin(4 * Math.PI * activeNote.freq * noteTime) * 0.25;
+    return wave * env * 0.6;
+  }, 32767);
 
-    let sampleVal = 0;
-    if (activeNote) {
-      const noteTime = timeSec - activeNote.t;
-      const env = Math.exp(-noteTime * 2.5);
-      const wave = Math.sin(2 * Math.PI * activeNote.freq * noteTime) * 0.75 +
-                   Math.sin(4 * Math.PI * activeNote.freq * noteTime) * 0.25;
-      sampleVal = wave * env * 0.6;
-    }
-
-    const int16 = Math.max(-32768, Math.min(32767, Math.floor(sampleVal * 32767)));
-    view.setInt16(writeOffset, int16, true);
-    writeOffset += 2;
-  }
-
-  const wavBlob = new Blob([buffer], { type: 'audio/wav' });
   return {
-    url: URL.createObjectURL(wavBlob),
+    url,
     name: 'Mozart_K545_Sonata_Motif.wav',
     duration: durationSec,
   };
