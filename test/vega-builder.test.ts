@@ -4,8 +4,15 @@ import * as vl from 'vega-lite';
 import { parse as parseVega } from 'vega-parser';
 import { View } from 'vega';
 import { SAMPLE_DATASETS } from '../src/data/sampleDatasets';
-import { annotationToTabular } from '../src/utils/boppParser';
-import { buildBoppVegaLiteSpec } from '../src/utils/vegaLiteBuilder';
+import { annotationToTabular, computeSummaryStats } from '../src/utils/boppParser';
+import {
+  buildBoppVegaLiteSpec,
+  getVegaViewPlotOrigin,
+  resolveVegaGroupItem,
+  getScaleRangeSpan,
+} from '../src/utils/vegaLiteBuilder';
+import { generateDemoAudioForAnnotation } from '../src/utils/mediaLinker';
+import { BoppAudioPlayer } from '../src/utils/audioSynthesizer';
 
 test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('1. Every sample dataset builds a valid, compilable Vega-Lite specification', () => {
@@ -470,6 +477,78 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
       // Verify that "mir_eval Circle of Fifths" does not appear in user-facing texts
       assert.ok(!jsonStr.includes('mir_eval Circle of Fifths'), `Spec for ${sample.id} should not explain 'mir_eval Circle of Fifths'`);
       assert.ok(!jsonStr.includes('mir_eval Pitch Class Colors'), `Spec for ${sample.id} should not mention 'mir_eval Pitch Class Colors'`);
+    }
+  });
+
+  await t.test('16. getVegaViewPlotOrigin accounts for both view.padding() and view.origin() so playhead aligns with canvas marks', async () => {
+    for (const sample of SAMPLE_DATASETS) {
+      const extentType = sample.data.extent?.extent_type;
+      if (!extentType || extentType === 'pixel_box') continue;
+
+      const tabular = annotationToTabular(sample.data);
+      const spec = buildBoppVegaLiteSpec(sample.data, tabular, {
+        chartWidth: 760,
+        chartHeight: 300,
+        enableOverviewBrush: true,
+      }) as any;
+      const compiled = vl.compile(spec);
+      const runtime = parseVega(compiled.spec);
+      const view = new View(runtime, { renderer: 'none' });
+      await view.runAsync();
+
+      const rawOrigin = view.origin();
+      const pad = view.padding();
+      const [originX, originY] = getVegaViewPlotOrigin(view);
+
+      // baseConfig sets padding: { left: 28, right: 28, top: 16, bottom: 16 }
+      assert.strictEqual(pad.left, 28, `View left padding for ${sample.id} must be 28px`);
+      assert.strictEqual(pad.top, 16, `View top padding for ${sample.id} must be 16px`);
+      assert.strictEqual(
+        originX,
+        rawOrigin[0] + pad.left,
+        `Plot originX for ${sample.id} must include both view.origin()[0] (${rawOrigin[0]}) and view.padding().left (${pad.left})`
+      );
+      assert.strictEqual(
+        originY,
+        rawOrigin[1] + pad.top,
+        `Plot originY for ${sample.id} must include both view.origin()[1] (${rawOrigin[1]}) and view.padding().top (${pad.top})`
+      );
+
+      const sgRoot = (view as any).scenegraph?.()?.root?.items?.[0];
+      const detailGroup = resolveVegaGroupItem(sgRoot, 'concat_0_group', 0);
+      assert.ok(detailGroup, `resolveVegaGroupItem must resolve detailGroup for ${sample.id}`);
+      const detailScale = view.scale('concat_0_x') || view.scale('x');
+      if (detailScale) {
+        const span = getScaleRangeSpan(detailScale, 0);
+        assert.ok(span > 0, `getScaleRangeSpan must return positive pixel width for ${sample.id}`);
+      }
+    }
+  });
+
+  await t.test('17. Demo audio synthesis and BoppAudioPlayer durations match timeline bounds across all extent types (including score Fractions)', () => {
+    for (const sample of SAMPLE_DATASETS) {
+      const extentType = sample.data.extent?.extent_type;
+      if (!extentType || extentType === 'pixel_box') continue;
+
+      const tabular = annotationToTabular(sample.data);
+      const stats = computeSummaryStats(sample.data, tabular);
+      const player = new BoppAudioPlayer();
+      player.loadAnnotation(sample.data, tabular);
+
+      const demo = generateDemoAudioForAnnotation(sample.data);
+      assert.ok(typeof demo.duration === 'number' && isFinite(demo.duration) && demo.duration > 0, `Demo audio duration for ${sample.id} must be finite positive number, got ${demo.duration}`);
+      assert.ok(demo.url.startsWith('blob:'), `Demo audio URL for ${sample.id} must be a valid blob URL`);
+
+      if (stats.duration && stats.duration > 0) {
+        assert.ok(
+          Math.abs(demo.duration - stats.duration) < 1e-6,
+          `Demo audio duration (${demo.duration}) must match annotation timeline duration (${stats.duration}) for ${sample.id}`
+        );
+        assert.ok(
+          Math.abs(player.getDuration() - Math.max(1, stats.duration)) < 1e-6,
+          `BoppAudioPlayer duration (${player.getDuration()}) must match annotation timeline duration (${stats.duration}) for ${sample.id}`
+        );
+      }
     }
   });
 });

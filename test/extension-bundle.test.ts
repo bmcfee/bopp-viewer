@@ -34,7 +34,7 @@ test('JupyterLab Extension Bundle & Manifest Verification', async (t) => {
     );
   });
 
-  await t.test('3. pyproject.toml defines standard hatchling and hatch-jupyter-builder targets', () => {
+  await t.test('3. pyproject.toml defines standard hatchling and hatch-jupyter-builder targets without triggering YN0028', () => {
     const pyprojectPath = path.resolve(rootDir, 'pyproject.toml');
     assert.ok(fs.existsSync(pyprojectPath), 'pyproject.toml must exist');
     const pyproject = fs.readFileSync(pyprojectPath, 'utf8');
@@ -42,6 +42,27 @@ test('JupyterLab Extension Bundle & Manifest Verification', async (t) => {
     assert.ok(pyproject.includes('build-backend = "hatchling.build"'));
     assert.ok(pyproject.includes('"jupyterlab_bopp/labextension" = "share/jupyter/labextensions/jupyterlab-bopp"'));
     assert.ok(pyproject.includes('ensured-targets = [\n    "jupyterlab_bopp/labextension/package.json"'));
+    assert.ok(
+      pyproject.includes('skip-if-exists = ["jupyterlab_bopp/labextension/package.json"]'),
+      'pyproject.toml must skip redundant JS rebuild when prebuilt labextension already exists'
+    );
+    assert.ok(
+      pyproject.includes('npm = ["npm"]'),
+      'pyproject.toml must use npm instead of jlpm so Yarn Berry YN0028 lockfile errors do not occur'
+    );
+    assert.ok(
+      !pyproject.includes('npm = ["jlpm"]'),
+      'pyproject.toml must not invoke jlpm without a yarn.lock file'
+    );
+
+    const ciWorkflowPath = path.resolve(rootDir, '.github/workflows/ci.yml');
+    if (fs.existsSync(ciWorkflowPath)) {
+      const ciYaml = fs.readFileSync(ciWorkflowPath, 'utf8');
+      assert.ok(
+        ciYaml.includes('YARN_ENABLE_IMMUTABLE_INSTALLS: "false"'),
+        'CI workflow must disable Yarn Berry immutable installs for JupyterLab test job'
+      );
+    }
   });
 
   await t.test('4. lib/index.js bundled extension exists and contains extension identifier', async () => {

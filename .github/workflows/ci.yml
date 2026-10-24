@@ -72,6 +72,8 @@ jobs:
     name: JupyterLab 4 Python Packaging & Install Verification (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: [lint-and-types]
+    env:
+      YARN_ENABLE_IMMUTABLE_INSTALLS: "false"
     strategy:
       fail-fast: false
       matrix:

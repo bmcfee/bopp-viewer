@@ -1,69 +1,60 @@
-# BOPP Interactive Visualizer & JupyterLab Extension
+# BOPP Interactive Visualizer, JupyterLab Extension & CLI
 
-An interactive browser visualizer and JupyterLab extension for **BOPP** ([Bounded Observation Payload Protocol](https://github.com/bmcfee/bopp)) music and audio annotation data.
+An interactive browser visualizer, JupyterLab 4 extension, and standalone command-line viewer for **BOPP** ([Bounded Observation Payload Protocol](https://github.com/bmcfee/bopp)) music and audio annotation data.
 
-This project renders BOPP JSON (`.bopp`, `.bopp.json`) and MessagePack (`.bopp.msgpack`, `.msgpack`) files dynamically using **Vega-Lite**, without requiring an active Python kernel. It also provides Web Audio API sonification, synchronized playhead scrubbing, audio spectrogram overlays, and metadata validation.
+This project renders BOPP JSON (`.bopp`, `.bopp.json`) and binary MessagePack (`.bopp.msgpack`, `.msgpack`) files dynamically using **Vega-Lite v6** without requiring an active Python kernel. It also provides Web Audio API sonification, synchronized playhead scrubbing, audio spectrogram overlays, optical sheet music overlays, and schema validation.
 
 ---
 
-## 1. Web Application Quickstart
+## Overview of Components
 
-### Prerequisites
-- Node.js ≥ 18.0.0
-- npm ≥ 9.0.0
+| Component | Description | Prerequisites |
+| :--- | :--- | :--- |
+| **1. Web Demo App** | Interactive SPA with 24 built-in sample datasets, live Vega-Lite spec editor, schema validator, and audio/image media linking. | Node.js ≥ 20, npm ≥ 9 |
+| **2. JupyterLab 4 Extension (`jupyterlab-bopp`)** | Kernel-free file viewer for `.bopp` / `.msgpack` files and notebook cell MIME renderer (`application/vnd.bopp+json`, `application/vnd.bopp+msgpack`). | Python ≥ 3.8, JupyterLab ≥ 4.0 *(+ Node.js ≥ 20 & npm ≥ 9 if building from source)* |
+| **3. Standalone CLI (`boppview`)** | Zero-configuration terminal utility that serves any local BOPP file in the browser without launching JupyterLab. | Python ≥ 3.8 *(installed automatically with `jupyterlab-bopp`)* |
+
+---
+
+## 1. Interactive Web Demo App
 
 ### Install Dependencies
-Dependencies have been updated and pinned to ensure clean peer dependency resolution without requiring `--legacy-peer-deps`:
 ```bash
 npm install
 ```
 
-### Run Locally (Dev Server)
+### Run Local Development Server
 ```bash
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Build Production Bundle
+### Build & Preview Production SPA Bundle
 ```bash
 npm run build
+npm run preview
 ```
-The compiled SPA output will be in `dist/`.
+The static SPA output is written to `dist/`.
 
 ---
 
-## 2. Building, Packaging & Installing as a JupyterLab Extension
+## 2. JupyterLab 4 Extension & Python Package (`jupyterlab-bopp`)
 
-The extension package (`jupyterlab-bopp`) registers a custom `DocumentWidgetFactory` in JupyterLab. When users double-click any `.bopp` or `.bopp.msgpack` file in the JupyterLab file browser, it opens and renders client-side with interactive Vega-Lite graphics and synchronized audio playback.
+Installing the Python package provides **both** the prebuilt JupyterLab 4 extension (`jupyterlab-bopp`) and the standalone `boppview` CLI tool.
 
-The package uses modern PEP 517/621 packaging via `pyproject.toml` with `hatchling` and `hatch-jupyter-builder`, maintaining full compatibility with `setup.cfg`/`setup.py`.
+### Option A: Install from Source (Local Use or Development)
 
-### Prerequisites
-- Python ≥ 3.8
-- JupyterLab ≥ 4.0.0
-- Node.js ≥ 18.0.0 & `jlpm` (or `npm`)
-- Modern packaging tools:
-```bash
-pip install "jupyterlab>=4.0.0" build hatchling "hatch-jupyter-builder>=0.5"
-```
-
----
-
-### Step A: Modern Local Development Installation (Editable)
-
-The extension build script executes via Node natively (`scripts/build_extension.mjs` and `scripts/generate_types.mjs`), ensuring compatibility across `jlpm`, `yarn`, and `npm` without relying on PATH binaries or external TypeScript loaders.
+Requires Python ≥ 3.8, `jupyterlab>=4.0.0`, `hatch-jupyter-builder>=0.5`, Node.js ≥ 20, and `npm`:
 
 ```bash
-# 1. Install frontend dependencies
-jlpm install # or npm install
+# 1. Install frontend dependencies and build extension & standalone bundles
+npm install
+npm run build
 
-# 2. Build the extension bundle (populates jupyterlab_bopp/labextension)
-jlpm run build # or npm run build
-
-# 3. Install Python package in editable mode
+# 2. Install the Python package (and register the prebuilt labextension)
 pip install -e .
 
-# 4. Confirm extension status in JupyterLab:
+# 3. Verify the extension is enabled in JupyterLab
 jupyter labextension list
 ```
 
@@ -72,75 +63,82 @@ You should see:
 jupyterlab-bopp v1.0.0 enabled OK (python, jupyterlab_bopp)
 ```
 
-Launch JupyterLab:
-```bash
-jupyter lab
-```
+> **Note:** Running `pip install .` or `pip install -e .` on a clean checkout will automatically run `npm install` and `npm run build` via `hatch-jupyter-builder` if `jupyterlab_bopp/labextension/package.json` does not yet exist, and will skip rebuilding if prebuilt assets are already present.
 
-> **Note on JupyterLab Extension Manager log warnings:**
-> If you observe an `UnboundLocalError: cannot access local variable 'data'` from `jupyterlab/extensions/pypi.py` in your terminal logs when opening JupyterLab's Extension Manager panel, this is an upstream JupyterLab 4 bug triggered when PyPI API queries fail or are throttled in offline/restricted network environments. It does **not** affect local prebuilt extensions like `jupyterlab-bopp`.
+### Option B: Build & Install a Standalone Python Wheel (`.whl`)
 
----
-
-### Step B: Building & Packaging a Standalone Wheel (`.whl`)
-
-To package `jupyterlab_bopp` for distribution or installation on other machines without needing Node.js:
+To build a self-contained `.whl` that can be installed on machines **without** Node.js or `npm`:
 
 ```bash
-# 1. Clean previous build artifacts
-npm run clean
-
-# 2. Build Python source distribution (sdist) and prebuilt wheel (.whl)
-# This automatically executes the frontend build via hatch-jupyter-builder
+# Build sdist and prebuilt wheel in dist/
 python -m build
-```
 
-This generates distribution packages in the `dist/` directory:
-- `dist/jupyterlab_bopp-1.0.0-py3-none-any.whl` (Python Wheel containing prebuilt assets)
-- `dist/jupyterlab_bopp-1.0.0.tar.gz` (Source Archive)
-
----
-
-### Step C: Installing the Packaged Wheel Locally
-
-Once the `.whl` is built, you can install it into any Python environment without Node.js or jlpm:
-
-```bash
-# Install the built wheel via pip
+# Install the wheel into any Python >= 3.8 environment
 pip install dist/jupyterlab_bopp-1.0.0-py3-none-any.whl
-
-# Confirm installation
-jupyter labextension list
 ```
 
-Now launch JupyterLab and open any BOPP file:
+### Using in JupyterLab
+
+Launch JupyterLab and double-click any `.bopp`, `.bopp.json`, `.bopp.msgpack`, or `.msgpack` file in the file browser:
 ```bash
 jupyter lab
 ```
 
----
+Python objects in notebooks can also render inline by implementing `_repr_mimebundle_()` returning `"application/vnd.bopp+json"` or `"application/vnd.bopp+msgpack"`.
 
-### Step D: Live Development Watch Mode
-
-When actively modifying extension source code:
-
-```bash
-# In terminal 1: Watch TypeScript and recompile on file save
-npm run watch
-
-# In terminal 2: Run JupyterLab in watch mode
-jupyter lab --watch
-```
-Changes to `src/*.ts` will automatically trigger rebuilds and reload the browser tab.
-
----
-
-### Step E: Uninstallation
-
-To remove the extension from your local environment:
-
+### Uninstalling
 ```bash
 pip uninstall jupyterlab_bopp
+```
+
+---
+
+## 3. Standalone Command-Line Viewer (`boppview`)
+
+Once `jupyterlab-bopp` is installed via `pip`, the `boppview` command is available directly in your terminal—no JupyterLab server or notebook kernel required.
+
+### Usage
+```bash
+# Open a BOPP file in your default browser (auto-selects free port starting at 8000)
+boppview path/to/annotations.bopp
+
+# Specify port, bind address, or theme, or run headless without opening a browser
+boppview beats.bopp.json --port 8080 --theme dark
+boppview melody.msgpack --host 0.0.0.0 --port 9000 --no-browser
+
+# Or invoke as a Python module
+python -m jupyterlab_bopp path/to/annotations.bopp
+```
+
+### CLI Options
+- `file`: Path to `.bopp`, `.bopp.json`, `.bopp.msgpack`, or `.msgpack` file.
+- `-p, --port PORT`: Port to listen on (default: `8000`, or first available port).
+- `-b, --host, --bind HOST`: Host/IP address to bind (default: `127.0.0.1`).
+- `--no-browser`: Start the server without opening a browser tab automatically.
+- `--theme {light,dark,system}`: Initial UI theme (default: `system`).
+- `-v, --version`: Show package version and exit.
+
+*(Optional)* Install `msgpack` (`pip install msgpack`) to enable server-side MessagePack inspection; binary `.msgpack` files are also decoded client-side in the browser automatically.
+
+---
+
+## 4. Development, Type Generation & Testing
+
+```bash
+# Regenerate TypeScript types from BOPP JSON schemas in schemas/
+npm run generate:types
+
+# Typecheck with TypeScript
+npm run lint
+
+# Run the automated test suite
+npm test
+
+# Watch and rebuild bundles during active development
+npm run watch
+
+# Clean all generated build artifacts and caches
+npm run clean
 ```
 
 ---
@@ -149,21 +147,21 @@ pip uninstall jupyterlab_bopp
 
 | Extent Type | Payload Type | Vega-Lite Visualization | Sonification Support |
 | :--- | :--- | :--- | :--- |
-| `time_interval` | `chord` | Mir_eval Circle-of-Fifths timeline | Synthesized root triads / 7ths |
+| `time_interval` / `score_interval` | `chord` | `mir_eval` Circle-of-Fifths timeline | Synthesized root triads / 7ths |
 | `time` / `interval` | `key_mode` | 24-tonic pitch axis (C at bottom) | Circle-of-fifths colormaps |
 | `none` (global) | `key_mode` | Two concentric donut plots (Outer: Major, Inner: Minor) | Harmonic mode inspection |
 | `none` (global) | `tempo` | KPI callout gauge with reference track | Metronome pulse click |
-| `none` (global) | `tag_open` | Clear labeled bars with in-plot annotation labels | Metadata analysis |
+| `none` (global) | `tag_open` | Labeled confidence bars or alphabetized badge grid | Metadata analysis |
 | `none` (global) | `mood_thayer` | Russell-Thayer 2D circumplex: 2D Gaussian density heatmap with 1σ/2σ uncertainty bounds (variance) or scatter plot (discrete) | Affective inspection |
 | `time` | `mood_thayer` | Dynamic 2D circumplex trajectory & V/A timeline | Continuous affect tracking |
-| `time` | `beat` | Metric downbeat / upbeat bar chart | Audio click synthesizer |
-| `time` / `midi_interval`| `note_midi` | Opaque piano roll with mir_eval pitch class | Polyphonic synth notes |
-| `time` | `pitch_contour` | Continuous F0 trajectory with voiced state | Pure sine F0 synth (voiced only) |
-| `time_frequency_box` | `tag_open` | Spectrogram-aligned TF bounding boxes | STFT spectrogram overlay |
+| `time` | `beat` / `onset` | Metric downbeat / upbeat bar chart & transient rules | Audio click synthesizer |
+| `time` / `midi_interval` / `score_interval` | `note_midi` / `note_hz` | Opaque piano roll with `mir_eval` pitch class | Polyphonic synth notes |
+| `time` | `pitch_contour` | Continuous F0 trajectory with voiced state & ±1.96σ whiskers | Pure sine F0 synth (voiced only) |
+| `time_frequency_box` | `tag_open` | Spectrogram-aligned TF bounding boxes | STFT spectrogram overlay & synth |
 | `pixel_box` | `tag_open` | Document image bounding boxes | Visual sheet music overlay |
 
 ---
 
 ## License
 
-BSD-3-Clause License. See [LICENSE](LICENSE) for details.
+BSD-3-Clause License. See [LICENSE](file:///home/bmcfee/git/bopp-viewer/LICENSE) for details.

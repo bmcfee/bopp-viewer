@@ -46,14 +46,17 @@ export class BoppAudioPlayer {
   private isPlaying = false;
   private currentPlayhead = 0; // in seconds
   private duration = 10;
+  private annotationMaxSec = 10;
   private speed = 1.0;
   private animationFrameId: number | null = null;
   private lastTimestamp = 0;
+  private lastAudioCtxTime: number | null = null;
   private onTimeUpdateCallback: ((time: number) => void) | null = null;
   private onEndedCallback: (() => void) | null = null;
   private records: TabularRecord[] = [];
   private annotation: BoppAnnotation | null = null;
   private activeScheduledIndices = new Set<number>();
+  private activeNodes = new Set<{ osc: OscillatorNode; gain: GainNode }>();
   private linkedAudioEl: HTMLAudioElement | null = null;
 
   // Dedicated continuous oscillator & gain for f0 vocal pitch contours
@@ -73,9 +76,12 @@ export class BoppAudioPlayer {
     if (this.linkedAudioEl && this.linkedAudioEl !== el) {
       this.linkedAudioEl.pause();
     }
+    this.stopActiveNodes();
     this.linkedAudioEl = el;
     if (typeof explicitDuration === 'number' && explicitDuration > 0) {
       this.duration = explicitDuration;
+    } else if (!el) {
+      this.duration = Math.max(1, this.annotationMaxSec);
     }
     if (el) {
       if (!isNaN(el.duration) && el.duration > 0) {
@@ -109,35 +115,26 @@ export class BoppAudioPlayer {
     this.annotation = annotation;
     this.records = records;
 
-    // Calculate duration strictly in seconds:
+    // Calculate duration strictly in seconds, matching computeSummaryStats & vegaLiteBuilder:
     // For MIDI ticks at standard 480 PPQ and 120 BPM: 1 tick = 1 / 960 seconds.
     // For Score quarters at 120 BPM: 1 quarter = 0.50 seconds.
     let maxSec = 0;
     const isMidiExtent = annotation.extent?.extent_type?.includes('midi') || (records.length > 0 && typeof records[0].tick === 'number');
     const isScoreExtent = annotation.extent?.extent_type?.includes('score') || (records.length > 0 && typeof records[0].quarter === 'number');
 
-    // For dense continuous contours (like pitch_contour), default duration per point should match sampling step
-    let defaultStepSec = 0.5;
-    if (records.length > 1 && typeof records[0].time === 'number' && typeof records[1].time === 'number') {
-      const step = records[1].time - records[0].time;
-      if (step > 0 && step < 1.0) {
-        defaultStepSec = step;
-      }
-    }
-
     for (const r of records) {
       let startSec = 0;
-      let durSec = defaultStepSec;
+      let durSec = 0;
 
       if (typeof r.time === 'number') {
         startSec = r.time;
-        durSec = typeof r.duration === 'number' ? r.duration : defaultStepSec;
+        durSec = typeof r.duration === 'number' ? r.duration : 0;
       } else if (typeof r.tick === 'number' || isMidiExtent) {
         startSec = (r.tick ?? 0) / 960;
-        durSec = typeof r.duration === 'number' ? r.duration / 960 : 0.25;
+        durSec = typeof r.duration === 'number' ? r.duration / 960 : 0;
       } else if (typeof r.quarter === 'number' || isScoreExtent) {
         startSec = (r.quarter ?? 0) * 0.5;
-        durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0.5;
+        durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0;
       }
 
       const endSec = startSec + durSec;
@@ -146,6 +143,7 @@ export class BoppAudioPlayer {
       }
     }
 
+    this.annotationMaxSec = maxSec;
     if (this.linkedAudioEl && !isNaN(this.linkedAudioEl.duration) && this.linkedAudioEl.duration > 0) {
       this.duration = Math.max(this.linkedAudioEl.duration, maxSec);
     } else {
@@ -168,6 +166,7 @@ export class BoppAudioPlayer {
     this.initAudio();
     this.isPlaying = true;
     this.lastTimestamp = performance.now();
+    this.lastAudioCtxTime = this.ctx ? this.ctx.currentTime : null;
 
     // Auto-rewind if at or near the end
     if (this.currentPlayhead >= this.duration - 0.05) {
@@ -180,12 +179,11 @@ export class BoppAudioPlayer {
       this.linkedAudioEl.currentTime = this.currentPlayhead;
       this.linkedAudioEl.playbackRate = this.speed;
       this.linkedAudioEl.play().catch(e => console.warn('Linked audio play error:', e));
-    }
-
-    // Always initialize and trigger F0 synth for pitch contour
-    if (this.annotation?.payload.payload_type === 'pitch_contour') {
+    } else if (this.annotation?.payload.payload_type === 'pitch_contour') {
       this.startF0Synthesizer();
       this.updateF0Pitch(this.currentPlayhead);
+    } else {
+      this.triggerActiveIntervalsAt(this.currentPlayhead);
     }
 
     this.tickLoop();
@@ -194,6 +192,7 @@ export class BoppAudioPlayer {
   public pause() {
     this.isPlaying = false;
     this.stopF0Synthesizer();
+    this.stopActiveNodes();
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -206,6 +205,7 @@ export class BoppAudioPlayer {
   public stop() {
     this.pause();
     this.stopF0Synthesizer();
+    this.stopActiveNodes();
     this.currentPlayhead = 0;
     this.activeScheduledIndices.clear();
     if (this.linkedAudioEl) {
@@ -217,11 +217,17 @@ export class BoppAudioPlayer {
   public seek(seconds: number) {
     this.currentPlayhead = Math.max(0, Math.min(seconds, this.duration));
     this.activeScheduledIndices.clear();
+    this.stopActiveNodes();
+    this.lastTimestamp = performance.now();
+    this.lastAudioCtxTime = this.ctx ? this.ctx.currentTime : null;
     if (this.linkedAudioEl) {
       this.linkedAudioEl.currentTime = this.currentPlayhead;
-    }
-    if (this.annotation?.payload.payload_type === 'pitch_contour' && this.isPlaying) {
-      this.updateF0Pitch(this.currentPlayhead);
+    } else if (this.isPlaying) {
+      if (this.annotation?.payload.payload_type === 'pitch_contour') {
+        this.updateF0Pitch(this.currentPlayhead);
+      } else {
+        this.triggerActiveIntervalsAt(this.currentPlayhead);
+      }
     }
     this.onTimeUpdateCallback?.(this.currentPlayhead);
   }
@@ -349,6 +355,31 @@ export class BoppAudioPlayer {
     }
   }
 
+  private stopActiveNodes() {
+    if (!this.ctx || this.activeNodes.size === 0) {
+      this.activeNodes.clear();
+      return;
+    }
+    const now = this.ctx.currentTime;
+    for (const { osc, gain } of this.activeNodes) {
+      try {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(0, now);
+        osc.stop();
+        osc.disconnect();
+      } catch {}
+    }
+    this.activeNodes.clear();
+  }
+
+  private registerActiveNode(osc: OscillatorNode, gain: GainNode) {
+    const entry = { osc, gain };
+    this.activeNodes.add(entry);
+    osc.onended = () => {
+      this.activeNodes.delete(entry);
+    };
+  }
+
   private tickLoop = () => {
     if (!this.isPlaying) return;
 
@@ -366,14 +397,26 @@ export class BoppAudioPlayer {
       }
     } else {
       const now = performance.now();
-      const delta = (now - this.lastTimestamp) / 1000;
+      let delta = (now - this.lastTimestamp) / 1000;
+      if (
+        this.ctx &&
+        this.ctx.state === 'running' &&
+        this.lastAudioCtxTime !== null &&
+        this.ctx.currentTime > this.lastAudioCtxTime
+      ) {
+        delta = this.ctx.currentTime - this.lastAudioCtxTime;
+      }
       this.lastTimestamp = now;
+      this.lastAudioCtxTime = this.ctx ? this.ctx.currentTime : null;
 
       const prevTime = this.currentPlayhead;
       this.currentPlayhead += delta * this.speed;
 
       if (this.currentPlayhead >= this.duration) {
         this.currentPlayhead = this.duration;
+        if (this.annotation?.payload.payload_type !== 'pitch_contour') {
+          this.triggerSounds(prevTime, this.duration, true);
+        }
         this.pause();
         this.onTimeUpdateCallback?.(this.currentPlayhead);
         this.onEndedCallback?.();
@@ -393,7 +436,45 @@ export class BoppAudioPlayer {
     this.animationFrameId = requestAnimationFrame(this.tickLoop);
   };
 
-  private triggerSounds(fromTime: number, toTime: number) {
+  private triggerActiveIntervalsAt(timeSec: number) {
+    if (!this.ctx || !this.annotation) return;
+
+    const payloadType = this.annotation.payload.payload_type;
+
+    for (let i = 0; i < this.records.length; i++) {
+      const r = this.records[i];
+      let tSec: number;
+      let durSec = 0;
+      let hasExplicitDuration = false;
+
+      if (typeof r.time === 'number') {
+        tSec = r.time;
+        hasExplicitDuration = typeof r.duration === 'number';
+        durSec = hasExplicitDuration ? (r.duration as number) : 0.5;
+      } else if (typeof r.tick === 'number') {
+        tSec = r.tick / 960;
+        hasExplicitDuration = typeof r.duration === 'number';
+        durSec = hasExplicitDuration ? (r.duration as number) / 960 : 0.25;
+      } else if (typeof r.quarter === 'number') {
+        tSec = r.quarter * 0.5;
+        hasExplicitDuration = typeof r.duration === 'number';
+        durSec = hasExplicitDuration ? (r.duration as number) * 0.5 : 0.5;
+      } else {
+        continue;
+      }
+
+      const isOngoingInterval = hasExplicitDuration && tSec <= timeSec && timeSec < tSec + durSec;
+      const isExactPoint = !hasExplicitDuration && Math.abs(tSec - timeSec) < 1e-4;
+
+      if ((isOngoingInterval || isExactPoint) && !this.activeScheduledIndices.has(i)) {
+        this.activeScheduledIndices.add(i);
+        const remainingDur = isOngoingInterval ? Math.max(0.08, tSec + durSec - timeSec) : durSec;
+        this.triggerRecordSound(payloadType, r, remainingDur);
+      }
+    }
+  }
+
+  private triggerSounds(fromTime: number, toTime: number, inclusiveEnd = false) {
     if (!this.ctx || !this.annotation) return;
 
     const payloadType = this.annotation.payload.payload_type;
@@ -416,23 +497,30 @@ export class BoppAudioPlayer {
         continue;
       }
 
-      if (tSec >= fromTime && tSec < toTime && !this.activeScheduledIndices.has(i)) {
-        this.activeScheduledIndices.add(i);
+      const inWindow = inclusiveEnd
+        ? tSec >= fromTime && tSec <= toTime
+        : tSec >= fromTime && tSec < toTime;
 
-        if (payloadType === 'chord' && typeof r.value === 'string') {
-          this.playChord(r.value, durSec);
-        } else if (payloadType === 'beat') {
-          const isDownbeat = r.value === 1;
-          this.playClick(isDownbeat);
-        } else if (payloadType === 'note_midi' && typeof r.value === 'number') {
-          this.playMidiNote(r.value, durSec);
-        } else if (payloadType === 'note_hz' && typeof r.value === 'number') {
-          this.playTone(r.value, durSec);
-        } else if (payloadType !== 'pitch_contour') {
-          // Default click for other events (onsets, segments)
-          this.playClick(false);
-        }
+      if (inWindow && !this.activeScheduledIndices.has(i)) {
+        this.activeScheduledIndices.add(i);
+        this.triggerRecordSound(payloadType, r, durSec);
       }
+    }
+  }
+
+  private triggerRecordSound(payloadType: string, r: TabularRecord, durSec: number) {
+    if (payloadType === 'chord' && typeof r.value === 'string') {
+      this.playChord(r.value, durSec);
+    } else if (payloadType === 'beat') {
+      const isDownbeat = r.value === 1;
+      this.playClick(isDownbeat);
+    } else if (payloadType === 'note_midi' && typeof r.value === 'number') {
+      this.playMidiNote(r.value, durSec);
+    } else if (payloadType === 'note_hz' && typeof r.value === 'number') {
+      this.playTone(r.value, durSec);
+    } else if (payloadType !== 'pitch_contour') {
+      // Default click for other events (onsets, segments)
+      this.playClick(false);
     }
   }
 
@@ -450,6 +538,7 @@ export class BoppAudioPlayer {
     osc.connect(gain);
     gain.connect(this.ctx.destination);
 
+    this.registerActiveNode(osc, gain);
     osc.start();
     osc.stop(this.ctx.currentTime + 0.09);
   }
@@ -468,13 +557,15 @@ export class BoppAudioPlayer {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
 
-    const dur = Math.min(Math.max(0.1, durationSec), 2.0);
+    const scaledDur = durationSec / Math.max(0.25, this.speed);
+    const dur = Math.min(Math.max(0.1, scaledDur), 2.0);
     gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
 
     osc.connect(gain);
     gain.connect(this.ctx.destination);
 
+    this.registerActiveNode(osc, gain);
     osc.start();
     osc.stop(this.ctx.currentTime + dur);
   }
@@ -516,7 +607,8 @@ export class BoppAudioPlayer {
     const intervals = [0, isMinor ? 3 : 4, 7];
     if (isSeventh) intervals.push(isMinor ? 10 : 11);
 
-    const dur = Math.min(Math.max(0.2, durationSec), 2.5);
+    const scaledDur = durationSec / Math.max(0.25, this.speed);
+    const dur = Math.min(Math.max(0.2, scaledDur), 2.5);
 
     for (const semitones of intervals) {
       const midi = rootMidi + semitones;
@@ -534,6 +626,7 @@ export class BoppAudioPlayer {
       osc.connect(gain);
       gain.connect(this.ctx.destination);
 
+      this.registerActiveNode(osc, gain);
       osc.start();
       osc.stop(this.ctx.currentTime + dur);
     }

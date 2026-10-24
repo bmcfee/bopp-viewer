@@ -36,7 +36,13 @@ import {
   Check,
 } from 'lucide-react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
-import { buildBoppVegaLiteSpec, VegaLiteBuilderOptions } from '../utils/vegaLiteBuilder';
+import {
+  buildBoppVegaLiteSpec,
+  VegaLiteBuilderOptions,
+  getVegaViewPlotOrigin,
+  resolveVegaGroupItem,
+  getScaleRangeSpan,
+} from '../utils/vegaLiteBuilder';
 import { BoppAudioPlayer, isSonifiablePayload } from '../utils/audioSynthesizer';
 import { computeSummaryStats } from '../utils/boppParser';
 import { analyzeIntervalAnnotation } from '../utils/intervalOverlap';
@@ -55,6 +61,18 @@ interface VegaLiteViewerProps {
   tabularData: TabularRecord[];
   theme: 'light' | 'dark';
   onViewSpecClick: () => void;
+}
+
+function getElementOffsetInContainer(el: HTMLElement | null, container: Element | null): [number, number] {
+  if (!el) return [0, 0];
+  if (container && typeof el.getBoundingClientRect === 'function' && typeof container.getBoundingClientRect === 'function') {
+    const elRect = el.getBoundingClientRect();
+    const cRect = container.getBoundingClientRect();
+    if (elRect.width > 0 || elRect.height > 0) {
+      return [elRect.left - cRect.left, elRect.top - cRect.top];
+    }
+  }
+  return [el.offsetLeft || 0, el.offsetTop || 0];
 }
 
 export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
@@ -171,6 +189,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const defaultMultiRow = intervalAnalysis.isIntervalExtent ? !intervalAnalysis.isDisjoint : false;
   const effectiveMultiRow = userMultiRowOverride !== null ? userMultiRowOverride : defaultMultiRow;
   const duration = linkedMedia?.duration || stats.duration || 10;
+  const durationRef = useRef<number>(duration);
+  durationRef.current = duration;
 
   // Measure container width dynamically from outer plot card with a deadband to eliminate loop warnings
   useEffect(() => {
@@ -249,12 +269,9 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     if (canvas) {
       canvas.style.display = 'block';
     }
-    const canvasOffsetX = canvas ? canvas.offsetLeft : 0;
-    const canvasOffsetY = canvas ? canvas.offsetTop : 0;
+    const [canvasOffsetX, canvasOffsetY] = getElementOffsetInContainer(canvas, svg);
 
-    const origin = typeof view.origin === 'function' ? view.origin() : [0, 0];
-    const originX = origin[0] || 0;
-    const originY = origin[1] || 0;
+    const [originX, originY] = getVegaViewPlotOrigin(view);
 
     const scaleNames = Object.keys((view as any)._runtime?.scales || {});
     // Support vconcat, single view, and hconcat (like time_mood_trajectory_variance where concat_1_x is the timeline)
@@ -275,13 +292,14 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     const sgRoot = (view as any).scenegraph?.()?.root?.items?.[0];
     const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
     const detailGroup = isVConcat
-      ? (sgRoot?.items?.[0]?.items?.[0] || sgRoot?.items?.[0])
+      ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
       : detailScaleName === 'concat_1_x'
-      ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1])
+      ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
       : sgRoot;
-    const overviewGroup = isVConcat ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1]) : null;
+    const overviewGroup = isVConcat ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1) : null;
 
-    const detailWidth = detailGroup?.width ?? (typeof view.width === 'function' && view.width() > 0 ? view.width() : containerWidth);
+    const fallbackDetailWidth = detailGroup?.width ?? (typeof view.width === 'function' && view.width() > 0 ? view.width() : containerWidth);
+    const detailWidth = getScaleRangeSpan(detailScale, fallbackDetailWidth);
     const detailHeight = detailGroup?.height ?? (isVConcat ? 220 : typeof view.height === 'function' && view.height() > 0 ? view.height() : 300);
     const detailGroupX = canvasOffsetX + originX + (detailGroup?.x ?? 0);
     const detailGroupY = canvasOffsetY + originY + (detailGroup?.y ?? 0);
@@ -325,7 +343,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         const oMin = oDom && typeof oDom[0] === 'number' ? oDom[0] : 0;
         const oMax = oDom && typeof oDom[1] === 'number' ? oDom[1] : Infinity;
         const overviewRelX = overviewScale(coordVal);
-        const overviewWidth = overviewGroup?.width ?? detailWidth;
+        const overviewWidth = getScaleRangeSpan(overviewScale, overviewGroup?.width ?? detailWidth);
         const overviewHeight = overviewGroup?.height ?? 56;
         if (coordVal >= oMin - 0.0001 && coordVal <= oMax + 0.0001 && typeof overviewRelX === 'number' && !isNaN(overviewRelX)) {
           const clampedOverviewRelX = Math.max(0, Math.min(overviewWidth, overviewRelX));
@@ -347,7 +365,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     } else if (overviewLine) {
       overviewLine.style.display = 'none';
     }
-  }, [extentType, containerWidth]);
+  }, [extentType, containerWidth, canSonify, linkedMedia?.type]);
 
   useEffect(() => {
     updatePlayheadRef.current = updatePlayhead;
@@ -466,13 +484,13 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     }
   };
 
-  const handleSeek = (newTime: number) => {
-    const clamped = Math.max(0, Math.min(duration, newTime));
+  const handleSeek = useCallback((newTime: number) => {
+    const clamped = Math.max(0, Math.min(durationRef.current, newTime));
     currentTimeRef.current = clamped;
     setCurrentTime(clamped);
     audioPlayerRef.current?.seek(clamped);
     updatePlayheadRef.current(clamped);
-  };
+  }, []);
 
   const handleResetPlayback = () => {
     audioPlayerRef.current?.stop();
@@ -732,7 +750,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
         // Measure exact inner plot area bounds for precision spectrogram overlay
         try {
-          const origin = typeof res.view.origin === 'function' ? res.view.origin() : [0, 0];
+          const [originX, originY] = getVegaViewPlotOrigin(res.view);
           const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
           let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
           if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
@@ -745,18 +763,19 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
           const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
           const sgRoot = (res.view as any).scenegraph?.()?.root?.items?.[0];
           const detailGroup = isVConcat
-            ? (sgRoot?.items?.[0]?.items?.[0] || sgRoot?.items?.[0])
+            ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
             : detailScaleName === 'concat_1_x'
-            ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1])
+            ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
             : sgRoot;
-          const w = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
+          const detailScale = detailScaleName ? res.view.scale(detailScaleName) : null;
+          const fallbackW = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
+          const w = getScaleRangeSpan(detailScale, fallbackW);
           const h = detailGroup?.height ?? (typeof res.view.height === 'function' && res.view.height() > 0 ? res.view.height() : 240);
           const canvas = (embedContainer?.querySelector('canvas') || embedContainer?.querySelector('svg:not(.bopp-playhead-overlay)')) as HTMLElement | null;
-          const canvasOffsetX = canvas ? canvas.offsetLeft : 0;
-          const canvasOffsetY = canvas ? canvas.offsetTop : 0;
+          const [canvasOffsetX, canvasOffsetY] = getElementOffsetInContainer(canvas, root);
           const nextBounds = {
-            left: Math.round(canvasOffsetX + origin[0] + (detailGroup?.x ?? 0)),
-            top: Math.round(canvasOffsetY + origin[1] + (detailGroup?.y ?? 0)),
+            left: Math.round(canvasOffsetX + originX + (detailGroup?.x ?? 0)),
+            top: Math.round(canvasOffsetY + originY + (detailGroup?.y ?? 0)),
             width: Math.round(w),
             height: Math.round(h),
           };
@@ -789,12 +808,23 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         } catch {}
 
         // Initial playhead position render
-        updatePlayheadRef.current(currentTime);
+        updatePlayheadRef.current(currentTimeRef.current);
 
         // Listen for clicks anywhere on the display to seek playhead
         res.view.addEventListener('click', (event: any, item: any) => {
+          const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
+          let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
+          if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
+            const s0 = res.view.scale('concat_0_x');
+            const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
+            if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
+              detailScaleName = 'concat_1_x';
+            }
+          }
+          const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
+
           // If clicked within overview navigator or brush window, ignore seek so brush dragging is uninterrupted!
-          if (item?.mark?.name?.includes('concat_1') || item?.mark?.name?.includes('brush')) {
+          if (item?.mark?.name?.includes('brush') || (isVConcat && item?.mark?.name?.includes('concat_1'))) {
             return;
           }
 
@@ -809,28 +839,17 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               const rect = canvas.getBoundingClientRect();
               const mx = event.clientX - rect.left;
               const my = event.clientY - rect.top;
-              const origin = typeof res.view.origin === 'function' ? res.view.origin() : [0, 0];
-              const originX = origin[0] || 0;
-              const originY = origin[1] || 0;
+              const [originX, originY] = getVegaViewPlotOrigin(res.view);
 
-              const scaleNames = Object.keys((res.view as any)._runtime?.scales || {});
-              let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k => scaleNames.includes(k));
-              if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
-                const s0 = res.view.scale('concat_0_x');
-                const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
-                if (d0 && typeof d0[0] === 'number' && d0[0] < -0.1) {
-                  detailScaleName = 'concat_1_x';
-                }
-              }
-
-              const isVConcat = Boolean(scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x');
               const sgRoot = (res.view as any).scenegraph?.()?.root?.items?.[0];
               const detailGroup = isVConcat
-                ? (sgRoot?.items?.[0]?.items?.[0] || sgRoot?.items?.[0])
+                ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
                 : detailScaleName === 'concat_1_x'
-                ? (sgRoot?.items?.[1]?.items?.[0] || sgRoot?.items?.[1])
+                ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
                 : sgRoot;
-              const detailWidth = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
+              const sc = detailScaleName ? res.view.scale(detailScaleName) : null;
+              const fallbackDetailWidth = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
+              const detailWidth = getScaleRangeSpan(sc, fallbackDetailWidth);
               const detailHeight = detailGroup?.height ?? (isVConcat ? 220 : typeof res.view.height === 'function' && res.view.height() > 0 ? res.view.height() : 300);
               const detailGroupX = originX + (detailGroup?.x ?? 0);
               const detailGroupY = originY + (detailGroup?.y ?? 0);
@@ -842,20 +861,17 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 my >= detailGroupY &&
                 my <= detailGroupY + detailHeight
               ) {
-                if (detailScaleName) {
-                  const sc = res.view.scale(detailScaleName);
-                  if (sc && typeof sc.invert === 'function') {
-                    const clickedCoord = sc.invert(mx - detailGroupX);
-                    if (typeof clickedCoord === 'number' && !isNaN(clickedCoord)) {
-                      let clickedTime = clickedCoord;
-                      if (detailScaleName.includes('tick') || extentType?.includes('tick') || extentType?.includes('midi')) {
-                        clickedTime = clickedCoord / 960;
-                      } else if (detailScaleName.includes('quarter') || extentType?.includes('quarter') || extentType?.includes('score')) {
-                        clickedTime = clickedCoord * 0.5;
-                      }
-                      handleSeek(clickedTime);
-                      return;
+                if (sc && typeof sc.invert === 'function') {
+                  const clickedCoord = sc.invert(mx - detailGroupX);
+                  if (typeof clickedCoord === 'number' && !isNaN(clickedCoord)) {
+                    let clickedTime = clickedCoord;
+                    if (detailScaleName?.includes('tick') || extentType?.includes('tick') || extentType?.includes('midi')) {
+                      clickedTime = clickedCoord / 960;
+                    } else if (detailScaleName?.includes('quarter') || extentType?.includes('quarter') || extentType?.includes('score')) {
+                      clickedTime = clickedCoord * 0.5;
                     }
+                    handleSeek(clickedTime);
+                    return;
                   }
                 }
               }
@@ -889,7 +905,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         vegaResultRef.current = null;
       }
     };
-  }, [vegaSpec, duration]);
+  }, [vegaSpec, handleSeek]);
 
   // Media Linking Logic
   const handleProcessMediaFile = async (file: File) => {
@@ -919,16 +935,18 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
       audioEl.onloadedmetadata = () => {
         const dur = audioEl.duration;
+        const validDur = isNaN(dur) ? undefined : dur;
         setLinkedMedia({
           type: 'audio',
           file,
           url,
           name: file.name,
           size: file.size,
-          duration: isNaN(dur) ? undefined : dur,
+          duration: validDur,
           audioBuffer,
         });
-        audioPlayerRef.current?.setLinkedAudioElement(audioEl);
+        audioPlayerRef.current?.setLinkedAudioElement(audioEl, validDur);
+        updatePlayheadRef.current(currentTimeRef.current);
       };
 
       // Fallback if metadata already ready
@@ -941,6 +959,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
         audioBuffer,
       });
       audioPlayerRef.current?.setLinkedAudioElement(audioEl);
+      updatePlayheadRef.current(currentTimeRef.current);
     } else if (check.mediaType === 'image') {
       setLinkedMedia({
         type: 'image',
@@ -1015,7 +1034,8 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       duration: demo.duration,
       audioBuffer,
     });
-    audioPlayerRef.current?.setLinkedAudioElement(audioEl);
+    audioPlayerRef.current?.setLinkedAudioElement(audioEl, demo.duration);
+    updatePlayheadRef.current(currentTimeRef.current);
   };
 
   const handleUnlinkMedia = () => {

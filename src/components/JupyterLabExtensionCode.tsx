@@ -265,138 +265,95 @@ export class BOPPWidgetFactory extends DocumentRegistry.ABCWidgetFactory<BOPPWid
     },
     package: {
       filename: 'package.json',
-      desc: 'npm package manifest defining JupyterLab 4 / 3 extension metadata, scripts, and dependencies.',
+      desc: 'npm package manifest defining JupyterLab 4 extension metadata, scripts, and dependencies.',
       code: `{
   "name": "jupyterlab-bopp",
   "version": "1.0.0",
-  "description": "JupyterLab plugin to visualize BOPP JSON & MessagePack files via Vega-Lite without a kernel",
+  "description": "JupyterLab extension and interactive Vega-Lite visualizer for BOPP annotations",
   "keywords": [
     "jupyter",
     "jupyterlab",
-    "jupyterlab-extension",
-    "bopp",
-    "audio-annotation",
-    "vega-lite",
-    "music-information-retrieval"
+    "jupyterlab-extension"
   ],
-  "author": "Brian McFee / BOPP Community",
-  "license": "BSD-3-Clause",
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
-  "style": "style/index.css",
-  "files": [
-    "lib/**/*.{d.ts,eot,gif,html,jpg,js,js.map,json,png,svg,woff2,ttf}",
-    "style/**/*.{css,js,eot,gif,html,jpg,json,png,svg,woff2,ttf}"
-  ],
+  "types": "src/extension/index.ts",
+  "type": "module",
+  "scripts": {
+    "generate:types": "node scripts/generate_types.mjs",
+    "build": "node scripts/generate_types.mjs && vite build && node scripts/build_extension.mjs",
+    "build:prod": "node scripts/generate_types.mjs && vite build && node scripts/build_extension.mjs",
+    "install:extension": "node scripts/generate_types.mjs && vite build && node scripts/build_extension.mjs",
+    "watch": "vite build --watch",
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "preview": "vite preview",
+    "lint": "node scripts/generate_types.mjs && tsc --noEmit",
+    "test": "node scripts/generate_types.mjs && tsx --test test/*.test.ts"
+  },
   "jupyterlab": {
     "extension": true,
-    "outputDir": "jupyterlab_bopp/labextension"
-  },
-  "scripts": {
-    "build": "jlpm build:lib && jlpm build:labextension:dev",
-    "build:prod": "jlpm clean && jlpm build:lib:prod && jlpm build:labextension",
-    "build:labextension": "jupyter labextension build .",
-    "build:labextension:dev": "jupyter labextension build --development True .",
-    "build:lib": "tsc --sourceMap",
-    "build:lib:prod": "tsc",
-    "clean": "jlpm clean:lib && jlpm clean:labextension",
-    "clean:lib": "rimraf lib tsconfig.tsbuildinfo",
-    "clean:labextension": "rimraf jupyterlab_bopp/labextension",
-    "watch": "run-p watch:src watch:labextension",
-    "watch:src": "tsc -w --sourceMap",
-    "watch:labextension": "jupyter labextension watch ."
+    "outputDir": "jupyterlab_bopp/labextension",
+    "webpackConfig": "webpack.config.cjs"
   },
   "dependencies": {
-    "@jupyterlab/application": "^4.0.0",
-    "@jupyterlab/apputils": "^4.0.0",
-    "@jupyterlab/docregistry": "^4.0.0",
-    "@lumino/widgets": "^2.0.0",
-    "@msgpack/msgpack": "^3.1.0",
-    "vega": "^5.25.0",
-    "vega-lite": "^5.16.0",
-    "vega-embed": "^6.22.0"
-  },
-  "devDependencies": {
-    "@jupyterlab/builder": "^4.0.0",
-    "rimraf": "^5.0.0",
-    "npm-run-all": "^4.1.5",
-    "typescript": "~5.2.0"
+    "@jupyterlab/application": "^4.5.11",
+    "@jupyterlab/apputils": "^4.6.11",
+    "@jupyterlab/docregistry": "^4.5.11",
+    "@jupyterlab/rendermime": "^4.5.11",
+    "@jupyterlab/rendermime-interfaces": "^3.13.11",
+    "@lumino/widgets": "^2.10.0",
+    "@msgpack/msgpack": "^3.1.3",
+    "vega": "^6.4.0",
+    "vega-embed": "^7.3.0",
+    "vega-lite": "^6.4.3"
   }
 }
 `,
     },
     readme: {
       filename: 'README.md',
-      desc: 'Building, packaging, local installation, and usage instructions for JupyterLab.',
+      desc: 'Building, packaging, local installation, and usage instructions for Web Demo, JupyterLab 4, and boppview CLI.',
       code: `# jupyterlab-bopp
 
-An interactive file viewer plugin for **BOPP** ([Bounded Observation Payload Protocol](https://github.com/bmcfee/bopp)) data in **JupyterLab**.
+Interactive Vega-Lite v6 visualizer, JupyterLab 4 extension, and standalone CLI (\`boppview\`) for **BOPP** ([Bounded Observation Payload Protocol](https://github.com/bmcfee/bopp)) annotations.
 
-## Features
-
-- **No Backend Kernel Required**: Double-click any \`.bopp\`, \`.bopp.msgpack\`, or \`.bopp.json\` file directly in JupyterLab. Renders client-side via Vega-Lite without a Python kernel.
-- **MessagePack & JSON Support**: High-performance client-side decoding of MessagePack binary and JSON structures.
-- **Vega-Lite Compositions**: Maps extents (intervals, time-frequency boxes, score quarters, global) with payloads (chords, 24-tonic key modulations, radial circle-of-fifths, MIDI piano roll, F0 contours).
-- **Interactive Audio Sonification**: Preview chord progressions, beats, and pitch contours with the Web Audio API.
-
-## Building & Installing Locally
-
-### Prerequisites
-- Python >= 3.8
-- JupyterLab >= 4.0.0
-- Node.js >= 18.0.0 and jlpm
+## 1. Interactive Web Demo App
 
 \`\`\`bash
-pip install "jupyterlab>=4.0.0" build hatchling
+npm install
+npm run dev       # http://localhost:3000
+npm run build     # Production SPA bundle in dist/
 \`\`\`
 
-### Option 1: Local Development Installation (Editable)
+## 2. JupyterLab 4 Extension & Python Package
+
+### Option A: Install from Source (Local Use or Development)
 \`\`\`bash
-# Install package in editable mode
+npm install
+npm run build
 pip install -e .
-
-# Symlink labextension assets into JupyterLab environment
-jupyter labextension develop . --overwrite
-
-# Build the extension TypeScript library
-jlpm run build
-
-# Verify installation
 jupyter labextension list
 \`\`\`
 
-### Option 2: Build & Package Standalone Python Wheel (.whl)
+### Option B: Build & Install a Standalone Python Wheel (.whl)
 \`\`\`bash
-# 1. Clean previous build output
-jlpm clean
-
-# 2. Build production assets
-jlpm build:prod
-
-# 3. Build Python distribution packages (wheel and tar.gz)
 python -m build
-
-# 4. Install the packaged wheel locally
 pip install dist/jupyterlab_bopp-1.0.0-py3-none-any.whl
-
-# 5. Verify the extension is active
 jupyter labextension list
 \`\`\`
 
-### Live Development Watch Mode
-\`\`\`bash
-# In terminal 1: Watch TypeScript source files
-jlpm watch
-
-# In terminal 2: Run JupyterLab in watch mode
-jupyter lab --watch
-\`\`\`
-
-### Launch JupyterLab
+Launch JupyterLab and double-click any \`.bopp\`, \`.bopp.json\`, \`.bopp.msgpack\`, or \`.msgpack\` file:
 \`\`\`bash
 jupyter lab
 \`\`\`
-Double-click any \`.bopp\` or \`.bopp.msgpack\` file to launch the interactive viewer!
+
+## 3. Standalone CLI Viewer (boppview)
+
+Installed automatically with the Python package—no JupyterLab server required:
+\`\`\`bash
+boppview chord_annotations.bopp
+boppview beats.bopp.json --port 8080 --theme dark
+boppview melody.msgpack --no-browser
+\`\`\`
 `,
     },
   };

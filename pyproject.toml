@@ -52,13 +52,14 @@ ensured-targets = [
     "jupyterlab_bopp/labextension/package.json",
     "jupyterlab_bopp/labextension/install.json",
 ]
+skip-if-exists = ["jupyterlab_bopp/labextension/package.json"]
 
 [tool.hatch.build.hooks.jupyter-builder.build-kwargs]
 build_cmd = "build:prod"
-npm = ["jlpm"]
+npm = ["npm"]
 
 [tool.hatch.build.hooks.jupyter-builder.editable-build-kwargs]
 build_cmd = "install:extension"
-npm = ["jlpm"]
+npm = ["npm"]
 source_dir = "src"
 build_dir = "jupyterlab_bopp/labextension"

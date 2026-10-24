@@ -473,13 +473,13 @@ export function computeSummaryStats(annotation: BoppAnnotation, records: Tabular
       // Standard 480 PPQ @ 120 BPM -> 960 ticks per second
       const startSec = r.tick / 960;
       minTime = minTime === null ? startSec : Math.min(minTime, startSec);
-      const durSec = typeof r.duration === 'number' ? r.duration / 960 : 0.25;
+      const durSec = typeof r.duration === 'number' ? r.duration / 960 : 0;
       maxTime = maxTime === null ? startSec + durSec : Math.max(maxTime, startSec + durSec);
     } else if (typeof r.quarter === 'number') {
       // 120 BPM -> 0.5s per quarter note
       const startSec = r.quarter * 0.5;
       minTime = minTime === null ? startSec : Math.min(minTime, startSec);
-      const durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0.5;
+      const durSec = typeof r.duration === 'number' ? r.duration * 0.5 : 0;
       maxTime = maxTime === null ? startSec + durSec : Math.max(maxTime, startSec + durSec);
     }
   }

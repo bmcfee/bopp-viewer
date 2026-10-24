@@ -25,7 +25,7 @@ import {
   registerMirEvalSchemes,
 } from './mirEvalColors';
 import {
-  ConfidenceChannelMode,
+  type ConfidenceChannelMode,
   buildIntervalConfidenceLayers,
   buildInstantaneousConfidenceLayers,
   buildVarianceErrorBarLayers,
@@ -58,6 +58,42 @@ export interface VegaLiteBuilderOptions {
   chartWidth?: number | string;
   chartHeight?: number;
   forceMultiRow?: boolean; // When true, flips disjoint interval plots to multi-row overlapping display style
+}
+
+/**
+ * Compute the total pixel origin [originX, originY] of the Vega scenegraph
+ * within its rendered <canvas> or <svg>.
+ * Vega's `view.origin()` returns only `view._origin` and omits `view.padding()`,
+ * whereas Vega's canvas renderer translates by `[padding.left + origin[0], padding.top + origin[1]]`.
+ */
+export function getVegaViewPlotOrigin(view: any): [number, number] {
+  const origin = typeof view?.origin === 'function' ? view.origin() : [0, 0];
+  const pad = typeof view?.padding === 'function' ? view.padding() : { left: 0, top: 0 };
+  const ox = (typeof origin?.[0] === 'number' ? origin[0] : 0) + (typeof pad?.left === 'number' ? pad.left : 0);
+  const oy = (typeof origin?.[1] === 'number' ? origin[1] : 0) + (typeof pad?.top === 'number' ? pad.top : 0);
+  return [ox, oy];
+}
+
+/**
+ * Resolve a sub-view group item from the root Vega scenegraph item by mark name
+ * (e.g. 'concat_0_group' or 'concat_1_group'), falling back to index if unnamed.
+ */
+export function resolveVegaGroupItem(sgRoot: any, groupName: string, fallbackIndex: number): any {
+  if (!sgRoot || !Array.isArray(sgRoot.items)) return sgRoot;
+  const namedMark = sgRoot.items.find((m: any) => m?.name === groupName);
+  const targetMark = namedMark || sgRoot.items[fallbackIndex];
+  return targetMark?.items?.[0] || targetMark || sgRoot;
+}
+
+export function getScaleRangeSpan(scale: any, fallbackWidth: number): number {
+  if (typeof scale?.range === 'function') {
+    const rng = scale.range();
+    if (Array.isArray(rng) && rng.length >= 2 && typeof rng[0] === 'number' && typeof rng[rng.length - 1] === 'number') {
+      const span = Math.abs(rng[rng.length - 1] - rng[0]);
+      if (span > 0) return span;
+    }
+  }
+  return fallbackWidth;
 }
 
 /**
@@ -445,7 +481,7 @@ export function buildBoppVegaLiteSpec(
               field: xField,
               type: 'quantitative',
               title: xTitle,
-              scale: { domain: [minXVal, maxXVal] },
+              scale: { domain: [minXVal, maxXVal], nice: false },
               ...(ol.encoding?.x?.axis ? { axis: ol.encoding.x.axis } : {}),
             },
           },

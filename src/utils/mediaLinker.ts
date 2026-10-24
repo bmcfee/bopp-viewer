@@ -192,25 +192,35 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   const sampleRate = 22050;
   const extentType = annotation.extent?.extent_type;
   const payloadType = annotation.payload.payload_type;
+  const records = annotationToTabular(annotation);
+
+  const getRecordStartSec = (r: any): number => {
+    if (typeof r?.time === 'number' && isFinite(r.time)) return r.time;
+    if (typeof r?.tick === 'number' && isFinite(r.tick)) return r.tick / 960;
+    if (typeof r?.quarter === 'number' && isFinite(r.quarter)) return r.quarter * 0.5;
+    return 0;
+  };
+
+  const getRecordExplicitDurSec = (r: any): number => {
+    if (typeof r?.duration !== 'number' || !isFinite(r.duration)) return 0;
+    if (typeof r?.tick === 'number') return r.duration / 960;
+    if (typeof r?.quarter === 'number') return r.duration * 0.5;
+    return r.duration;
+  };
+
+  let timelineMaxSec = 0;
+  for (const r of records) {
+    const endSec = getRecordStartSec(r) + getRecordExplicitDurSec(r);
+    if (endSec > timelineMaxSec) {
+      timelineMaxSec = endSec;
+    }
+  }
 
   // 1. Time-Frequency Boxes (e.g. Bioacoustics / Birds)
   if (extentType === 'time_frequency_box') {
-    const times = annotation.extent?.time || [];
-    const durations = annotation.extent?.duration || [];
-    const fmins = annotation.extent?.freq_min || [];
-    const fmaxs = annotation.extent?.freq_max || [];
-    const payloadObj = annotation.payload as any;
-    const tags = Array.isArray(payloadObj.value) ? payloadObj.value : [];
+    const totalDuration = timelineMaxSec > 0 ? timelineMaxSec : 12.0;
 
-    let totalDuration = 12.0;
-    for (let i = 0; i < times.length; i++) {
-      const end = (times[i] || 0) + (durations[i] || 0);
-      if (end > totalDuration) totalDuration = end;
-    }
-    const tfMaxTime = Math.max(12.0, Math.ceil(totalDuration + 0.5));
-    totalDuration = tfMaxTime;
-
-    const numSamples = Math.floor(sampleRate * totalDuration);
+    const numSamples = Math.max(1, Math.floor(sampleRate * totalDuration));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -238,12 +248,13 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
       let sampleVal = 0;
 
       // Find any active bird calls at this moment
-      for (let k = 0; k < times.length; k++) {
-        const boxStart = times[k] || 0;
-        const boxDur = durations[k] || 1;
-        const boxFmin = fmins[k] || 1000;
-        const boxFmax = fmaxs[k] || 4000;
-        const tag = String(tags[k] || '').toLowerCase();
+      for (let k = 0; k < records.length; k++) {
+        const r = records[k];
+        const boxStart = getRecordStartSec(r);
+        const boxDur = getRecordExplicitDurSec(r) || 1;
+        const boxFmin = typeof r.freq_min === 'number' ? r.freq_min : 1000;
+        const boxFmax = typeof r.freq_max === 'number' ? r.freq_max : 4000;
+        const tag = String(r.value ?? '').toLowerCase();
 
         if (t >= boxStart && t < boxStart + boxDur) {
           const relT = (t - boxStart) / boxDur; // 0 to 1
@@ -295,15 +306,9 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
   // 2. Pitch Contour (Continuous Vocal F0) - Strictly Sonifies Voiced Segments
   if (payloadType === 'pitch_contour') {
-    const rawValues = Array.isArray(annotation.payload.value) ? annotation.payload.value : [];
-    let maxT = 3.5;
-    const extentObj = annotation.extent as any;
-    const timeArr = extentObj?.time && Array.isArray(extentObj.time) ? extentObj.time : [];
-    if (timeArr.length > 0) {
-      maxT = Math.max(...timeArr) + 0.1;
-    }
+    const maxT = timelineMaxSec > 0 ? timelineMaxSec : 3.5;
 
-    const numSamples = Math.floor(sampleRate * maxT);
+    const numSamples = Math.max(1, Math.floor(sampleRate * maxT));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -332,14 +337,22 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     for (let i = 0; i < numSamples; i++) {
       const t = i / sampleRate;
 
-      // Find closest time point in extent
-      while (timePtr < timeArr.length - 1 && timeArr[timePtr + 1] <= t) {
+      // Find closest time point in records
+      while (timePtr < records.length - 1 && getRecordStartSec(records[timePtr + 1]) <= t) {
         timePtr++;
       }
-      const pt = rawValues[timePtr] as any;
-      const freq = (pt && typeof pt.frequency === 'number') ? pt.frequency : 440;
-      // Strictly voiced: only sonify when voicing is active!
-      const isVoiced = pt?.voicing === 1 || pt?.voicing === true;
+      const pt = records[timePtr];
+      const freq = typeof pt?.frequency === 'number'
+        ? pt.frequency
+        : typeof pt?.value === 'number'
+        ? pt.value
+        : 440;
+      const rawVoicing = pt?.voicing ?? (pt as any)?.voiced;
+      const isVoiced =
+        rawVoicing === 1 ||
+        rawVoicing === true ||
+        (typeof rawVoicing === 'number' && rawVoicing >= 0.5) ||
+        (typeof rawVoicing === 'string' && ['voiced', 'true', '1', 'v'].includes(rawVoicing.toLowerCase().trim()));
 
       let sampleVal = 0;
       if (isVoiced && freq >= 40 && freq <= 3200) {
@@ -363,36 +376,28 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     };
   }
 
-  // 3. MIDI Notes (e.g. Bach Invention in ticks or Mozart in seconds)
+  // 3. MIDI Notes (e.g. Bach Invention in ticks or Mozart in score quarters / seconds)
   if (payloadType === 'note_midi') {
     const isMidiTicks = extentType?.includes('midi') || extentType?.includes('tick');
-    const extentObj = annotation.extent as any;
-    const ticks = isMidiTicks ? (extentObj?.tick || []) : (extentObj?.time || []);
-    const durations = extentObj?.duration || [];
-    const midiNotes = Array.isArray(annotation.payload.value) ? annotation.payload.value : [];
+    const notes: { t: number; d: number; freq: number }[] = [];
 
-    const notes = [];
-    let maxNoteEnd = 4.0;
-
-    for (let k = 0; k < midiNotes.length; k++) {
-      const rawNote = midiNotes[k];
+    for (let k = 0; k < records.length; k++) {
+      const r = records[k];
+      const rawNote = r.value;
       const midi: number = typeof rawNote === 'number'
         ? rawNote
         : typeof rawNote === 'string'
         ? (noteNameToMidi(rawNote) ?? 60)
         : 60;
       const freq = 440 * Math.pow(2, (midi - 69) / 12);
-      // Standard 480 PPQ @ 120 BPM: 960 ticks per sec
-      const startSec = isMidiTicks ? (ticks[k] || 0) / 960 : (ticks[k] || 0);
-      const durSec = isMidiTicks ? (durations[k] || 240) / 960 : (durations[k] || 0.5);
+      const startSec = getRecordStartSec(r);
+      const explicitDur = getRecordExplicitDurSec(r);
+      const durSec = explicitDur > 0 ? explicitDur : 0.25;
       notes.push({ t: startSec, d: durSec, freq });
-      if (startSec + durSec > maxNoteEnd) {
-        maxNoteEnd = startSec + durSec;
-      }
     }
-    maxNoteEnd += 0.5;
+    const maxNoteEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.floor(sampleRate * maxNoteEnd);
+    const numSamples = Math.max(1, Math.floor(sampleRate * maxNoteEnd));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -441,14 +446,7 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   }
 
   // 4. Chords (Harmonic Progressions matching exact annotation timestamps)
-  if (payloadType === 'chord') {
-    const isMidiTicks = extentType?.includes('midi') || extentType?.includes('tick');
-    const isScoreQuarters = extentType?.includes('score') || extentType?.includes('quarter');
-    const extentObj = annotation.extent as any;
-    const rawTimes = isMidiTicks ? (extentObj?.tick || []) : isScoreQuarters ? (extentObj?.quarter || []) : (extentObj?.time || []);
-    const rawDurations = extentObj?.duration || [];
-    const chordValues = Array.isArray(annotation.payload.value) ? annotation.payload.value : [];
-
+  if (payloadType === 'chord' && records.length > 0) {
     const rootPitchMap: Record<string, number> = {
       C: 48, 'C#': 49, Db: 49, D: 50, 'D#': 51, Eb: 51, E: 52, F: 53,
       'F#': 54, Gb: 54, G: 55, 'G#': 56, Ab: 56, A: 57, 'A#': 58, Bb: 58, B: 59,
@@ -460,24 +458,20 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
       freqs: number[];
     }
     const chordEvents: ChordEvent[] = [];
-    let maxChordEnd = 4.0;
 
-    for (let k = 0; k < chordValues.length; k++) {
-      const chordStr = String(chordValues[k] || '');
+    for (let k = 0; k < records.length; k++) {
+      const r = records[k];
+      const chordStr = String(r.value || '');
       if (chordStr === 'N' || chordStr === 'X' || !chordStr) continue;
 
-      let startSec = 0;
-      let durSec = 1.0;
-      if (isMidiTicks) {
-        startSec = (rawTimes[k] || 0) / 960;
-        durSec = (rawDurations[k] || 960) / 960;
-      } else if (isScoreQuarters) {
-        startSec = (rawTimes[k] || 0) * 0.5;
-        durSec = (rawDurations[k] || 2) * 0.5;
-      } else {
-        startSec = rawTimes[k] || 0;
-        durSec = rawDurations[k] || (k < rawTimes.length - 1 ? (rawTimes[k + 1] - startSec) : 1.5);
-      }
+      const startSec = getRecordStartSec(r);
+      const explicitDur = getRecordExplicitDurSec(r);
+      const nextStartSec = k < records.length - 1 ? getRecordStartSec(records[k + 1]) : undefined;
+      const durSec = explicitDur > 0
+        ? explicitDur
+        : typeof nextStartSec === 'number' && nextStartSec > startSec
+        ? nextStartSec - startSec
+        : 0.5;
 
       const match = chordStr.match(/^([A-G][b#]?)(?::(.*))?$/);
       if (!match) continue;
@@ -491,13 +485,10 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
       const freqs = intervals.map(semis => 440 * Math.pow(2, (rootMidi + semis - 69) / 12));
       chordEvents.push({ t: startSec, d: durSec, freqs });
-      if (startSec + durSec > maxChordEnd) {
-        maxChordEnd = startSec + durSec;
-      }
     }
-    maxChordEnd += 0.5;
+    const maxChordEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.floor(sampleRate * maxChordEnd);
+    const numSamples = Math.max(1, Math.floor(sampleRate * maxChordEnd));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -549,12 +540,9 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
   // 5. Beats (Rhythmic Metronome / Pulse matching exact annotation timestamps)
   if (payloadType === 'beat') {
-    const extentObj = annotation.extent as any;
-    const times = extentObj?.time || [];
-    const beatValues = Array.isArray(annotation.payload.value) ? annotation.payload.value : [];
-    let maxBeatEnd = Math.max(4.0, ...times) + 0.6;
+    const maxBeatEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.floor(sampleRate * maxBeatEnd);
+    const numSamples = Math.max(1, Math.floor(sampleRate * maxBeatEnd));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -581,9 +569,9 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
       const t = i / sampleRate;
       let sampleVal = 0;
 
-      for (let k = 0; k < times.length; k++) {
-        const bTime = times[k] || 0;
-        const isDownbeat = beatValues[k] === 1;
+      for (let k = 0; k < records.length; k++) {
+        const bTime = getRecordStartSec(records[k]);
+        const isDownbeat = records[k].value === 1;
         const freq = isDownbeat ? 880 : 440;
         if (t >= bTime && t < bTime + 0.08) {
           const noteT = t - bTime;
@@ -607,11 +595,9 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
   // 6. Onsets (Acoustic Transient Detection Events matching exact timestamps)
   if (payloadType === 'onset') {
-    const extentObj = annotation.extent as any;
-    const times = extentObj?.time || [];
-    let maxOnsetEnd = Math.max(4.0, ...times) + 0.5;
+    const maxOnsetEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.floor(sampleRate * maxOnsetEnd);
+    const numSamples = Math.max(1, Math.floor(sampleRate * maxOnsetEnd));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -638,8 +624,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
       const t = i / sampleRate;
       let sampleVal = 0;
 
-      for (let k = 0; k < times.length; k++) {
-        const oTime = times[k] || 0;
+      for (let k = 0; k < records.length; k++) {
+        const oTime = getRecordStartSec(records[k]);
         if (t >= oTime && t < oTime + 0.06) {
           const noteT = t - oTime;
           const env = Math.exp(-noteT * 70);
@@ -662,19 +648,9 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
   // 7. Tone Frequencies in Hz
   if (payloadType === 'note_hz' || (payloadType as string) === 'hz') {
-    const extentObj = annotation.extent as any;
-    const times = extentObj?.time || [];
-    const durations = extentObj?.duration || [];
-    const payloadObj = annotation.payload as any;
-    const freqs = Array.isArray(payloadObj.value) ? payloadObj.value : [];
-    let maxToneEnd = 4.0;
-    for (let k = 0; k < times.length; k++) {
-      const end = (times[k] || 0) + (durations[k] || 0.5);
-      if (end > maxToneEnd) maxToneEnd = end;
-    }
-    maxToneEnd += 0.5;
+    const maxToneEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
 
-    const numSamples = Math.floor(sampleRate * maxToneEnd);
+    const numSamples = Math.max(1, Math.floor(sampleRate * maxToneEnd));
     const buffer = new ArrayBuffer(44 + numSamples * 2);
     const view = new DataView(buffer);
 
@@ -701,10 +677,10 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
       const t = i / sampleRate;
       let sampleVal = 0;
 
-      for (let k = 0; k < times.length; k++) {
-        const start = times[k] || 0;
-        const dur = durations[k] || 0.5;
-        const f = Number(freqs[k]) || 440;
+      for (let k = 0; k < records.length; k++) {
+        const start = getRecordStartSec(records[k]);
+        const dur = getRecordExplicitDurSec(records[k]) || 0.5;
+        const f = Number(records[k].value) || 440;
         if (t >= start && t < start + dur) {
           const relT = t - start;
           const env = Math.exp(-relT * 2.0) * Math.sin(Math.min(1, relT * 40) * Math.PI * 0.5);
@@ -726,7 +702,7 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   }
 
   // 8. Fallback / Default: Mozart Piano Sonata Motif
-  const durationSec = 11.8;
+  const durationSec = timelineMaxSec > 0 ? timelineMaxSec : 11.8;
   const numSamples = Math.floor(sampleRate * durationSec);
   const buffer = new ArrayBuffer(44 + numSamples * 2);
   const view = new DataView(buffer);
