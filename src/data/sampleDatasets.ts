@@ -271,9 +271,9 @@ const NOTE_NAMES_PIANOROLL_DATA: BoppAnnotation = {
   }
 };
 
-// Piano Roll with Note Frequencies in Hz (C3=130.81, D3=146.83, E3=164.81, G3=196.00, C4=261.63 Hz)
+// Acoustic Note Segments with Frequencies in Hz (130.81, 146.83, 164.81, 196.00, 220.00, 261.63 Hz)
 const FREQUENCY_HZ_PIANOROLL_DATA: BoppAnnotation = {
-  media_id: "audio:frequency_hz_pianoroll",
+  media_id: "audio:frequency_hz_intervals",
   bopp_version: "1.0",
   metadata: {
     metadata_type: "algorithm",
@@ -285,8 +285,8 @@ const FREQUENCY_HZ_PIANOROLL_DATA: BoppAnnotation = {
     },
   },
   sandbox: {
-    piece: "Acoustic Note Segments in Hz (Log Frequency Pitch Axis)",
-    description: "time_interval extent with frequency_hz payload: note pitches in Hz with voiced flags mapped to numerical log-frequency piano roll"
+    piece: "Acoustic Note Segments in Hz (Quantitative Frequency Axis)",
+    description: "time_interval extent with frequency_hz payload: note frequencies in Hz with voiced flags plotted directly on continuous frequency axis in Hz"
   },
   extent: {
     extent_type: "time_interval",
@@ -1733,12 +1733,12 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     data: NOTE_NAMES_PIANOROLL_DATA,
   },
   {
-    id: "interval_frequency_hz_pianoroll",
-    filename: "time_intervals/18_frequency_hz_pianoroll.bopp",
-    title: "Note Frequencies (Hz): Piano Roll (Log Pitch)",
+    id: "interval_frequency_hz_segments",
+    filename: "time_intervals/18_frequency_hz_segments.bopp",
+    title: "Acoustic Note Segments (Frequency in Hz)",
     category: "music",
     format: "json",
-    description: "time_interval extent with frequency_hz payload: note frequencies in Hz mapped to numerical log-frequency semitone axis.",
+    description: "time_interval extent with frequency_hz payload: note frequencies in Hz plotted directly on a quantitative Frequency (Hz) axis with voicing indicators.",
     extentType: "time_interval",
     payloadType: "frequency_hz",
     confidenceType: "likelihood",

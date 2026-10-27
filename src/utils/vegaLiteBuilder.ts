@@ -2744,10 +2744,7 @@ export function buildBoppVegaLiteSpec(
   if (
     payloadType === 'note_midi' ||
     payloadType === 'note' ||
-    (payloadType as string) === 'piano_roll' ||
-    ((payloadType === 'frequency_hz' || payloadType === 'note_hz') &&
-      extentType !== 'time' &&
-      extentType !== 'time_uniform')
+    (payloadType as string) === 'piano_roll'
   ) {
     const { isMidi, isScore, xField: rawXField, xTitle } = resolveExtentAxis(extentType, data, {
       scoreTitle: 'Musical Quarter Notes',
@@ -3657,197 +3654,300 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (Simultaneous 2D Projections)
+  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (Polar Coordinates & DoA vs Time)
   // =========================================================================
   if (extentType === 'spherical' || extentType === 'spherical_time' || extentType === 'spherical_time_interval') {
     const isTemporal = extentType === 'spherical_time' || extentType === 'spherical_time_interval';
-    const colorScale = resolveColorScale(colorScheme, payloadType);
+    const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
+    const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 340;
+    const panelWidth = Math.max(300, Math.floor((totalWidth - 60) / 2));
+    const panelHeight = Math.max(300, totalHeight - 40);
+
+    const maxR = Math.max(...data.map(d => Number(d.radius) || 1), 1);
+    const rLimit = +(maxR * 1.2).toFixed(2);
+    const rStep = +(rLimit / 3).toFixed(2);
+    const ringRadii = [rStep, +(rStep * 2).toFixed(2), rLimit];
+
+    // Background polar grid range rings
+    const ringPoints: { ring: number; x: number; y: number; order: number }[] = [];
+    for (const r of ringRadii) {
+      for (let a = 0; a <= 360; a += 10) {
+        const rad = (a * Math.PI) / 180;
+        ringPoints.push({
+          ring: r,
+          x: +(r * Math.sin(rad)).toFixed(3),
+          y: +(r * Math.cos(rad)).toFixed(3),
+          order: a,
+        });
+      }
+    }
+
+    // Background polar radial spokes
+    const spokePoints: { spoke: number; x: number; y: number; order: number }[] = [];
+    for (const a of [0, 45, 90, 135, 180, 225, 270, 315]) {
+      const rad = (a * Math.PI) / 180;
+      spokePoints.push({ spoke: a, x: 0, y: 0, order: 0 });
+      spokePoints.push({ spoke: a, x: +(rLimit * Math.sin(rad)).toFixed(3), y: +(rLimit * Math.cos(rad)).toFixed(3), order: 1 });
+    }
+
+    // Outer compass direction labels
+    const compassLabels: { text: string; x: number; y: number }[] = [
+      { text: '0° (Front)', x: 0, y: rLimit + 0.15 },
+      { text: '+45°', x: +(rLimit * 0.707 * 1.08).toFixed(2), y: +(rLimit * 0.707 * 1.08).toFixed(2) },
+      { text: '+90° (Right)', x: rLimit + 0.15, y: 0 },
+      { text: '+135°', x: +(rLimit * 0.707 * 1.08).toFixed(2), y: +(-rLimit * 0.707 * 1.08).toFixed(2) },
+      { text: '180° (Back)', x: 0, y: -(rLimit + 0.15) },
+      { text: '-135°', x: +(-rLimit * 0.707 * 1.08).toFixed(2), y: +(-rLimit * 0.707 * 1.08).toFixed(2) },
+      { text: '-90° (Left)', x: -(rLimit + 0.15), y: 0 },
+      { text: '-45°', x: +(-rLimit * 0.707 * 1.08).toFixed(2), y: +(rLimit * 0.707 * 1.08).toFixed(2) },
+    ];
+
     const sphericalTransforms = [
       ...transforms,
       {
-        calculate: 'datum.radius * cos(datum.elevation * PI / 180) * sin(datum.azimuth * PI / 180)',
-        as: '_x_horiz',
+        calculate: 'datum.radius * sin(datum.azimuth * PI / 180)',
+        as: '_x_polar',
       },
       {
-        calculate: 'datum.radius * cos(datum.elevation * PI / 180) * cos(datum.azimuth * PI / 180)',
-        as: '_y_horiz',
+        calculate: 'datum.radius * cos(datum.azimuth * PI / 180)',
+        as: '_y_polar',
       },
     ];
-
-    const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
-    const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 300;
-    const subplotWidth = Math.max(180, Math.floor((totalWidth - 90) / 3));
-    const subplotHeight = Math.max(190, totalHeight - (isTemporal ? 130 : 60));
 
     const hoverConditions = (activeVal: any, defaultVal: any) => ({
       condition: [
         { param: 'obs_hover_sph_1', empty: false, value: activeVal },
         { param: 'obs_hover_sph_2', empty: false, value: activeVal },
-        { param: 'obs_hover_sph_3', empty: false, value: activeVal },
       ],
       value: defaultVal,
     });
 
     const sharedPointEncoding = {
-      size: hoverConditions(220, 75),
-      opacity: hoverConditions(1.0, 0.75),
+      size: hoverConditions(220, 85),
+      opacity: hoverConditions(1.0, 0.8),
       stroke: { value: isDark ? '#ffffff' : '#0f172a' },
       strokeWidth: hoverConditions(2.5, 1.2),
       tooltip: [
         { field: 'value', type: 'nominal', title: 'Observation' },
-        { field: 'azimuth', type: 'quantitative', format: '.1f', title: 'Azimuth (°)' },
-        { field: 'elevation', type: 'quantitative', format: '.1f', title: 'Elevation (°)' },
-        { field: 'radius', type: 'quantitative', format: '.2f', title: 'Radius' },
+        { field: 'azimuth', type: 'quantitative', format: '.1f', title: 'Azimuth θ (°)' },
+        { field: 'elevation', type: 'quantitative', format: '.1f', title: 'Elevation φ (°)' },
+        { field: 'radius', type: 'quantitative', format: '.2f', title: 'Radius r (meters)' },
         ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
         ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
       ],
     };
 
-    // Subplot 1: Horizontal Plan View (Polar Projection: X_horiz vs Y_horiz)
-    const planView: Record<string, unknown> = {
-      title: { text: 'Horizontal Plan View (Polar Projection)', color: textColor, fontSize: 11 },
-      width: subplotWidth,
-      height: subplotHeight,
+    // Panel 1: Traditional Polar Soundfield Map
+    const polarPanel: Record<string, unknown> = {
+      title: { text: 'Polar Soundfield Plan (Azimuth θ & Radius r)', color: textColor, fontSize: 12 },
+      width: panelWidth,
+      height: panelHeight,
       layer: [
+        // Concentric range rings
         {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
+          data: { values: ringPoints },
+          mark: { type: 'line', strokeDash: [3, 3], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.35 },
           encoding: {
-            x: { field: '_x_horiz', type: 'quantitative', title: 'Horizontal X (r·cosφ·sinθ)' },
-            y: { field: '_y_horiz', type: 'quantitative', title: 'Horizontal Y (r·cosφ·cosθ)' },
+            x: {
+              field: 'x',
+              type: 'quantitative',
+              title: 'Lateral Distance (meters: r · sin θ)',
+              scale: { domain: [-rLimit * 1.3, rLimit * 1.3] },
+            },
+            y: {
+              field: 'y',
+              type: 'quantitative',
+              title: 'Frontal Distance (meters: r · cos θ)',
+              scale: { domain: [-rLimit * 1.3, rLimit * 1.3] },
+            },
+            detail: { field: 'ring', type: 'nominal' },
+            order: { field: 'order', type: 'quantitative' },
+          },
+        },
+        // Radial compass spokes
+        {
+          data: { values: spokePoints },
+          mark: { type: 'line', strokeDash: [2, 2], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.25 },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            y: { field: 'y', type: 'quantitative' },
+            detail: { field: 'spoke', type: 'nominal' },
+            order: { field: 'order', type: 'quantitative' },
+          },
+        },
+        // Compass perimeter direction labels
+        {
+          data: { values: compassLabels },
+          mark: { type: 'text', fontSize: 10, fontWeight: 'bold', fill: isDark ? '#94a3b8' : '#64748b', align: 'center', baseline: 'middle' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            y: { field: 'y', type: 'quantitative' },
+            text: { field: 'text', type: 'nominal' },
+          },
+        },
+        // Sound source trajectory path in polar space
+        {
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.6, stroke: isDark ? '#38bdf8' : '#0284c7' },
+          encoding: {
+            x: { field: '_x_polar', type: 'quantitative' },
+            y: { field: '_y_polar', type: 'quantitative' },
             order: { field: '__index', type: 'quantitative' },
           },
         },
+        // Observation points colored by Elevation φ (Altitude)
         {
           params: [
             { name: 'obs_hover_sph_1', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
           ],
           mark: { type: 'circle' },
           encoding: {
-            x: { field: '_x_horiz', type: 'quantitative', title: 'Horizontal X (r·cosφ·sinθ)' },
-            y: { field: '_y_horiz', type: 'quantitative', title: 'Horizontal Y (r·cosφ·cosθ)' },
-            color: { field: 'value', type: 'nominal', scale: colorScale, title: 'Observation' },
+            x: { field: '_x_polar', type: 'quantitative' },
+            y: { field: '_y_polar', type: 'quantitative' },
+            color: {
+              field: 'elevation',
+              type: 'quantitative',
+              title: 'Elevation φ (°)',
+              scale: { domain: [-90, 90], scheme: 'spectral' },
+            },
             ...sharedPointEncoding,
           },
         },
       ],
     };
 
-    // Subplot 2: Direction of Arrival Map (Azimuth vs Elevation)
-    const doaView: Record<string, unknown> = {
-      title: { text: 'Direction of Arrival (DoA Map)', color: textColor, fontSize: 11 },
-      width: subplotWidth,
-      height: subplotHeight,
-      layer: [
-        {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
-          encoding: {
-            x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ [-180°, +180°)', scale: { domain: [-180, 180] } },
-            y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ [-90°, +90°]', scale: { domain: [-90, 90] } },
-            order: { field: '__index', type: 'quantitative' },
+    // Panel 2: Direction of Arrival Angles vs Time (or DoA Map)
+    let panel2: Record<string, unknown>;
+    if (isTemporal) {
+      panel2 = {
+        title: { text: 'Direction of Arrival (DoA) & Elevation vs Time', color: textColor, fontSize: 12 },
+        width: panelWidth,
+        height: panelHeight,
+        layer: [
+          // Horizon reference line at 0 degrees
+          {
+            mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.45 },
+            encoding: { y: { datum: 0 } },
           },
-        },
-        {
-          params: [
-            { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-          ],
-          mark: { type: 'circle' },
-          encoding: {
-            x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ [-180°, +180°)', scale: { domain: [-180, 180] } },
-            y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ [-90°, +90°]', scale: { domain: [-90, 90] } },
-            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
-            ...sharedPointEncoding,
+          // Multi-line trajectory for Azimuth and Elevation
+          {
+            transform: [
+              { fold: ['azimuth', 'elevation'], as: ['angle_type', 'angle_deg'] },
+            ],
+            mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
+            encoding: {
+              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+              y: { field: 'angle_deg', type: 'quantitative', title: 'Angle (degrees [°])', scale: { domain: [-185, 185] } },
+              color: {
+                field: 'angle_type',
+                type: 'nominal',
+                title: 'Direction',
+                scale: { domain: ['azimuth', 'elevation'], range: ['#38bdf8', '#f59e0b'] },
+              },
+            },
           },
-        },
-      ],
-    };
-
-    // Subplot 3: Elevation Profile (Radius vs Elevation)
-    const profileView: Record<string, unknown> = {
-      title: { text: 'Elevation Profile (Radius vs Elevation)', color: textColor, fontSize: 11 },
-      width: subplotWidth,
-      height: subplotHeight,
-      layer: [
-        {
-          mark: { type: 'rule', strokeDash: [4, 4], opacity: 0.35, stroke: isDark ? '#94a3b8' : '#64748b' },
-          encoding: { y: { datum: 0 } },
-        },
-        {
-          params: [
-            { name: 'obs_hover_sph_3', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-          ],
-          mark: { type: 'circle' },
-          encoding: {
-            x: { field: 'radius', type: 'quantitative', title: 'Radius r (> 0)' },
-            y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ [-90°, +90°]', scale: { domain: [-90, 90] } },
-            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
-            ...sharedPointEncoding,
+          // Linked observation points
+          {
+            params: [
+              { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+            ],
+            mark: { type: 'circle' },
+            encoding: {
+              x: { field: 'time', type: 'quantitative' },
+              y: { field: 'azimuth', type: 'quantitative' },
+              color: { value: '#38bdf8' },
+              ...sharedPointEncoding,
+            },
           },
-        },
-      ],
-    };
-
-    const sphericalTitle = {
-      text: `BOPP Spherical Coordinates Trajectory: ${annotation.media_id}`,
-      color: textColor,
-    };
+        ],
+      };
+    } else {
+      panel2 = {
+        title: { text: 'Direction of Arrival Map (Azimuth vs Elevation)', color: textColor, fontSize: 12 },
+        width: panelWidth,
+        height: panelHeight,
+        layer: [
+          {
+            mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.45 },
+            encoding: { y: { datum: 0 } },
+          },
+          {
+            mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
+            encoding: {
+              x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ (degrees [-180°, +180°))', scale: { domain: [-180, 180] } },
+              y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ (degrees [-90°, +90°])', scale: { domain: [-90, 90] } },
+              order: { field: '__index', type: 'quantitative' },
+            },
+          },
+          {
+            params: [
+              { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+            ],
+            mark: { type: 'circle' },
+            encoding: {
+              x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ (degrees [-180°, +180°))', scale: { domain: [-180, 180] } },
+              y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ (degrees [-90°, +90°])', scale: { domain: [-90, 90] } },
+              color: { field: 'radius', type: 'quantitative', title: 'Radius r (m)', scale: { scheme: 'viridis' } },
+              ...sharedPointEncoding,
+            },
+          },
+        ],
+      };
+    }
 
     return {
       $schema: VEGA_LITE_SCHEMA,
-      title: sphericalTitle,
+      title: { text: `BOPP Spherical Polar Coordinates: ${annotation.media_id}`, color: textColor },
       data: { values: data },
       transform: sphericalTransforms,
       config: baseConfig,
-      hconcat: [planView, doaView, profileView],
+      hconcat: [polarPanel, panel2],
     };
   }
 
   // =========================================================================
-  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (Simultaneous 2D Projections)
+  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (Planar Trajectory & Time Profile)
   // =========================================================================
   if (extentType === 'cartesian' || extentType === 'cartesian_time' || extentType === 'cartesian_time_interval') {
     const isTemporal = extentType === 'cartesian_time' || extentType === 'cartesian_time_interval';
-    const colorScale = resolveColorScale(colorScheme, payloadType);
-
     const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
-    const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 300;
-    const subplotWidth = Math.max(180, Math.floor((totalWidth - 90) / 3));
-    const subplotHeight = Math.max(190, totalHeight - (isTemporal ? 130 : 60));
+    const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 340;
+    const panelWidth = Math.max(300, Math.floor((totalWidth - 60) / 2));
+    const panelHeight = Math.max(300, totalHeight - 40);
 
     const hoverConditions = (activeVal: any, defaultVal: any) => ({
       condition: [
         { param: 'obs_hover_cart_1', empty: false, value: activeVal },
         { param: 'obs_hover_cart_2', empty: false, value: activeVal },
-        { param: 'obs_hover_cart_3', empty: false, value: activeVal },
       ],
       value: defaultVal,
     });
 
     const sharedPointEncoding = {
-      size: hoverConditions(220, 75),
-      opacity: hoverConditions(1.0, 0.75),
+      size: hoverConditions(220, 85),
+      opacity: hoverConditions(1.0, 0.8),
       stroke: { value: isDark ? '#ffffff' : '#0f172a' },
       strokeWidth: hoverConditions(2.5, 1.2),
       tooltip: [
         { field: 'value', type: 'nominal', title: 'Observation' },
-        { field: 'x', type: 'quantitative', format: '.2f', title: 'X' },
-        { field: 'y', type: 'quantitative', format: '.2f', title: 'Y' },
-        { field: 'z', type: 'quantitative', format: '.2f', title: 'Z' },
+        { field: 'x', type: 'quantitative', format: '.2f', title: 'Lateral Position X (m)' },
+        { field: 'y', type: 'quantitative', format: '.2f', title: 'Forward Position Y (m)' },
+        { field: 'z', type: 'quantitative', format: '.2f', title: 'Vertical Height Z (m)' },
         ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
         ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
       ],
     };
 
-    // Subplot 1: Top View (XY Plane)
-    const topView: Record<string, unknown> = {
-      title: { text: 'Top View (XY Plane)', color: textColor, fontSize: 11 },
-      width: subplotWidth,
-      height: subplotHeight,
+    // Panel 1: Planar Trajectory Map (X vs Y colored by Z)
+    const mapPanel: Record<string, unknown> = {
+      title: { text: 'Spatial Trajectory (X vs Y Plane)', color: textColor, fontSize: 12 },
+      width: panelWidth,
+      height: panelHeight,
       layer: [
         {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.5, stroke: isDark ? '#94a3b8' : '#64748b' },
           encoding: {
-            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
-            y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+            x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+            y: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)' },
             order: { field: '__index', type: 'quantitative' },
           },
         },
@@ -3857,221 +3957,325 @@ export function buildBoppVegaLiteSpec(
           ],
           mark: { type: 'circle' },
           encoding: {
-            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
-            y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
-            color: { field: 'value', type: 'nominal', scale: colorScale, title: 'Observation' },
+            x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+            y: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)' },
+            color: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)', scale: { scheme: 'turbo' } },
             ...sharedPointEncoding,
           },
         },
       ],
     };
 
-    // Subplot 2: Front View (XZ Plane)
-    const frontView: Record<string, unknown> = {
-      title: { text: 'Front View (XZ Plane)', color: textColor, fontSize: 11 },
-      width: subplotWidth,
-      height: subplotHeight,
-      layer: [
-        {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
-          encoding: {
-            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
-            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
-            order: { field: '__index', type: 'quantitative' },
+    let panel2: Record<string, unknown>;
+    if (isTemporal) {
+      // Panel 2: 3D Coordinate Trajectories vs Time (X(t), Y(t), Z(t))
+      panel2 = {
+        title: { text: '3D Coordinates vs Time (X, Y, Z)', color: textColor, fontSize: 12 },
+        width: panelWidth,
+        height: panelHeight,
+        layer: [
+          {
+            mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.4 },
+            encoding: { y: { datum: 0 } },
           },
-        },
-        {
-          params: [
-            { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-          ],
-          mark: { type: 'circle' },
-          encoding: {
-            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
-            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
-            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
-            ...sharedPointEncoding,
+          {
+            transform: [
+              { fold: ['x', 'y', 'z'], as: ['coord', 'pos'] },
+            ],
+            mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
+            encoding: {
+              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+              y: { field: 'pos', type: 'quantitative', title: 'Position (meters)' },
+              color: {
+                field: 'coord',
+                type: 'nominal',
+                title: 'Coordinate',
+                scale: { domain: ['x', 'y', 'z'], range: ['#06b6d4', '#f59e0b', '#10b981'] },
+              },
+            },
           },
-        },
-      ],
-    };
-
-    // Subplot 3: Side View (YZ Plane)
-    const sideView: Record<string, unknown> = {
-      title: { text: 'Side View (YZ Plane)', color: textColor, fontSize: 11 },
-      width: subplotWidth,
-      height: subplotHeight,
-      layer: [
-        {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
-          encoding: {
-            x: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
-            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
-            order: { field: '__index', type: 'quantitative' },
+          {
+            params: [
+              { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+            ],
+            mark: { type: 'circle' },
+            encoding: {
+              x: { field: 'time', type: 'quantitative' },
+              y: { field: 'x', type: 'quantitative' },
+              color: { value: '#06b6d4' },
+              ...sharedPointEncoding,
+            },
           },
-        },
-        {
-          params: [
-            { name: 'obs_hover_cart_3', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-          ],
-          mark: { type: 'circle' },
-          encoding: {
-            x: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
-            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
-            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
-            ...sharedPointEncoding,
+        ],
+      };
+    } else {
+      // Panel 2: Front View (XZ Plane)
+      panel2 = {
+        title: { text: 'Front View (XZ Plane)', color: textColor, fontSize: 12 },
+        width: panelWidth,
+        height: panelHeight,
+        layer: [
+          {
+            mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
+            encoding: {
+              x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+              y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
+              order: { field: '__index', type: 'quantitative' },
+            },
           },
-        },
-      ],
-    };
-
-    const cartesianTitle = {
-      text: `BOPP 3D Cartesian Coordinates Trajectory: ${annotation.media_id}`,
-      color: textColor,
-    };
+          {
+            params: [
+              { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+            ],
+            mark: { type: 'circle' },
+            encoding: {
+              x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+              y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
+              color: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)', scale: { scheme: 'turbo' } },
+              ...sharedPointEncoding,
+            },
+          },
+        ],
+      };
+    }
 
     return {
       $schema: VEGA_LITE_SCHEMA,
-      title: cartesianTitle,
+      title: { text: `BOPP 3D Cartesian Coordinates: ${annotation.media_id}`, color: textColor },
       data: { values: data },
       transform: transforms,
       config: baseConfig,
-      hconcat: [topView, frontView, sideView],
+      hconcat: [mapPanel, panel2],
     };
   }
 
   // =========================================================================
-  // 7. TIME + PITCH_CONTOUR / FREQUENCY_HZ (Continuous F0 vocal/instrument melody)
+  // 7. TIME / TIME_UNIFORM / TIME_INTERVAL + FREQUENCY_HZ (Frequency in Hz)
   // =========================================================================
-  if ((extentType === 'time' || extentType === 'time_uniform') && (payloadType === 'pitch_contour' || payloadType === 'frequency_hz')) {
+  if (
+    (extentType === 'time' || extentType === 'time_uniform' || extentType === 'time_interval') &&
+    (payloadType === 'pitch_contour' || payloadType === 'frequency_hz')
+  ) {
+    const isInterval = extentType === 'time_interval';
     const layers: Record<string, unknown>[] = [];
-    const freqValues = data.map(d => Number(d.frequency ?? d.value)).filter(f => !isNaN(f) && f > 0);
+    const freqValues = data.map(d => Number(d.hz ?? d.frequency ?? d.value)).filter(f => !isNaN(f) && f > 0);
     const minFreq = freqValues.length ? Math.min(...freqValues) : 100;
     const maxFreq = freqValues.length ? Math.max(...freqValues) : 1000;
     const freqPad = Math.max(15, (maxFreq - minFreq) * 0.1);
 
-    // If likelihood confidence is present, add shaded activation likelihood baseline ribbon
-    if (hasConfidence && confidenceType === 'likelihood' && confidenceChannel !== 'none') {
-      layers.push({
-        transform: [
-          { filter: 'datum.confidence != null' },
-          { calculate: `${minFreq - freqPad}`, as: '_base_freq' },
-          { calculate: `${minFreq - freqPad} + (${maxFreq - minFreq + 2 * freqPad}) * 0.18 * datum.confidence`, as: '_conf_freq_top' },
-        ],
-        mark: {
-          type: 'area',
-          opacity: isDark ? 0.32 : 0.22,
-          color: isDark ? '#38bdf8' : '#0284c7',
-        },
-        encoding: {
-          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-          y: { field: '_base_freq', type: 'quantitative', scale: { domain: [minFreq - freqPad, maxFreq + freqPad], zero: false } },
-          y2: { field: '_conf_freq_top', type: 'quantitative' },
-        },
-      });
-    }
+    transforms.push(
+      {
+        calculate: 'datum.hz != null ? datum.hz : (datum.frequency != null ? datum.frequency : datum.value)',
+        as: 'hz',
+      },
+      {
+        calculate: "datum.voiced === false || datum.voicing === 0 ? false : true",
+        as: 'voiced',
+      }
+    );
 
-    // If variance confidence is present, add shaded 95% Confidence Interval error ribbon (±1.96σ)
-    if (hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none') {
-      layers.push({
-        transform: [
-          { filter: 'datum.frequency_ci_lower != null && datum.frequency_ci_upper != null' },
-        ],
-        mark: {
-          type: 'area',
-          opacity: isDark ? 0.25 : 0.18,
-          color: isDark ? '#38bdf8' : '#0284c7',
-        },
-        encoding: {
-          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-          y: { field: 'frequency_ci_lower', type: 'quantitative', title: 'Pitch F0 (Hz)', scale: { zero: false } },
-          y2: { field: 'frequency_ci_upper' },
-        },
+    if (isInterval) {
+      transforms.push({
+        calculate: 'datum.time + (datum.duration != null ? datum.duration : 0)',
+        as: '_calc_end',
       });
 
-      // Whiskers and horizontal caps (switch cleanly between dark cyan and crisp ocean blue)
-      layers.push(...buildVarianceErrorBarLayers({
-        xField: 'time',
-        yField: 'frequency',
-        lowerField: 'frequency_ci_lower',
-        upperField: 'frequency_ci_upper',
-        isDark,
-        capWidth: 8,
-        whiskerColor: isDark ? '#7dd3fc' : '#0284c7',
-      }));
-    }
-
-    // Trajectory smooth guide line
-    layers.push({
-      mark: {
-        type: 'line',
-        strokeWidth: 2,
-        stroke: isDark ? '#38bdf8' : '#0284c7',
-        interpolate: 'monotone',
-      },
-      encoding: {
-        x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
-        y: { field: 'frequency', type: 'quantitative', scale: { zero: false } },
-      },
-    });
-
-    // Sample points colored by voiced state and modulated by likelihood confidence
-    layers.push({
-      mark: { type: 'point', filled: true },
-      ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-      encoding: {
-        x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-        y: { field: 'frequency', type: 'quantitative', title: 'Fundamental Frequency F0 (Hz)', scale: { domain: [minFreq - freqPad, maxFreq + freqPad], zero: false } },
-        color: {
-          field: 'voicing',
-          type: 'nominal',
-          scale: { domain: [0, 1], range: ['#94a3b8', isDark ? '#38bdf8' : '#0284c7'] },
-          legend: {
-            title: 'Voicing',
-            labelExpr: "datum.value == 1 ? 'Voiced' : 'Unvoiced'",
+      // Horizontal frequency tone intervals at y = hz
+      layers.push(
+        {
+          mark: {
+            type: 'rule',
+            strokeWidth: 4.5,
+            strokeCap: 'round',
+            color: isDark ? '#38bdf8' : '#0284c7',
+          },
+          ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+          encoding: {
+            x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+            x2: { field: '_calc_end' },
+            y: {
+              field: 'hz',
+              type: 'quantitative',
+              title: 'Frequency (Hz)',
+              scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false },
+            },
+            tooltip: [
+              { field: 'hz', type: 'quantitative', format: '.2f', title: 'Frequency (Hz)' },
+              { field: 'time', type: 'quantitative', format: '.2f', title: 'Start (s)' },
+              { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
+              { field: 'voiced', type: 'nominal', title: 'Voiced' },
+              ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+            ],
           },
         },
-        opacity: hasConfidence && confidenceType === 'likelihood'
-          ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.25, 1.0] }, title: 'Tracking Likelihood' }
-          : { value: 1.0 },
-        size: hasConfidence && confidenceType === 'likelihood'
-          ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [25, 80] }, legend: null }
-          : { value: 55 },
-        tooltip: [
-          { field: 'time', type: 'quantitative', format: '.3f', title: 'Time (s)' },
-          { field: 'frequency', type: 'quantitative', format: '.2f', title: 'Pitch F0 (Hz)' },
-          { field: 'voicing', type: 'nominal', title: 'Voiced (1=yes, 0=no)' },
-          ...(hasConfidence && confidenceType === 'likelihood' ? [
-            { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Model Likelihood' },
-          ] : []),
-          ...(hasConfidence && confidenceType === 'variance' ? [
-            { field: 'confidence_variance', type: 'quantitative', format: '.2f', title: 'Variance (σ²)' },
-            { field: 'confidence_std', type: 'quantitative', format: '.2f', title: 'Std Dev (σ Hz)' },
-            { field: 'frequency_ci_lower', type: 'quantitative', format: '.2f', title: '95% CI Lower (Hz)' },
-            { field: 'frequency_ci_upper', type: 'quantitative', format: '.2f', title: '95% CI Upper (Hz)' },
-          ] : []),
-        ],
-      },
-    });
+        // Frequency start indicator
+        {
+          mark: { type: 'circle', size: 65, color: isDark ? '#38bdf8' : '#0284c7' },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            y: { field: 'hz', type: 'quantitative' },
+          },
+        },
+        // Frequency in Hz text badge
+        {
+          transform: [
+            { calculate: "datum.hz + ' Hz'", as: '_hz_label' },
+          ],
+          mark: {
+            type: 'text',
+            align: 'left',
+            dx: 8,
+            dy: -8,
+            fontSize: 10.5,
+            fontWeight: 'bold',
+            fill: textFill,
+            font: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            y: { field: 'hz', type: 'quantitative' },
+            text: { field: '_hz_label', type: 'nominal' },
+          },
+        }
+      );
+    } else {
+      // Continuous / dynamic grid frequency sweep or point track
+      // If likelihood confidence is present, add shaded activation likelihood baseline ribbon
+      if (hasConfidence && confidenceType === 'likelihood' && confidenceChannel !== 'none') {
+        layers.push({
+          transform: [
+            { filter: 'datum.confidence != null' },
+            { calculate: `${minFreq - freqPad}`, as: '_base_freq' },
+            { calculate: `${minFreq - freqPad} + (${maxFreq - minFreq + 2 * freqPad}) * 0.18 * datum.confidence`, as: '_conf_freq_top' },
+          ],
+          mark: {
+            type: 'area',
+            opacity: isDark ? 0.32 : 0.22,
+            color: isDark ? '#38bdf8' : '#0284c7',
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+            y: { field: '_base_freq', type: 'quantitative', scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false } },
+            y2: { field: '_conf_freq_top', type: 'quantitative' },
+          },
+        });
+      }
+
+      // If variance confidence is present, add shaded 95% Confidence Interval error ribbon (±1.96σ)
+      if (hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none') {
+        layers.push({
+          transform: [
+            { filter: 'datum.value_ci_lower != null && datum.value_ci_upper != null' },
+          ],
+          mark: {
+            type: 'area',
+            opacity: isDark ? 0.25 : 0.18,
+            color: isDark ? '#38bdf8' : '#0284c7',
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+            y: { field: 'value_ci_lower', type: 'quantitative', title: 'Frequency (Hz)', scale: { zero: false } },
+            y2: { field: 'value_ci_upper' },
+          },
+        });
+
+        layers.push(...buildVarianceErrorBarLayers({
+          xField: 'time',
+          yField: 'hz',
+          lowerField: 'value_ci_lower',
+          upperField: 'value_ci_upper',
+          isDark,
+          capWidth: 8,
+          whiskerColor: isDark ? '#7dd3fc' : '#0284c7',
+        }));
+      }
+
+      // Trajectory smooth guide line in Hz
+      layers.push({
+        mark: {
+          type: 'line',
+          strokeWidth: 2.2,
+          stroke: isDark ? '#38bdf8' : '#0284c7',
+          interpolate: 'monotone',
+        },
+        encoding: {
+          x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
+          y: { field: 'hz', type: 'quantitative', title: 'Frequency (Hz)', scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false } },
+        },
+      });
+
+      // Sample points colored by voiced state and modulated by likelihood confidence
+      layers.push({
+        mark: { type: 'point', filled: true },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+          y: {
+            field: 'hz',
+            type: 'quantitative',
+            title: 'Frequency (Hz)',
+            scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false },
+          },
+          color: {
+            field: 'voiced',
+            type: 'nominal',
+            scale: { domain: [true, false], range: [isDark ? '#38bdf8' : '#0284c7', isDark ? '#64748b' : '#94a3b8'] },
+            legend: {
+              title: 'Voicing',
+              labelExpr: "datum.value === true || datum.value === 'true' ? 'Voiced' : 'Unvoiced'",
+            },
+          },
+          opacity: {
+            condition: { test: "datum.voiced === false || datum.voiced === 'false'", value: 0.35 },
+            ...(hasConfidence && confidenceType === 'likelihood'
+              ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] }, title: 'Likelihood' }
+              : { value: 1.0 }),
+          },
+          size: hasConfidence && confidenceType === 'likelihood'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [35, 90] }, legend: null }
+            : { value: 65 },
+          tooltip: [
+            { field: 'time', type: 'quantitative', format: '.3f', title: 'Time (s)' },
+            { field: 'hz', type: 'quantitative', format: '.2f', title: 'Frequency (Hz)' },
+            { field: 'voiced', type: 'nominal', title: 'Voiced' },
+            ...(hasConfidence && confidenceType === 'likelihood' ? [
+              { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Model Likelihood' },
+            ] : []),
+            ...(hasConfidence && confidenceType === 'variance' ? [
+              { field: 'confidence_variance', type: 'quantitative', format: '.2f', title: 'Variance (σ²)' },
+              { field: 'confidence_std', type: 'quantitative', format: '.2f', title: 'Std Dev (σ Hz)' },
+            ] : []),
+          ],
+        },
+      });
+    }
 
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
 
-    const contourTitle = { text: `BOPP Vocal Melody & Pitch Contour (F0): ${annotation.media_id}`, color: textColor };
+    const contourTitle = {
+      text: isInterval
+        ? `BOPP Frequency Tone Segments (Hz): ${annotation.media_id}`
+        : `BOPP Frequency Trajectory (Hz): ${annotation.media_id}`,
+      color: textColor,
+    };
+
     const overviewLayers = [
       {
         mark: {
-          type: 'line',
-          interpolate: 'monotone',
+          type: isInterval ? 'rect' : 'line',
           strokeWidth: 2,
           stroke: isDark ? '#38bdf8' : '#0284c7',
-          fill: null,
+          fill: isInterval ? (isDark ? '#38bdf8' : '#0284c7') : null,
+          opacity: isInterval ? 0.7 : 1,
         },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
+          ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
           y: {
-            field: 'frequency',
+            field: 'hz',
             type: 'quantitative',
-            scale: { domain: [minFreq - freqPad, maxFreq + freqPad], zero: false },
+            scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false },
             axis: null,
           },
         },

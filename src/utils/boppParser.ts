@@ -290,12 +290,8 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
         const rawHz = payload.value?.[i];
         record.value = rawHz;
         record.hz = typeof rawHz === 'number' ? rawHz : null;
-        if (typeof rawHz === 'number' && rawHz > 0) {
-          const midi = hzToMidi(rawHz);
-          record.midi = midi;
-          if (midi !== null) {
-            record.note_name = midiToNoteName(midi);
-          }
+        if (typeof rawHz === 'number') {
+          record.frequency = rawHz;
         }
         if (Array.isArray(payload.voiced)) {
           record.voiced = Boolean(payload.voiced[i]);
