@@ -91,6 +91,7 @@ export function checkMediaCompatibility(
     const hasSpectrogram =
       extentType === 'time_frequency_box' ||
       payloadType === 'pitch_contour' ||
+      payloadType === 'frequency_hz' ||
       payloadType === 'note_hz';
 
     return {
@@ -472,8 +473,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     };
   }
 
-  // 6. Onsets (Acoustic Transient Detection Events matching exact timestamps)
-  if (payloadType === 'onset') {
+  // 6. Onsets & Markers (Event Transient Detection Events matching exact timestamps)
+  if (payloadType === 'marker' || payloadType === 'onset') {
     const maxOnsetEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
     const url = synthesizeMonoWavBlobUrl(maxOnsetEnd, sampleRate, (t) => {
       let sampleVal = 0;
@@ -490,21 +491,22 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
     return {
       url,
-      name: 'Onsets_Click_Track.wav',
+      name: payloadType === 'marker' ? 'Markers_Click_Track.wav' : 'Onsets_Click_Track.wav',
       duration: maxOnsetEnd,
     };
   }
 
-  // 7. Tone Frequencies in Hz
-  if (payloadType === 'note_hz' || (payloadType as string) === 'hz') {
+  // 7. Tone Frequencies in Hz & Notes
+  if (payloadType === 'frequency_hz' || payloadType === 'note_hz' || payloadType === 'note' || (payloadType as string) === 'hz') {
     const maxToneEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
     const url = synthesizeMonoWavBlobUrl(maxToneEnd, sampleRate, (t) => {
       let sampleVal = 0;
       for (let k = 0; k < records.length; k++) {
         const start = getRecordStartSec(records[k]);
         const dur = getRecordExplicitDurSec(records[k]) || 0.5;
-        const f = Number(records[k].value) || 440;
-        if (t >= start && t < start + dur) {
+        const f = records[k].hz || Number(records[k].value) || 440;
+        const isVoiced = records[k].voiced !== false;
+        if (isVoiced && t >= start && t < start + dur) {
           const relT = t - start;
           const env = Math.exp(-relT * 2.0) * Math.sin(Math.min(1, relT * 40) * Math.PI * 0.5);
           sampleVal += Math.sin(2 * Math.PI * f * relT) * env * 0.5;
@@ -515,7 +517,7 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
     return {
       url,
-      name: 'Tones_Audio_Track.wav',
+      name: payloadType === 'note' ? 'Notes_Audio_Track.wav' : 'Tones_Audio_Track.wav',
       duration: maxToneEnd,
     };
   }

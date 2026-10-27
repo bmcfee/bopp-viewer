@@ -192,7 +192,7 @@ export function computeOptimalChartHeight(
     }
     return effectiveMultiRow ? 360 : 240;
   }
-  if (pType === 'pitch_contour' || pType === 'note_hz') return 380;
+  if (pType === 'pitch_contour' || pType === 'note_hz' || pType === 'frequency_hz') return 380;
   if (!eType || eType === 'none') return 440;
   return effectiveMultiRow ? 420 : 340;
 }
@@ -292,6 +292,8 @@ export function resolveColorScale(
   const isPitchPayload =
     payloadType === 'note_midi' ||
     payloadType === 'note_hz' ||
+    payloadType === 'frequency_hz' ||
+    payloadType === 'note' ||
     payloadType === 'hz' ||
     payloadType === 'pitch_contour' ||
     payloadType === 'piano_roll';
@@ -1042,7 +1044,7 @@ export function buildBoppVegaLiteSpec(
   const textFill = isDark ? '#f8fafc' : '#0f172a';
 
   // Base Vega-Lite config (transparent for time-frequency charts to allow underlying spectrogram overlay)
-  const isTimeFrequencyPlot = extentType === 'time_frequency_box' || payloadType === 'pitch_contour' || payloadType === 'note_hz';
+  const isTimeFrequencyPlot = extentType === 'time_frequency_box' || payloadType === 'pitch_contour' || payloadType === 'note_hz' || payloadType === 'frequency_hz';
   const baseConfig = {
     autosize: {
       type: (chartWidth === 'container' ? 'fit-x' : 'pad') as 'fit-x' | 'pad',
@@ -1736,7 +1738,7 @@ export function buildBoppVegaLiteSpec(
           width: totalW,
           height: totalH,
           title: {
-            text: `Global ${payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
+            text: `Global ${payloadType === 'tag' || payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
             subtitle: `Alphabetized collection · Scope: Entire Media Object · ${count} ${count === 1 ? 'badge' : 'badges'} (No confidence rating)`,
             anchor: 'start',
             fontSize: 14,
@@ -2646,12 +2648,13 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 2.5. TIME + ONSET (Audio transients, e.g. percussive onset detection)
+  // 2.5. TIME / TIME_UNIFORM + ONSET / MARKER (Point Events / Transients)
   // Clean impulse / stem plot proportional to likelihood without crowding!
   // =========================================================================
-  if (extentType === 'time' && payloadType === 'onset') {
+  if ((extentType === 'time' || extentType === 'time_uniform') && (payloadType === 'onset' || payloadType === 'marker')) {
     const onsetColor = isDark ? '#38bdf8' : '#0284c7';
     const mainPlotHeight = chartHeight - 74;
+    const markerDesc = (annotation.payload as any)?.description || (data[0]?.description as string) || (payloadType === 'onset' ? 'onset' : 'marker');
 
     const layers: Record<string, unknown>[] = [
       // Stems from baseline 0 up to likelihood height
@@ -2667,7 +2670,8 @@ export function buildBoppVegaLiteSpec(
             scale: { domain: [0, 1], zero: true },
           },
           tooltip: [
-            { field: 'time', type: 'quantitative', format: '.3f', title: 'Onset Timestamp (s)' },
+            { field: 'time', type: 'quantitative', format: '.3f', title: 'Timestamp (s)' },
+            { field: 'description', type: 'nominal', title: 'Event' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Detection Likelihood' }] : []),
           ],
         },
@@ -2680,14 +2684,15 @@ export function buildBoppVegaLiteSpec(
           y: {
             field: hasConfidence ? 'confidence' : 'value',
             type: 'quantitative',
-            title: hasConfidence ? 'Onset Likelihood' : 'Onset Strength',
+            title: hasConfidence ? 'Likelihood' : 'Marker',
             scale: { domain: [0, 1], zero: true },
             axis: hasConfidence
               ? { format: '.0%', titleColor: textColor, labelColor: axisColor, tickCount: 5 }
               : { titleColor: textColor, labelColor: axisColor, tickCount: 5 },
           },
           tooltip: [
-            { field: 'time', type: 'quantitative', format: '.3f', title: 'Onset Timestamp (s)' },
+            { field: 'time', type: 'quantitative', format: '.3f', title: 'Timestamp (s)' },
+            { field: 'description', type: 'nominal', title: 'Event' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Detection Likelihood' }] : []),
           ],
         },
@@ -2697,7 +2702,12 @@ export function buildBoppVegaLiteSpec(
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
 
-    const onsetTitle = { text: `BOPP Percussive Transient Onsets: ${annotation.media_id}`, color: textColor };
+    const onsetTitle = {
+      text: payloadType === 'marker'
+        ? `BOPP Event Markers (${markerDesc}): ${annotation.media_id}`
+        : `BOPP Percussive Transient Onsets: ${annotation.media_id}`,
+      color: textColor,
+    };
     const overviewLayers = [
       {
         mark: { type: 'rule', strokeWidth: 1.5, stroke: onsetColor, opacity: 0.8 },
@@ -2724,13 +2734,21 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 3. NOTE_MIDI & NOTE_HZ (Piano Roll)
+  // 3. NOTE, NOTE_MIDI, FREQUENCY_HZ & NOTE_HZ (Piano Roll)
   // Unit height note bars centered on the MIDI pitch number with opaque boxes!
   // Axis is strictly NUMERICAL (quantitative), never categorical, reflecting true
   // semitone spacing from note names to MIDI numbers (and thus to log frequency).
   // Colors matched to mir_eval palette by pitch class (C=0 .. B=11).
+  // Supports dimming unvoiced frequencies using the voiced flag vector.
   // =========================================================================
-  if (payloadType === 'note_midi' || payloadType === 'note_hz' || (payloadType as string) === 'piano_roll') {
+  if (
+    payloadType === 'note_midi' ||
+    payloadType === 'note' ||
+    (payloadType as string) === 'piano_roll' ||
+    ((payloadType === 'frequency_hz' || payloadType === 'note_hz') &&
+      extentType !== 'time' &&
+      extentType !== 'time_uniform')
+  ) {
     const { isMidi, isScore, xField: rawXField, xTitle } = resolveExtentAxis(extentType, data, {
       scoreTitle: 'Musical Quarter Notes',
     });
@@ -2743,11 +2761,11 @@ export function buildBoppVegaLiteSpec(
     // Normalize each record so that datum.value is strictly a numerical MIDI note number
     // Even if the input provided string note names ("C3", "D3", "E3") or frequencies in Hz
     const enrichedNoteData = data.map(d => {
-      let numericMidi = typeof d.value === 'number' && payloadType !== 'note_hz' ? d.value : null;
-      let hzVal = typeof d.hz === 'number' ? d.hz : (typeof d.value === 'number' && payloadType === 'note_hz' ? d.value : null);
+      let numericMidi = typeof d.value === 'number' && payloadType !== 'note_hz' && payloadType !== 'frequency_hz' ? d.value : null;
+      let hzVal = typeof d.hz === 'number' ? d.hz : (typeof d.value === 'number' && (payloadType === 'note_hz' || payloadType === 'frequency_hz') ? d.value : null);
       let noteName = d.note_name ? String(d.note_name) : null;
 
-      // If string note name provided (e.g. "C3", "D3", "E3")
+      // If string note name provided (e.g. "C3", "D3", "E3", "C♯4", "E♭3")
       if (numericMidi === null && typeof d.value === 'string') {
         numericMidi = noteNameToMidi(d.value);
         if (numericMidi !== null && !noteName) {
@@ -2778,6 +2796,8 @@ export function buildBoppVegaLiteSpec(
         pitch_class_name: ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'][roundedPc],
       };
     });
+
+    const hasVoiced = enrichedNoteData.some(d => d.voiced !== undefined);
 
     // Internal transforms for unit-height centered notes:
     // Centered on datum.value: spans [datum.value - 0.5, datum.value + 0.5], unit height = 1.0 semitone!
@@ -2876,14 +2896,25 @@ export function buildBoppVegaLiteSpec(
               orient: 'right',
             },
           },
-          opacity: { value: 1.0 },
+          opacity: hasVoiced
+            ? {
+                condition: {
+                  test: 'datum.voiced === false',
+                  value: 0.25,
+                },
+                value: 0.95,
+              }
+            : hasConfidence && confidenceChannel === 'opacity'
+            ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+            : { value: 1.0 },
           tooltip: [
             { field: 'note_name', type: 'nominal', title: 'Note' },
             { field: 'pitch_class_name', type: 'nominal', title: 'Pitch Class' },
             { field: 'value', type: 'quantitative', format: '.1f', title: 'MIDI Pitch' },
-            ...(payloadType === 'note_hz' || enrichedNoteData.some(d => d.hz != null)
+            ...(payloadType === 'frequency_hz' || payloadType === 'note_hz' || enrichedNoteData.some(d => d.hz != null)
               ? [{ field: 'hz', type: 'quantitative', format: '.1f', title: 'Frequency (Hz)' }]
               : []),
+            ...(hasVoiced ? [{ field: 'voiced', type: 'nominal', title: 'Voiced' }] : []),
             { field: xField, type: 'quantitative', format: isScore ? '.2f' : isMidi ? 'd' : '.2f', title: 'Start' },
             { field: 'duration', type: 'quantitative', format: isScore ? '.2f' : isMidi ? 'd' : '.2f', title: 'Duration' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
@@ -2929,8 +2960,10 @@ export function buildBoppVegaLiteSpec(
 
     const cursor = makeCursorLayer(xField);
     const pianoTitle = {
-      text: payloadType === 'note_hz'
-        ? `BOPP Note Piano Roll (Hz / Log Pitch): ${annotation.media_id}`
+      text: payloadType === 'frequency_hz' || payloadType === 'note_hz'
+        ? `BOPP Frequency (Hz / Log Pitch) Piano Roll: ${annotation.media_id}`
+        : payloadType === 'note'
+        ? `BOPP Scientific Pitch Notation Piano Roll: ${annotation.media_id}`
         : `BOPP MIDI Piano Roll: ${annotation.media_id}`,
       subtitle: 'Numerical Pitch Axis (Semitone Spacing / Log Frequency)',
       color: textColor,
@@ -2975,9 +3008,16 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 4. TIME_INTERVAL + MULTI_SEGMENT / SEGMENT_OPEN (Structural Analysis)
+  // 4. TIME_INTERVAL + TAG / LYRICS / MULTI_SEGMENT / SEGMENT_OPEN (Interval Spans)
   // =========================================================================
-  if (extentType === 'time_interval' && (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open')) {
+  if (
+    extentType === 'time_interval' &&
+    (payloadType === 'multi_segment' ||
+      payloadType === 'segment_open' ||
+      payloadType === 'tag_open' ||
+      payloadType === 'tag' ||
+      payloadType === 'lyrics')
+  ) {
     const isMulti = payloadType === 'multi_segment';
     const intervalAnalysis = analyzeIntervalAnnotation(annotation, data);
     const useSingleRow = Boolean(!forceMultiRow && !isMulti && intervalAnalysis.shouldUseSingleRow);
@@ -2991,7 +3031,15 @@ export function buildBoppVegaLiteSpec(
 
     const yField = isMulti ? 'level' : useSingleRow ? '_single_row' : 'value';
     const yType = isMulti ? 'ordinal' : 'nominal';
-    const yTitle = isMulti ? 'Structural Level' : useSingleRow ? intervalAnalysis.singleRowLabel : (payloadType === 'tag_open' ? 'Tracks / Instruments' : 'Section');
+    const yTitle = isMulti
+      ? 'Structural Level'
+      : useSingleRow
+      ? intervalAnalysis.singleRowLabel
+      : payloadType === 'tag_open' || payloadType === 'tag'
+      ? 'Tags / Labels'
+      : payloadType === 'lyrics'
+      ? 'Lyrics'
+      : 'Section';
     const colorField = isMulti ? 'label' : 'value';
     const uniqueLabels = Array.from(new Set(data.map(d => String(d[colorField] ?? d.value ?? '')))).filter(Boolean);
     const colorScale = resolveColorScale(colorScheme, payloadType, uniqueLabels);
@@ -3377,9 +3425,442 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 7. TIME + PITCH_CONTOUR (Continuous F0 vocal/instrument melody)
+  // 6b. PIXEL (2D Point Coordinates in Pixel Space)
   // =========================================================================
-  if (extentType === 'time' && payloadType === 'pitch_contour') {
+  if (extentType === 'pixel') {
+    const colorScale = resolveColorScale(colorScheme, payloadType);
+    const pixelLayers: Record<string, unknown>[] = [
+      // Optional faint connecting trajectory line if sequential
+      {
+        mark: {
+          type: 'line',
+          strokeDash: [4, 4],
+          opacity: 0.45,
+          stroke: isDark ? '#94a3b8' : '#64748b',
+          strokeWidth: 1.5,
+        },
+        encoding: {
+          x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
+          y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
+          order: { field: '__index', type: 'quantitative' },
+        },
+      },
+      // 2D Pixel point markers
+      {
+        mark: {
+          type: 'circle',
+          size: 110,
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
+          opacity: 0.9,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
+          y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
+          color: { field: 'value', type: 'nominal', title: 'Label / Class', scale: colorScale },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Observation' },
+            { field: 'x', type: 'quantitative', title: 'X' },
+            { field: 'y', type: 'quantitative', title: 'Y' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+          ],
+        },
+      },
+    ];
+
+    if (showLabels) {
+      pixelLayers.push({
+        mark: {
+          type: 'text',
+          align: 'left',
+          baseline: 'bottom',
+          dx: 8,
+          dy: -6,
+          fontSize: 10,
+          fontWeight: 'bold',
+          color: textColor,
+        },
+        encoding: {
+          x: { field: 'x', type: 'quantitative' },
+          y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+          text: { field: 'value', type: 'nominal' },
+        },
+      });
+    }
+
+    return {
+      $schema: VEGA_LITE_SCHEMA,
+      width: chartWidth,
+      height: chartHeight,
+      title: { text: `BOPP 2D Pixel Coordinates: ${annotation.media_id}`, color: textColor },
+      data: { values: data },
+      transform: transforms,
+      config: baseConfig,
+      layer: pixelLayers,
+    };
+  }
+
+  // =========================================================================
+  // 6c. TEXT & TEXT_INTERVAL (Character Offset Highlighting & Spans)
+  // =========================================================================
+  if (extentType === 'text' || extentType === 'text_interval') {
+    const isInterval = extentType === 'text_interval';
+    const colorScale = resolveColorScale(colorScheme, payloadType);
+    const textTransforms = [...transforms];
+    if (isInterval) {
+      textTransforms.push({
+        calculate: 'datum.offset + (datum.length != null && datum.length > 0 ? datum.length : 1)',
+        as: '_offset_end',
+      });
+    }
+
+    const uniqueValues = Array.from(new Set(data.map(d => String(d.value ?? d.label ?? '')))).filter(Boolean);
+    const textLayers: Record<string, unknown>[] = [];
+
+    if (isInterval) {
+      // Horizontal interval rect bars along character offset
+      textLayers.push({
+        mark: {
+          type: 'rect',
+          cornerRadius: 4,
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
+          opacity: 0.85,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'offset', type: 'quantitative', title: 'Character Offset', scale: { zero: true } },
+          x2: { field: '_offset_end' },
+          y: {
+            field: 'value',
+            type: 'nominal',
+            title: 'Span / Label',
+            scale: { domain: uniqueValues },
+            axis: { labelFontWeight: 'bold', labelPadding: 8, titlePadding: 14, minExtent: 70 },
+          },
+          color: { field: 'value', type: 'nominal', title: 'Category', scale: colorScale },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Text Span' },
+            { field: 'offset', type: 'quantitative', title: 'Char Offset' },
+            { field: 'length', type: 'quantitative', title: 'Length' },
+            { field: '_offset_end', type: 'quantitative', title: 'Char End' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+          ],
+        },
+      });
+
+      if (showLabels) {
+        textLayers.push({
+          mark: {
+            type: 'text',
+            align: 'center',
+            baseline: 'middle',
+            fontSize: 10,
+            fontWeight: 'bold',
+            color: '#ffffff',
+          },
+          encoding: {
+            x: { field: 'offset', type: 'quantitative' },
+            x2: { field: '_offset_end' },
+            y: { field: 'value', type: 'nominal' },
+            text: { field: 'value', type: 'nominal' },
+          },
+        });
+      }
+    } else {
+      // Point / tick marks at character offset
+      textLayers.push({
+        mark: {
+          type: 'tick',
+          thickness: 3,
+          size: 28,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'offset', type: 'quantitative', title: 'Character Offset', scale: { zero: true } },
+          y: {
+            field: 'value',
+            type: 'nominal',
+            title: 'Offset Label',
+            scale: { domain: uniqueValues },
+            axis: { labelFontWeight: 'bold', labelPadding: 8, titlePadding: 14, minExtent: 70 },
+          },
+          color: { field: 'value', type: 'nominal', title: 'Category', scale: colorScale },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Label' },
+            { field: 'offset', type: 'quantitative', title: 'Char Offset' },
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+          ],
+        },
+      });
+    }
+
+    return {
+      $schema: VEGA_LITE_SCHEMA,
+      width: chartWidth,
+      height: chartHeight,
+      title: { text: `BOPP Text Spans & Offsets: ${annotation.media_id}`, color: textColor },
+      data: { values: data },
+      transform: textTransforms,
+      config: baseConfig,
+      layer: textLayers,
+    };
+  }
+
+  // =========================================================================
+  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (3D/Polar Trajectories)
+  // =========================================================================
+  if (extentType === 'spherical' || extentType === 'spherical_time' || extentType === 'spherical_time_interval') {
+    const isTemporal = extentType === 'spherical_time' || extentType === 'spherical_time_interval';
+    const colorScale = resolveColorScale(colorScheme, payloadType);
+
+    const detailLayers: Record<string, unknown>[] = [
+      // Trajectory path connecting points in order
+      {
+        mark: {
+          type: 'line',
+          interpolate: 'monotone',
+          strokeWidth: 2,
+          opacity: 0.65,
+          stroke: isDark ? '#38bdf8' : '#0284c7',
+        },
+        encoding: {
+          x: {
+            field: 'azimuth',
+            type: 'quantitative',
+            title: 'Azimuth (degrees [-180°, +180°))',
+            scale: { domain: [-180, 180] },
+          },
+          y: {
+            field: 'elevation',
+            type: 'quantitative',
+            title: 'Elevation (degrees [-90°, +90°])',
+            scale: { domain: [-90, 90] },
+          },
+          order: { field: '__index', type: 'quantitative' },
+        },
+      },
+      // Spatial coordinate points
+      {
+        mark: {
+          type: 'circle',
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
+          opacity: 0.85,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: {
+            field: 'azimuth',
+            type: 'quantitative',
+            title: 'Azimuth (degrees [-180°, +180°))',
+            scale: { domain: [-180, 180] },
+          },
+          y: {
+            field: 'elevation',
+            type: 'quantitative',
+            title: 'Elevation (degrees [-90°, +90°])',
+            scale: { domain: [-90, 90] },
+          },
+          size: {
+            field: 'radius',
+            type: 'quantitative',
+            title: 'Radius (r > 0)',
+            scale: { range: [60, 400] },
+          },
+          color: { field: 'value', type: 'nominal', title: 'Observation', scale: colorScale },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Observation' },
+            { field: 'azimuth', type: 'quantitative', format: '.1f', title: 'Azimuth (°)' },
+            { field: 'elevation', type: 'quantitative', format: '.1f', title: 'Elevation (°)' },
+            { field: 'radius', type: 'quantitative', format: '.2f', title: 'Radius' },
+            ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+          ],
+        },
+      },
+    ];
+
+    if (showLabels) {
+      detailLayers.push({
+        mark: {
+          type: 'text',
+          align: 'left',
+          dx: 8,
+          dy: -6,
+          fontSize: 10,
+          fontWeight: 'bold',
+          color: textColor,
+        },
+        encoding: {
+          x: { field: 'azimuth', type: 'quantitative' },
+          y: { field: 'elevation', type: 'quantitative' },
+          text: { field: 'value', type: 'nominal' },
+        },
+      });
+    }
+
+    const sphericalTitle = {
+      text: `BOPP Spherical Coordinates Trajectory: ${annotation.media_id}`,
+      color: textColor,
+    };
+
+    if (isTemporal) {
+      const overviewLayers = [
+        {
+          mark: { type: 'line', stroke: '#38bdf8', strokeWidth: 1.5 },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            y: { field: 'azimuth', type: 'quantitative' },
+          },
+        },
+      ];
+
+      return composeTimelineSpecWithOverview({
+        data,
+        transforms,
+        detailLayers,
+        overviewLayers,
+        xField: 'time',
+        xTitle: 'Time (seconds)',
+        minXVal: minX,
+        maxXVal: maxX,
+        plotTitle: sphericalTitle,
+        detailPlotHeight: chartHeight - 74,
+      });
+    }
+
+    return {
+      $schema: VEGA_LITE_SCHEMA,
+      width: chartWidth,
+      height: chartHeight,
+      title: sphericalTitle,
+      data: { values: data },
+      transform: transforms,
+      config: baseConfig,
+      layer: detailLayers,
+    };
+  }
+
+  // =========================================================================
+  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (3D Spatial Trajectories)
+  // =========================================================================
+  if (extentType === 'cartesian' || extentType === 'cartesian_time' || extentType === 'cartesian_time_interval') {
+    const isTemporal = extentType === 'cartesian_time' || extentType === 'cartesian_time_interval';
+
+    const detailLayers: Record<string, unknown>[] = [
+      // 3D trajectory connecting line in spatial space
+      {
+        mark: {
+          type: 'line',
+          interpolate: 'monotone',
+          strokeWidth: 2,
+          opacity: 0.65,
+          stroke: isDark ? '#94a3b8' : '#64748b',
+        },
+        encoding: {
+          x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
+          y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+          order: { field: '__index', type: 'quantitative' },
+        },
+      },
+      // Point marks colored by Z coordinate
+      {
+        mark: {
+          type: 'circle',
+          size: 110,
+          stroke: isDark ? '#ffffff' : '#0f172a',
+          strokeWidth: 1.5,
+          opacity: 0.9,
+        },
+        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
+          y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+          color: {
+            field: 'z',
+            type: 'quantitative',
+            title: 'Z Coordinate',
+            scale: { scheme: 'turbo' },
+          },
+          tooltip: [
+            { field: 'value', type: 'nominal', title: 'Observation' },
+            { field: 'x', type: 'quantitative', format: '.2f', title: 'X' },
+            { field: 'y', type: 'quantitative', format: '.2f', title: 'Y' },
+            { field: 'z', type: 'quantitative', format: '.2f', title: 'Z' },
+            ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
+            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+          ],
+        },
+      },
+    ];
+
+    if (showLabels) {
+      detailLayers.push({
+        mark: {
+          type: 'text',
+          align: 'left',
+          dx: 8,
+          dy: -6,
+          fontSize: 10,
+          fontWeight: 'bold',
+          color: textColor,
+        },
+        encoding: {
+          x: { field: 'x', type: 'quantitative' },
+          y: { field: 'y', type: 'quantitative' },
+          text: { field: 'value', type: 'nominal' },
+        },
+      });
+    }
+
+    const cartesianTitle = {
+      text: `BOPP 3D Cartesian Coordinates Trajectory: ${annotation.media_id}`,
+      color: textColor,
+    };
+
+    if (isTemporal) {
+      const overviewLayers = [
+        {
+          mark: { type: 'line', stroke: '#38bdf8', strokeWidth: 1.5 },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            y: { field: 'x', type: 'quantitative' },
+          },
+        },
+      ];
+
+      return composeTimelineSpecWithOverview({
+        data,
+        transforms,
+        detailLayers,
+        overviewLayers,
+        xField: 'time',
+        xTitle: 'Time (seconds)',
+        minXVal: minX,
+        maxXVal: maxX,
+        plotTitle: cartesianTitle,
+        detailPlotHeight: chartHeight - 74,
+      });
+    }
+
+    return {
+      $schema: VEGA_LITE_SCHEMA,
+      width: chartWidth,
+      height: chartHeight,
+      title: cartesianTitle,
+      data: { values: data },
+      transform: transforms,
+      config: baseConfig,
+      layer: detailLayers,
+    };
+  }
+
+  // =========================================================================
+  // 7. TIME + PITCH_CONTOUR / FREQUENCY_HZ (Continuous F0 vocal/instrument melody)
+  // =========================================================================
+  if ((extentType === 'time' || extentType === 'time_uniform') && (payloadType === 'pitch_contour' || payloadType === 'frequency_hz')) {
     const layers: Record<string, unknown>[] = [];
     const freqValues = data.map(d => Number(d.frequency ?? d.value)).filter(f => !isNaN(f) && f > 0);
     const minFreq = freqValues.length ? Math.min(...freqValues) : 100;
@@ -3937,8 +4418,13 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   // 9. SCORE_INTERVAL / SCORE_QUARTER (Fractional notation)
   // =========================================================================
-  if (extentType === 'score_interval' || extentType === 'score_quarter') {
-    const isInterval = extentType === 'score_interval';
+  if (
+    extentType === 'score_interval' ||
+    extentType === 'score_quarter' ||
+    extentType === 'score_interval_float' ||
+    extentType === 'score_quarter_float'
+  ) {
+    const isInterval = extentType === 'score_interval' || extentType === 'score_interval_float';
     const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
     const useSingleRow = Boolean(!forceMultiRow && isInterval && intervalAnalysis?.shouldUseSingleRow);
 

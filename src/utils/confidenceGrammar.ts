@@ -196,7 +196,7 @@ export function buildIntervalConfidenceLayers(params: {
           },
           {
             calculate: confidenceType === 'agreement'
-              ? "datum.agreement_ratio_str != null ? (datum.n_annotators >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
+              ? "datum.agreement_ratio_str != null ? ((datum.num_annotators != null ? datum.num_annotators : datum.n_annotators) >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
               : "round(datum.confidence * 100) + '%'",
             as: '_badge_label',
           },
@@ -378,7 +378,7 @@ export function buildInstantaneousConfidenceLayers(params: {
           },
           {
             calculate: confidenceType === 'agreement'
-              ? "datum.agreement_ratio_str != null ? (datum.n_annotators >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
+              ? "datum.agreement_ratio_str != null ? ((datum.num_annotators != null ? datum.num_annotators : datum.n_annotators) >= 10 ? '👥 ' + datum.agreement_ratio_str : '👤 ' + datum.agreement_ratio_str) : round(datum.confidence * 100) + '%'"
               : "round(datum.confidence * 100) + '%'",
             as: '_pin_label',
           },

@@ -30,12 +30,15 @@ export function quartersToSeconds(quarters: number, bpm = DEFAULT_BPM): number {
  * Checks whether a given BOPP payload and extent type can be sonified meaningfully
  */
 export function isSonifiablePayload(payloadType?: string, extentType?: string): boolean {
-  if (extentType === 'pixel_box') return false;
+  if (extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'cartesian' || extentType === 'spherical' || extentType === 'text') return false;
   const sonifiableTypes = new Set([
     'chord',
     'beat',
+    'note',
     'note_midi',
+    'frequency_hz',
     'note_hz',
+    'marker',
     'onset',
     'pitch_contour',
   ]);
@@ -480,8 +483,16 @@ export class BoppAudioPlayer {
     } else if (payloadType === 'beat') {
       const isDownbeat = r.value === 1;
       this.playClick(isDownbeat);
+    } else if (payloadType === 'marker' || payloadType === 'onset') {
+      this.playClick(true);
+    } else if ((payloadType === 'note_midi' || payloadType === 'note') && typeof r.midi === 'number') {
+      this.playMidiNote(r.midi, durSec);
     } else if (payloadType === 'note_midi' && typeof r.value === 'number') {
       this.playMidiNote(r.value, durSec);
+    } else if ((payloadType === 'frequency_hz' || payloadType === 'note_hz') && typeof r.hz === 'number') {
+      if (r.voiced !== false) {
+        this.playTone(r.hz, durSec);
+      }
     } else if (payloadType === 'note_hz' && typeof r.value === 'number') {
       this.playTone(r.value, durSec);
     } else if (payloadType !== 'pitch_contour') {

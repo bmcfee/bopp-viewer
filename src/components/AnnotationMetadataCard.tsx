@@ -258,6 +258,24 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
             </div>
           )}
 
+          {/* Groupings if present */}
+          {annotation.groupings && annotation.groupings.length > 0 && (
+            <div className="p-2.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800">
+              <div className="flex items-center gap-1.5 text-blue-900 dark:text-blue-200 font-bold mb-1">
+                <Layers className="w-3.5 h-3.5" />
+                <span>Groupings ({annotation.groupings.length} layer{annotation.groupings.length > 1 ? 's' : ''})</span>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {annotation.groupings.map((g, idx) => (
+                  <div key={idx} className="p-2 rounded bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-900 flex flex-col">
+                    <span className="font-bold text-slate-800 dark:text-slate-200">{g.name}</span>
+                    <span className="text-[11px] text-slate-500 font-mono">{g.ids?.length ?? 0} elements mapped</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Sandbox Storage if present */}
           {hasSandbox && (
             <div className="p-2.5 rounded bg-amber-50 dark:bg-amber-950 border border-amber-300 dark:border-amber-800">

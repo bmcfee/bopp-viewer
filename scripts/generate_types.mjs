@@ -27,9 +27,10 @@ async function generateBoppTypes() {
 
   // 1. Load all schemas in schemas/v1/ into a map
   const schemasMap = {};
+  const relativeSchemasMap = {};
 
   function loadDir(dir, baseDir) {
-    for (const f of fs.readdirSync(dir)) {
+    for (const f of fs.readdirSync(dir).sort()) {
       const full = path.join(dir, f);
       const stat = fs.statSync(full);
       if (stat.isDirectory()) {
@@ -38,6 +39,7 @@ async function generateBoppTypes() {
         const rel = path.relative(baseDir, full).replace(/\\/g, '/');
         const content = JSON.parse(fs.readFileSync(full, 'utf-8'));
         schemasMap[rel] = content;
+        relativeSchemasMap[rel] = content;
         if (!schemasMap[f]) {
           schemasMap[f] = content;
         }
@@ -47,6 +49,12 @@ async function generateBoppTypes() {
 
   loadDir(schemasDir, schemasDir);
   console.log(`[BOPP Schema Codegen] Loaded ${Object.keys(schemasMap).length} schema entries.`);
+
+  // Write bundled schemas to src/schemas/boppSchemas.json
+  const bundledSchemasFile = path.resolve(process.cwd(), 'src/schemas/boppSchemas.json');
+  fs.mkdirSync(path.dirname(bundledSchemasFile), { recursive: true });
+  fs.writeFileSync(bundledSchemasFile, JSON.stringify(relativeSchemasMap, null, 2) + '\n', 'utf-8');
+  console.log(`[BOPP Schema Codegen] Bundled ${Object.keys(relativeSchemasMap).length} schemas to ${bundledSchemasFile}`);
 
   // 2. Dereference schemas resolving $ref relative to schemas/v1
   function resolveRef(ref, currentPath) {

@@ -240,30 +240,41 @@ export const SchemaValidationReport: React.FC<SchemaValidationReportProps> = ({
  * AUTO-COMPILED TYPEDEF PREVIEW (from schemas/v1/annotation.json)
  */
 export type AnyExtent =
-  | Times
+  | Time
   | TimeIntervalExtent
   | TimeFrequencyBoxExtent
+  | UniformTimeExtent
+  | Pixel
   | PixelBoxExtent
+  | Text
+  | TextInterval
+  | SphericalExtent
+  | SphericalTimeExtent
+  | SphericalTimeIntervalExtent
+  | CartesianExtent
+  | CartesianTimeExtent
+  | CartesianTimeIntervalExtent
   | ScoreQuarterNotes
   | ScoreInterval
+  | ScoreQuarterNotesFloat
+  | ScoreIntervalFloat
   | MIDITicks
   | MIDIInterval;
 
 export type AnyPayload =
   | BeatPositionPayload
   | ChordPayload
+  | ExtensionPayload
+  | Frequency_HzPayload
   | Key_ModePayload
   | LyricsPayload
+  | MarkerPayload
   | Mood_ThayerPayload
-  | Note_HzPayload
+  | NotePayload
   | Note_MidiPayload
   | ObjectPayload
-  | OnsetPayload
-  | Pitch_ContourPayload
   | RelationPayload
-  | Multi_SegmentPayload
-  | Segment_OpenPayload
-  | Tag_OpenPayload
+  | TagPayload
   | TempoPayload;
 
 export type AnyConfidence =
@@ -281,6 +292,7 @@ export interface Annotation {
   payload: AnyPayload;
   confidence?: AnyConfidence;
   sandbox?: { [k: string]: any };
+  groupings?: Grouping[];
 }`}
               </pre>
             </>

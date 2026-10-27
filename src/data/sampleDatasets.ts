@@ -286,7 +286,7 @@ const NOTE_HZ_PIANOROLL_DATA: BoppAnnotation = {
   },
   sandbox: {
     piece: "Acoustic Note Segments in Hz (Log Frequency Pitch Axis)",
-    description: "time_interval extent with note_hz payload: note pitches in Hz mapped to numerical log-frequency piano roll"
+    description: "time_interval extent with frequency_hz payload: note pitches in Hz with voiced flags mapped to numerical log-frequency piano roll"
   },
   extent: {
     extent_type: "time_interval",
@@ -294,8 +294,9 @@ const NOTE_HZ_PIANOROLL_DATA: BoppAnnotation = {
     duration: [0.5, 0.5, 0.5, 0.5, 0.5, 0.8]
   },
   payload: {
-    payload_type: "note_hz",
-    value: [130.81, 146.83, 164.81, 196.00, 220.00, 261.63]
+    payload_type: "frequency_hz",
+    value: [130.81, 146.83, 164.81, 196.00, 220.00, 261.63],
+    voiced: [true, true, true, true, true, true]
   },
   confidence: {
     confidence_type: "likelihood",
@@ -343,13 +344,19 @@ const STRUCTURE_DATA: BoppAnnotation = {
     duration: sections.map(s => s.d)
   },
   payload: {
-    payload_type: "multi_segment",
-    label: sections.map(s => s.label),
-    level: sections.map(s => s.level)
+    payload_type: "tag",
+    value: sections.map(s => s.label)
   },
+  groupings: [
+    {
+      name: "level",
+      ids: sections.map(s => s.level),
+      labels: { "section": 0, "sub_phrase": 1 }
+    }
+  ],
   confidence: {
     confidence_type: "agreement",
-    n_annotators_common: 5,
+    num_annotators_common: 5,
     confidence: sections.map(s => s.conf)
   }
 };
@@ -386,7 +393,7 @@ const TF_DATA: BoppAnnotation = {
     freq_max: tfBoxes.map(b => b.fmax)
   },
   payload: {
-    payload_type: "tag_open",
+    payload_type: "tag",
     value: tfBoxes.map(b => b.tag)
   },
   confidence: {
@@ -427,8 +434,9 @@ const PITCH_DATA: BoppAnnotation = {
     time: pitchContourPoints.map(p => p.t)
   },
   payload: {
-    payload_type: "pitch_contour",
-    value: pitchContourPoints.map(p => ({ frequency: p.frequency, voicing: p.voicing }))
+    payload_type: "frequency_hz",
+    value: pitchContourPoints.map(p => p.frequency),
+    voiced: pitchContourPoints.map(p => p.voicing === 1)
   },
   confidence: {
     confidence_type: "likelihood",
@@ -476,8 +484,9 @@ const VOCAL_ARIA_DATA: BoppAnnotation = {
     time: vocalAriaPoints.map(p => p.t)
   },
   payload: {
-    payload_type: "pitch_contour",
-    value: vocalAriaPoints.map(p => ({ frequency: p.frequency, voicing: p.voicing }))
+    payload_type: "frequency_hz",
+    value: vocalAriaPoints.map(p => p.frequency),
+    voiced: vocalAriaPoints.map(p => p.voicing === 1)
   },
   confidence: {
     confidence_type: "variance",
@@ -518,14 +527,13 @@ const CROWD_AGREEMENT_DATA: BoppAnnotation = {
     duration: [12.5, 23.5, 12.0, 24.0, 16.0, 24.0, 16.0]
   },
   payload: {
-    payload_type: "multi_segment",
-    label: ["Intro", "Verse 1", "Pre-Chorus", "Chorus 1", "Bridge", "Chorus 2", "Outro"],
-    level: [0, 0, 0, 0, 0, 0, 0]
+    payload_type: "tag",
+    value: ["Intro", "Verse 1", "Pre-Chorus", "Chorus 1", "Bridge", "Chorus 2", "Outro"]
   },
   confidence: {
     confidence_type: "agreement",
-    n_annotators_common: 25,
-    n_annotators: [25, 25, 24, 25, 23, 25, 25],
+    num_annotators_common: 25,
+    num_annotators: [25, 25, 24, 25, 23, 25, 25],
     confidence: [0.96, 0.88, 0.68, 0.92, 0.72, 0.96, 0.84]
   }
 };
@@ -617,7 +625,7 @@ const PIXEL_DATA: BoppAnnotation = {
     height: [65, 70, 110, 120, 130, 140, 20]
   },
   payload: {
-    payload_type: "tag_open",
+    payload_type: "tag",
     value: [
       "Treble Clef",
       "Time Signature 4/4",
@@ -857,7 +865,7 @@ const TAGS_GLOBAL_DATA: BoppAnnotation = {
     description: "Global genre, instrumentation, and mood tags describing the entire media object",
   },
   payload: {
-    payload_type: "tag_open",
+    payload_type: "tag",
     value: ["Post-Rock", "Ambient", "Electric Guitar", "Instrumental", "Crescendo", "Cinematic"]
   },
   confidence: {
@@ -884,7 +892,7 @@ const TAGS_TIME_INTERVAL_DATA: BoppAnnotation = {
     duration: [12.0, 16.0, 16.0, 16.0, 20.0]
   },
   payload: {
-    payload_type: "tag_open",
+    payload_type: "tag",
     value: ["Solo Cello", "String Section", "Brass & Woodwinds", "Full Tutti", "Decrescendo Strings"]
   }
 };
@@ -907,7 +915,7 @@ const TAGS_OVERLAPPING_DATA: BoppAnnotation = {
     duration: [30.0, 40.0, 35.0, 30.0, 32.0]
   },
   payload: {
-    payload_type: "tag_open",
+    payload_type: "tag",
     value: ["Rhythm Section (Drums & Bass)", "Acoustic Guitar", "Lead Vocals", "Hammond Organ Pad", "Electric Guitar Solo"]
   },
   confidence: {
@@ -1104,15 +1112,15 @@ const PERCUSSIVE_ONSET_LIKELIHOOD: BoppAnnotation = {
     parameters: { filter_size: 5, threshold: 0.18 }
   },
   sandbox: {
-    description: "Percussive transient onsets with likelihood confidence values",
+    description: "Percussive transient markers with likelihood confidence values",
   },
   extent: {
     extent_type: "time",
     time: PERCUSSIVE_ONSETS,
   },
   payload: {
-    payload_type: "onset",
-    value: PERCUSSIVE_ONSETS.map(() => 1),
+    payload_type: "marker",
+    description: "onset",
   },
   confidence: {
     confidence_type: "likelihood",
@@ -1155,7 +1163,7 @@ const SEGMENT_OPEN_DISJOINT: BoppAnnotation = {
     duration: [15.0, 27.0, 26.0, 27.0, 25.0, 18.0],
   },
   payload: {
-    payload_type: "segment_open",
+    payload_type: "tag",
     value: ["Intro", "Verse 1", "Chorus 1", "Verse 2", "Chorus 2", "Outro"],
   },
   confidence: {
@@ -1269,6 +1277,266 @@ const SCORE_QUARTER_POINTS_NOCONF: BoppAnnotation = {
   payload: {
     payload_type: "chord",
     value: ["C:maj", "G:maj", "A:min", "F:maj", "C:maj"],
+  },
+};
+
+// 13. TIME_UNIFORM Extent with FREQUENCY_HZ Payload
+const TIME_UNIFORM_DATA: BoppAnnotation = {
+  media_id: "audio:synthesized_f0_sweep",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "sine_generator",
+    version: "1.0.0",
+    parameters: { sample_rate: 100 },
+  },
+  sandbox: {
+    description: "Regular time grid synthesized dynamically: start_time: 0.0s, sampling_period: 0.05s (20 Hz frames)",
+  },
+  extent: {
+    extent_type: "time_uniform",
+    start_time: 0.0,
+    sampling_period: 0.05,
+  },
+  payload: {
+    payload_type: "frequency_hz",
+    value: [220.0, 225.2, 230.5, 236.1, 242.0, 248.1, 254.5, 261.63, 269.2, 277.18, 285.3, 293.66, 302.2, 311.13, 320.3, 329.63],
+    voiced: [true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.95, 0.94, 0.96, 0.95, 0.97, 0.98, 0.96, 0.99, 0.97, 0.96, 0.95, 0.93, 0.45, 0.42, 0.38, 0.35],
+  },
+};
+
+// 14. PIXEL Extent (Singular 2D Point Coordinates) with OBJECT Payload
+const PIXEL_2D_DATA: BoppAnnotation = {
+  media_id: "image:scanned_sheet_music_noteheads.png",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "YOLO_Music_Object_Detector",
+    version: "2.1.0",
+    parameters: { conf_threshold: 0.8 },
+  },
+  sandbox: {
+    description: "2D notehead center coordinates (x, y) on score image with inverted Y handling toggle",
+  },
+  extent: {
+    extent_type: "pixel",
+    x: [120, 185, 250, 315, 380, 445, 510, 575],
+    y: [340, 320, 295, 280, 260, 240, 220, 200],
+  },
+  payload: {
+    payload_type: "object",
+    description: "notehead_centers",
+    value: [
+      { pitch: "C4" },
+      { pitch: "D4" },
+      { pitch: "E4" },
+      { pitch: "F4" },
+      { pitch: "G4" },
+      { pitch: "A4" },
+      { pitch: "B4" },
+      { pitch: "C5" },
+    ],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.98, 0.95, 0.97, 0.94, 0.96, 0.93, 0.95, 0.99],
+  },
+};
+
+// 15. TEXT_INTERVAL Extent with LYRICS Payload (BCP 47 Validated)
+const TEXT_INTERVAL_LYRICS_DATA: BoppAnnotation = {
+  media_id: "text:folk_song_transcript_en",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "linguist_aligner",
+    tool: "MFA_Montreal_Forced_Aligner",
+  },
+  sandbox: {
+    description: "Lyrics word spans with character offsets and lengths validated with IETF BCP 47 language tag",
+    text_transcript: "Row row row your boat gently down the stream",
+  },
+  extent: {
+    extent_type: "text_interval",
+    offset: [0, 4, 8, 13, 18, 23, 30, 35],
+    length: [3, 3, 3, 4, 4, 6, 4, 10],
+  },
+  payload: {
+    payload_type: "lyrics",
+    value: ["Row", "row", "row", "your", "boat", "gently", "down", "the stream"],
+    language: "en-US",
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.98, 0.99, 0.97, 0.96, 0.95, 0.94, 0.96, 0.98],
+  },
+};
+
+// 16. TEXT Extent with TAG Payload (Token Boundaries)
+const TEXT_TOKENS_DATA: BoppAnnotation = {
+  media_id: "text:dialogue_turn_tokens",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "spacy_tokenizer",
+    version: "3.7.0",
+    parameters: {},
+  },
+  sandbox: {
+    description: "Token character start offsets highlighting text segment start positions",
+  },
+  extent: {
+    extent_type: "text",
+    offset: [0, 4, 8, 13, 18, 23, 30, 35],
+  },
+  payload: {
+    payload_type: "tag",
+    value: ["token_0", "token_1", "token_2", "token_3", "token_4", "token_5", "token_6", "token_7"],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.99, 0.98, 0.99, 0.97, 0.98, 0.95, 0.96, 0.99],
+  },
+};
+
+// 17. SPHERICAL_TIME Extent with TAG Payload (3D Polar Audio Source Trajectory)
+const SPHERICAL_TIME_DATA: BoppAnnotation = {
+  media_id: "audio:ambisonics_soundfield_3d",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "DoA_Spatial_Tracker",
+    version: "2.0.0",
+    parameters: {},
+  },
+  sandbox: {
+    description: "3D polar coordinates (azimuth, elevation, radius) over time for moving spatial audio source",
+  },
+  extent: {
+    extent_type: "spherical_time",
+    azimuth: [-120.0, -90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0, 120.0],
+    elevation: [0.0, 5.0, 12.0, 20.0, 25.0, 20.0, 12.0, 5.0, 0.0],
+    radius: [2.5, 2.3, 2.0, 1.8, 1.5, 1.8, 2.0, 2.3, 2.5],
+    time: [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+  },
+  payload: {
+    payload_type: "tag",
+    value: ["Left Surround", "Left", "Center-Left", "Center-Left High", "Center Front", "Center-Right High", "Center-Right", "Right", "Right Surround"],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.92, 0.94, 0.95, 0.96, 0.98, 0.96, 0.95, 0.94, 0.91],
+  },
+};
+
+// 18. CARTESIAN_TIME Extent with TAG Payload (3D Cartesian Sound Source Trajectory)
+const CARTESIAN_TIME_DATA: BoppAnnotation = {
+  media_id: "sensor:spatial_microphone_array",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "MUSIC_3D_Cartesian_Localizer",
+    version: "1.5.0",
+    parameters: {},
+  },
+  sandbox: {
+    description: "3D Cartesian coordinates (x, y, z in meters) over time with overview timeline brush",
+  },
+  extent: {
+    extent_type: "cartesian_time",
+    x: [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0],
+    y: [1.0, 1.2, 1.5, 1.8, 2.0, 1.8, 1.5, 1.2, 1.0],
+    z: [0.0, 0.2, 0.5, 0.8, 1.0, 0.8, 0.5, 0.2, 0.0],
+    time: [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+  },
+  payload: {
+    payload_type: "tag",
+    value: ["WayPoint 1", "WayPoint 2", "WayPoint 3", "WayPoint 4", "Apex", "WayPoint 6", "WayPoint 7", "WayPoint 8", "WayPoint 9"],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.91, 0.93, 0.95, 0.97, 0.99, 0.96, 0.94, 0.92, 0.90],
+  },
+};
+
+// 19. NOTE Payload with Scientific Pitch Notation (SPN)
+const NOTE_SPN_DATA: BoppAnnotation = {
+  media_id: "audio:scale_scientific_pitch_notation",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "pitch_analyst",
+    tool: "spn_transcriber",
+  },
+  sandbox: {
+    description: "Scientific Pitch Notation (SPN) with Unicode accidentals (e.g. E♭4, A♭4, B♭4) mapped to piano roll",
+  },
+  extent: {
+    extent_type: "time_interval",
+    time: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
+    duration: [0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.9],
+  },
+  payload: {
+    payload_type: "note",
+    value: ["C4", "D4", "E♭4", "F4", "G4", "A♭4", "B♭4", "C5"],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.98, 0.95, 0.94, 0.96, 0.97, 0.93, 0.95, 0.99],
+  },
+};
+
+// 20. SCORE_QUARTER_FLOAT Extent with NOTE Payload
+const SCORE_QUARTER_FLOAT_DATA: BoppAnnotation = {
+  media_id: "score:continuous_quarter_measure",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "midi_to_quarter_converter",
+    version: "1.1.0",
+    parameters: {},
+  },
+  sandbox: {
+    description: "Floating-point score quarter positions (extent: score_quarter_float)",
+  },
+  extent: {
+    extent_type: "score_quarter_float",
+    quarter: [0.0, 1.0, 2.0, 2.5, 3.0, 4.0],
+  },
+  payload: {
+    payload_type: "note",
+    value: ["C4", "E4", "G4", "B♭4", "C5", "G4"],
+  },
+};
+
+// 21. SCORE_INTERVAL_FLOAT Extent with CHORD Payload
+const SCORE_INTERVAL_FLOAT_DATA: BoppAnnotation = {
+  media_id: "score:chopin_prelude_float_quarters",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "music_theorist",
+    tool: "musescore_score_annotator",
+  },
+  sandbox: {
+    description: "Floating-point score interval quarter note bounds [quarter, duration] (extent: score_interval_float)",
+  },
+  extent: {
+    extent_type: "score_interval_float",
+    quarter: [0.0, 0.5, 1.0, 2.0, 2.25, 3.0],
+    duration: [0.5, 0.5, 1.0, 0.25, 0.75, 1.0],
+  },
+  payload: {
+    payload_type: "chord",
+    value: ["C:maj", "G:maj", "A:min", "F:maj", "G:7", "C:maj"],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [0.96, 0.94, 0.98, 0.92, 0.95, 0.99],
   },
 };
 
@@ -1402,9 +1670,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Global Tags: Genres & Moods (Likelihood)",
     category: "music",
     format: "json",
-    description: "tag_open payload with NO extent: global descriptive genres, instruments, and style tags with likelihood confidence bars.",
+    description: "tag payload with NO extent: global descriptive genres, instruments, and style tags with likelihood confidence bars.",
     extentType: "none",
-    payloadType: "tag_open",
+    payloadType: "tag",
     confidenceType: "likelihood",
     data: TAGS_GLOBAL_DATA,
   },
@@ -1414,9 +1682,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Global Tags: Genres & Moods (No Confidence)",
     category: "music",
     format: "json",
-    description: "tag_open payload with NO extent and NO confidence: global descriptive media tags rendered as an alphabetized collection of badges.",
+    description: "tag payload with NO extent and NO confidence: global descriptive media tags rendered as an alphabetized collection of badges.",
     extentType: "none",
-    payloadType: "tag_open",
+    payloadType: "tag",
     data: TAGS_GLOBAL_NOCONF,
   },
 
@@ -1449,24 +1717,24 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
   {
     id: "time_onset_likelihood",
     filename: "time_points/03_onset_percussive_likelihood.bopp",
-    title: "Percussive Onsets (Likelihood)",
+    title: "Percussive Markers (Likelihood)",
     category: "music",
     format: "json",
-    description: "time extent with onset payload: percussive audio transients detected by SuperFlux with likelihood confidence pins.",
+    description: "time extent with marker payload: percussive audio transients detected by SuperFlux with likelihood confidence pins.",
     extentType: "time",
-    payloadType: "onset",
+    payloadType: "marker",
     confidenceType: "likelihood",
     data: PERCUSSIVE_ONSET_LIKELIHOOD,
   },
   {
     id: "time_onset_noconf",
     filename: "time_points/04_onset_percussive_noconf.bopp",
-    title: "Percussive Onsets (No Confidence)",
+    title: "Percussive Markers (No Confidence)",
     category: "music",
     format: "json",
-    description: "time extent with onset payload: percussive transient timestamps without confidence ratings.",
+    description: "time extent with marker payload: percussive transient timestamps without confidence ratings.",
     extentType: "time",
-    payloadType: "onset",
+    payloadType: "marker",
     data: PERCUSSIVE_ONSET_NOCONF,
   },
   {
@@ -1475,9 +1743,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Vocal Melody F0: CREPE (Likelihood)",
     category: "music",
     format: "json",
-    description: "time extent with pitch_contour payload: continuous vocal pitch contour tracked by CREPE with activation likelihood confidence ratings and voiced state trajectory.",
+    description: "time extent with frequency_hz payload: continuous vocal pitch contour tracked by CREPE with activation likelihood confidence ratings and voiced state trajectory.",
     extentType: "time",
-    payloadType: "pitch_contour",
+    payloadType: "frequency_hz",
     confidenceType: "likelihood",
     data: PITCH_DATA,
   },
@@ -1487,9 +1755,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Puccini Vocal Aria F0: pYIN (Variance)",
     category: "music",
     format: "json",
-    description: "time extent with pitch_contour payload: Puccini soprano aria with rich vibrato, voicing state, statistical error whiskers, and line overview.",
+    description: "time extent with frequency_hz payload: Puccini soprano aria with rich vibrato, voicing state, statistical error whiskers, and line overview.",
     extentType: "time",
-    payloadType: "pitch_contour",
+    payloadType: "frequency_hz",
     confidenceType: "variance",
     data: VOCAL_ARIA_DATA,
   },
@@ -1499,9 +1767,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Vocal Melody F0 (No Confidence)",
     category: "music",
     format: "json",
-    description: "time extent with pitch_contour payload: continuous fundamental frequency trajectory without confidence uncertainty ribbons.",
+    description: "time extent with frequency_hz payload: continuous fundamental frequency trajectory without confidence uncertainty ribbons.",
     extentType: "time",
-    payloadType: "pitch_contour",
+    payloadType: "frequency_hz",
     data: PITCH_DATA_NOCONF,
   },
   {
@@ -1607,9 +1875,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Hierarchical Form: Multi-Segment (Agreement)",
     category: "music",
     format: "json",
-    description: "time_interval extent with multi_segment payload: Level 0 sections and Level 1 sub-phrases with inter-annotator agreement consensus votes.",
+    description: "time_interval extent with tag payload: Level 0 sections and Level 1 sub-phrases with inter-annotator agreement consensus votes.",
     extentType: "time_interval",
-    payloadType: "multi_segment",
+    payloadType: "tag",
     confidenceType: "agreement",
     data: STRUCTURE_DATA,
   },
@@ -1619,9 +1887,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Hierarchical Form: Multi-Segment (No Confidence)",
     category: "music",
     format: "json",
-    description: "time_interval extent with multi_segment payload: structural sections across multiple hierarchy levels without confidence meters.",
+    description: "time_interval extent with tag payload: structural sections across multiple hierarchy levels without confidence meters.",
     extentType: "time_interval",
-    payloadType: "multi_segment",
+    payloadType: "tag",
     data: STRUCTURE_DATA_NOCONF,
   },
   {
@@ -1630,9 +1898,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Song Sections: Disjoint Layout (Likelihood)",
     category: "music",
     format: "json",
-    description: "time_interval extent with segment_open payload: single-level song sections with likelihood confidence meters and interactive layout toggle.",
+    description: "time_interval extent with tag payload: single-level song sections with likelihood confidence meters and interactive layout toggle.",
     extentType: "time_interval",
-    payloadType: "segment_open",
+    payloadType: "tag",
     confidenceType: "likelihood",
     data: SEGMENT_OPEN_DISJOINT,
   },
@@ -1642,9 +1910,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Song Sections: Crowd Agreement 25 Annotators",
     category: "music",
     format: "json",
-    description: "time_interval extent with segment_open payload: 25-annotator crowd consensus agreement on song section boundaries.",
+    description: "time_interval extent with tag payload: 25-annotator crowd consensus agreement on song section boundaries.",
     extentType: "time_interval",
-    payloadType: "segment_open",
+    payloadType: "tag",
     confidenceType: "agreement",
     data: CROWD_AGREEMENT_DATA,
   },
@@ -1654,9 +1922,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Song Sections: Disjoint Layout (No Confidence)",
     category: "music",
     format: "json",
-    description: "time_interval extent with segment_open payload: song sections without confidence meters.",
+    description: "time_interval extent with tag payload: song sections without confidence meters.",
     extentType: "time_interval",
-    payloadType: "segment_open",
+    payloadType: "tag",
     data: SEGMENT_OPEN_NOCONF,
   },
   {
@@ -1689,9 +1957,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Instrument Presence: Disjoint (No Confidence)",
     category: "music",
     format: "json",
-    description: "time_interval extent with tag_open payload: non-overlapping orchestral instrument presences rendered on a single row.",
+    description: "time_interval extent with tag payload: non-overlapping orchestral instrument presences rendered on a single row.",
     extentType: "time_interval",
-    payloadType: "tag_open",
+    payloadType: "tag",
     data: TAGS_TIME_INTERVAL_DATA,
   },
   {
@@ -1700,9 +1968,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Concurrent Band Tracks: Overlapping (Likelihood)",
     category: "music",
     format: "json",
-    description: "time_interval extent with tag_open payload: concurrent multitrack instruments rendered across multiple distinct rows to avoid collisions.",
+    description: "time_interval extent with tag payload: concurrent multitrack instruments rendered across multiple distinct rows to avoid collisions.",
     extentType: "time_interval",
-    payloadType: "tag_open",
+    payloadType: "tag",
     confidenceType: "likelihood",
     data: TAGS_OVERLAPPING_DATA,
   },
@@ -1747,9 +2015,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Note Frequencies (Hz): Piano Roll (Log Pitch)",
     category: "music",
     format: "json",
-    description: "time_interval extent with note_hz payload: note frequencies in Hz mapped to numerical log-frequency semitone axis.",
+    description: "time_interval extent with frequency_hz payload: note frequencies in Hz mapped to numerical log-frequency semitone axis.",
     extentType: "time_interval",
-    payloadType: "note_hz",
+    payloadType: "frequency_hz",
     confidenceType: "likelihood",
     data: NOTE_HZ_PIANOROLL_DATA,
   },
@@ -1849,9 +2117,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Bioacoustic Spectrogram Boxes (Likelihood)",
     category: "bioacoustic",
     format: "json",
-    description: "time_frequency_box extent with tag_open payload: avian song spectrogram bounding boxes in Hz with BirdNET likelihood ratings.",
+    description: "time_frequency_box extent with tag payload: avian song spectrogram bounding boxes in Hz with BirdNET likelihood ratings.",
     extentType: "time_frequency_box",
-    payloadType: "tag_open",
+    payloadType: "tag",
     confidenceType: "likelihood",
     data: TF_DATA,
   },
@@ -1861,9 +2129,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "Bioacoustic Spectrogram Boxes (No Confidence)",
     category: "bioacoustic",
     format: "json",
-    description: "time_frequency_box extent with tag_open payload: spectrogram frequency-time bounding boxes without confidence values.",
+    description: "time_frequency_box extent with tag payload: spectrogram frequency-time bounding boxes without confidence values.",
     extentType: "time_frequency_box",
-    payloadType: "tag_open",
+    payloadType: "tag",
     data: TF_DATA_NOCONF,
   },
   {
@@ -1872,9 +2140,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "OMR Sheet Music Pixels (No Confidence)",
     category: "omr",
     format: "json",
-    description: "pixel_box extent with tag_open payload: scanned sheet music glyph bounding boxes in image pixel coordinates.",
+    description: "pixel_box extent with tag payload: scanned sheet music glyph bounding boxes in image pixel coordinates.",
     extentType: "pixel_box",
-    payloadType: "tag_open",
+    payloadType: "tag",
     data: PIXEL_DATA,
   },
   {
@@ -1883,11 +2151,122 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     title: "OMR Sheet Music Pixels (Likelihood)",
     category: "omr",
     format: "json",
-    description: "pixel_box extent with tag_open payload: OMR glyph detections with optical model classification likelihood confidences.",
+    description: "pixel_box extent with tag payload: OMR glyph detections with optical model classification likelihood confidences.",
     extentType: "pixel_box",
-    payloadType: "tag_open",
+    payloadType: "tag",
     confidenceType: "likelihood",
     data: PIXEL_DATA_LIKELIHOOD,
+  },
+
+  // =========================================================================
+  // 7. NEW EXTENTS & PAYLOADS (BOPP v1 Revisions)
+  // =========================================================================
+  {
+    id: "time_uniform_frequency_hz_likelihood",
+    filename: "time_uniform/01_frequency_hz_sweep_likelihood.bopp",
+    title: "Synthesized F0 Sweep: Time Uniform (Likelihood)",
+    category: "music",
+    format: "json",
+    description: "time_uniform extent with frequency_hz payload: regular dynamic time grid t[i] = start_time + i * sampling_period with voiced flag dimming.",
+    extentType: "time_uniform",
+    payloadType: "frequency_hz",
+    confidenceType: "likelihood",
+    data: TIME_UNIFORM_DATA,
+  },
+  {
+    id: "spatial_pixel_notehead_centers",
+    filename: "spatial_boxes/05_pixel_2d_noteheads.bopp",
+    title: "OMR Notehead Centers: 2D Pixel Scatter (Likelihood)",
+    category: "omr",
+    format: "json",
+    description: "pixel extent with object payload: 2D notehead coordinates with inverted Y handling toggle.",
+    extentType: "pixel",
+    payloadType: "object",
+    confidenceType: "likelihood",
+    data: PIXEL_2D_DATA,
+  },
+  {
+    id: "text_interval_lyrics_word_spans",
+    filename: "text/01_text_interval_lyrics_word_spans.bopp",
+    title: "Lyrics Word Spans: Text Interval (Likelihood)",
+    category: "music",
+    format: "json",
+    description: "text_interval extent with lyrics payload: character offset ranges with IETF BCP 47 language validation and transcript highlighting.",
+    extentType: "text_interval",
+    payloadType: "lyrics",
+    confidenceType: "likelihood",
+    data: TEXT_INTERVAL_LYRICS_DATA,
+  },
+  {
+    id: "text_tokens_tag_boundaries",
+    filename: "text/02_text_tokens_tag_boundaries.bopp",
+    title: "Token Boundaries: Text (Likelihood)",
+    category: "music",
+    format: "json",
+    description: "text extent with tag payload: discrete character offset boundaries marking token start positions.",
+    extentType: "text",
+    payloadType: "tag",
+    confidenceType: "likelihood",
+    data: TEXT_TOKENS_DATA,
+  },
+  {
+    id: "spatial_spherical_time_trajectory",
+    filename: "spatial_boxes/06_spherical_time_trajectory.bopp",
+    title: "Spatial Soundfield: Spherical Time (Likelihood)",
+    category: "music",
+    format: "json",
+    description: "spherical_time extent with tag payload: 3D polar azimuth vs elevation trajectory with radius scaling and overview timeline brush.",
+    extentType: "spherical_time",
+    payloadType: "tag",
+    confidenceType: "likelihood",
+    data: SPHERICAL_TIME_DATA,
+  },
+  {
+    id: "spatial_cartesian_time_trajectory",
+    filename: "spatial_boxes/07_cartesian_time_trajectory.bopp",
+    title: "Microphone Array: Cartesian Time (Likelihood)",
+    category: "music",
+    format: "json",
+    description: "cartesian_time extent with tag payload: 3D Cartesian coordinates [x, y, z] over time with overview timeline brush.",
+    extentType: "cartesian_time",
+    payloadType: "tag",
+    confidenceType: "likelihood",
+    data: CARTESIAN_TIME_DATA,
+  },
+  {
+    id: "interval_note_spn_pianoroll",
+    filename: "time_intervals/19_note_spn_pianoroll.bopp",
+    title: "Scientific Pitch Notation: SPN Piano Roll (Likelihood)",
+    category: "music",
+    format: "json",
+    description: "time_interval extent with note payload: Scientific Pitch Notation strings with Unicode accidentals mapped to piano roll.",
+    extentType: "time_interval",
+    payloadType: "note",
+    confidenceType: "likelihood",
+    data: NOTE_SPN_DATA,
+  },
+  {
+    id: "symbolic_score_quarter_float_notes",
+    filename: "symbolic_midi_score/08_score_quarter_float_notes.bopp",
+    title: "Score Beat Points: Float Quarters (No Confidence)",
+    category: "score",
+    format: "json",
+    description: "score_quarter_float extent with note payload: continuous floating-point score beat positions.",
+    extentType: "score_quarter_float",
+    payloadType: "note",
+    data: SCORE_QUARTER_FLOAT_DATA,
+  },
+  {
+    id: "symbolic_score_interval_float_chords",
+    filename: "symbolic_midi_score/09_score_interval_float_chords.bopp",
+    title: "Chords: Float Score Quarters (Likelihood)",
+    category: "score",
+    format: "json",
+    description: "score_interval_float extent with chord payload: floating-point quarter intervals with likelihood confidence.",
+    extentType: "score_interval_float",
+    payloadType: "chord",
+    confidenceType: "likelihood",
+    data: SCORE_INTERVAL_FLOAT_DATA,
   },
 ];
 

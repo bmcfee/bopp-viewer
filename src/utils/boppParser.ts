@@ -79,7 +79,10 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
     return [];
   }
 
-  // Determine observation count from payload arrays
+  const extent = annotation.extent;
+  const confidence = annotation.confidence;
+
+  // Determine observation count across payload, extent, and confidence facets
   let rowCount = 0;
   if ('value' in payload && Array.isArray(payload.value)) {
     rowCount = payload.value.length;
@@ -87,10 +90,17 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
     rowCount = payload.label.length;
   } else if ('valence' in payload && Array.isArray(payload.valence)) {
     rowCount = payload.valence.length;
+  } else if (extent) {
+    const ext = extent as Record<string, any>;
+    if (Array.isArray(ext.time)) rowCount = ext.time.length;
+    else if (Array.isArray(ext.x)) rowCount = ext.x.length;
+    else if (Array.isArray(ext.offset)) rowCount = ext.offset.length;
+    else if (Array.isArray(ext.azimuth)) rowCount = ext.azimuth.length;
+    else if (Array.isArray(ext.quarter)) rowCount = ext.quarter.length;
+    else if (Array.isArray(ext.tick)) rowCount = ext.tick.length;
+  } else if (confidence && Array.isArray((confidence as any).confidence)) {
+    rowCount = (confidence as any).confidence.length;
   }
-
-  const extent = annotation.extent;
-  const confidence = annotation.confidence;
 
   const records: TabularRecord[] = [];
 
@@ -121,11 +131,85 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
           record.freq_max = extent.freq_max?.[i];
           break;
         }
+        case 'time_uniform': {
+          const startTime = typeof extent.start_time === 'number' ? extent.start_time : 0;
+          const sp = typeof extent.sampling_period === 'number' ? extent.sampling_period : 1;
+          record.time = +(startTime + i * sp).toFixed(6);
+          break;
+        }
+        case 'pixel': {
+          record.x = extent.x?.[i];
+          record.y = extent.y?.[i];
+          break;
+        }
         case 'pixel_box': {
           record.x = extent.x?.[i];
           record.y = extent.y?.[i];
           record.width = extent.width?.[i];
           record.height = extent.height?.[i];
+          break;
+        }
+        case 'text': {
+          record.offset = extent.offset?.[i];
+          break;
+        }
+        case 'text_interval': {
+          record.offset = extent.offset?.[i];
+          record.length = extent.length?.[i];
+          break;
+        }
+        case 'spherical': {
+          record.azimuth = extent.azimuth?.[i];
+          record.elevation = extent.elevation?.[i];
+          record.radius = extent.radius?.[i];
+          break;
+        }
+        case 'spherical_time': {
+          record.time = extent.time?.[i];
+          record.azimuth = extent.azimuth?.[i];
+          record.elevation = extent.elevation?.[i];
+          record.radius = extent.radius?.[i];
+          break;
+        }
+        case 'spherical_time_interval': {
+          record.time = extent.time?.[i];
+          record.duration = extent.duration?.[i];
+          record.azimuth = extent.azimuth?.[i];
+          record.elevation = extent.elevation?.[i];
+          record.radius = extent.radius?.[i];
+          break;
+        }
+        case 'cartesian': {
+          record.x = extent.x?.[i];
+          record.y = extent.y?.[i];
+          record.z = extent.z?.[i];
+          break;
+        }
+        case 'cartesian_time': {
+          record.time = extent.time?.[i];
+          record.x = extent.x?.[i];
+          record.y = extent.y?.[i];
+          record.z = extent.z?.[i];
+          break;
+        }
+        case 'cartesian_time_interval': {
+          record.time = extent.time?.[i];
+          record.duration = extent.duration?.[i];
+          record.x = extent.x?.[i];
+          record.y = extent.y?.[i];
+          record.z = extent.z?.[i];
+          break;
+        }
+        case 'score_quarter_float': {
+          record.quarter = extent.quarter?.[i];
+          record.quarter_str = String(extent.quarter?.[i]);
+          break;
+        }
+        case 'score_interval_float': {
+          record.quarter = extent.quarter?.[i];
+          record.duration = extent.duration?.[i];
+          record.quarter_str = String(extent.quarter?.[i]);
+          record.quarter_duration_str = String(extent.duration?.[i]);
           break;
         }
         case 'score_quarter': {
@@ -161,6 +245,10 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
 
     // Payload fields
     switch (payload.payload_type) {
+      case 'marker':
+        record.description = payload.description;
+        record.value = payload.description;
+        break;
       case 'beat':
         record.value = payload.value?.[i];
         break;
@@ -174,11 +262,39 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
       }
       case 'lyrics':
         record.value = payload.value?.[i];
+        record.language = payload.language;
         break;
       case 'mood_thayer':
         record.valence = payload.valence?.[i];
         record.arousal = payload.arousal?.[i];
         break;
+      case 'note': {
+        const raw = payload.value?.[i];
+        record.value = raw;
+        record.note_name = raw;
+        const midi = noteNameToMidi(raw);
+        if (midi !== null) {
+          record.midi = midi;
+          record.hz = midiToHz(midi);
+        }
+        break;
+      }
+      case 'frequency_hz': {
+        const rawHz = payload.value?.[i];
+        record.value = rawHz;
+        record.hz = typeof rawHz === 'number' ? rawHz : null;
+        if (typeof rawHz === 'number' && rawHz > 0) {
+          const midi = hzToMidi(rawHz);
+          record.midi = midi;
+          if (midi !== null) {
+            record.note_name = midiToNoteName(midi);
+          }
+        }
+        if (Array.isArray(payload.voiced)) {
+          record.voiced = Boolean(payload.voiced[i]);
+        }
+        break;
+      }
       case 'note_hz': {
         const raw = payload.value?.[i];
         let hz: number | null = null;
@@ -201,11 +317,17 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
         }
         record.value = midi ?? hz ?? raw;
         record.hz = hz ?? (typeof midi === 'number' ? midiToHz(midi) : null);
+        record.frequency = hz ?? (typeof raw === 'number' ? raw : (typeof midi === 'number' ? midiToHz(midi) : undefined));
         record.midi = midi;
         if (typeof midi === 'number') {
           record.note_name = midiToNoteName(midi);
         } else if (typeof raw === 'string') {
           record.note_name = raw;
+        }
+        if (Array.isArray(payload.voiced)) {
+          const isV = Boolean(payload.voiced[i]);
+          record.voiced = isV;
+          record.voicing = isV ? 1 : 0;
         }
         break;
       }
@@ -229,9 +351,13 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
       }
       case 'object':
         record.value = payload.value?.[i];
+        if (payload.description) {
+          record.description = payload.description;
+        }
         break;
       case 'onset':
         record.value = (payload.value?.[i] as any) ?? 1;
+        record.description = payload.description || 'onset';
         break;
       case 'pitch_contour': {
         const item = payload.value?.[i];
@@ -243,6 +369,7 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
           }
           record.frequency = item.frequency;
           record.voicing = v;
+          record.voiced = v === 1;
           record.value = item.frequency;
         } else {
           const pAny = payload as unknown as Record<string, any>;
@@ -256,6 +383,7 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
           }
           record.frequency = f;
           record.voicing = v;
+          record.voiced = v === 1;
           record.value = f;
         }
         break;
@@ -272,11 +400,16 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
       case 'segment_open':
         record.value = payload.value?.[i];
         break;
+      case 'tag':
       case 'tag_open':
         record.value = payload.value?.[i];
         break;
       case 'tempo':
         record.value = payload.value?.[i];
+        break;
+      case 'ext':
+        record.value = payload.value?.[i] as string | number | boolean | Record<string, unknown> | undefined;
+        record.ext_schema = payload.ext_schema;
         break;
     }
 
@@ -304,8 +437,17 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
         case 'agreement': {
           const conf = confidence.confidence?.[i];
           record.confidence = conf;
-          const nTotal = confidence.n_annotators?.[i] ?? confidence.n_annotators_common;
+          const nTotal =
+            confidence.num_annotators?.[i] ??
+            confidence.num_annotators_common ??
+            confidence.n_annotators?.[i] ??
+            confidence.n_annotators_common;
+
+          record.num_annotators = nTotal;
           record.n_annotators = nTotal;
+          record.num_annotators_common = confidence.num_annotators_common ?? confidence.n_annotators_common;
+          record.n_annotators_common = record.num_annotators_common;
+
           if (typeof conf === 'number') {
             const pct = Math.round(conf * 100);
             record.confidence_pct = pct;
@@ -326,6 +468,7 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
             } else {
               const agree5 = Math.max(0, Math.min(5, Math.round(conf * 5)));
               record.n_agree = agree5;
+              record.num_annotators = 5;
               record.n_annotators = 5;
               record.agreement_ratio_str = `${agree5}/5`;
               record.agreement_text = `${pct}% consensus (${agree5}/5)`;
@@ -376,7 +519,7 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
 }
 
 /**
- * Maps musical note name string (e.g. 'C3', 'D#4', 'Eb2', 'C♯3') to MIDI note number (0..127).
+ * Maps musical note name string (e.g. 'C3', 'D#4', 'Eb2', 'C♯3', 'F𝄪5', 'B𝄫2', 'D♮4') to MIDI note number (0..127).
  * If already a number, returns the number.
  */
 export function noteNameToMidi(noteName: string | number | null | undefined): number | null {
@@ -385,10 +528,11 @@ export function noteNameToMidi(noteName: string | number | null | undefined): nu
   }
   if (!noteName || typeof noteName !== 'string') return null;
 
-  const cleaned = toAsciiAccidentals(noteName.trim());
-  const match = cleaned.match(/^([A-Ga-g])([b#]?)(-?\d+)?$/);
+  const trimmed = noteName.trim();
+  // Match SPN: Root (A-G), optional accidental (b, #, ♯, ♭, 𝄫, 𝄪, ♮, etc.), optional octave (-1, 0, 4, etc.)
+  const match = trimmed.match(/^([A-Ga-g])([b♭]*|𝄫|[#♯]*|𝄪|♮)?(-?\d+)?$/);
   if (!match) {
-    const num = parseFloat(cleaned);
+    const num = parseFloat(trimmed);
     return isFinite(num) ? num : null;
   }
 
@@ -397,21 +541,31 @@ export function noteNameToMidi(noteName: string | number | null | undefined): nu
   const octaveStr = match[3];
   const octave = octaveStr !== undefined ? parseInt(octaveStr, 10) : 4;
 
-  const semitones: Record<string, number> = {
-    C: 0, 'C#': 1, Db: 1,
-    D: 2, 'D#': 3, Eb: 3,
+  const baseSemitones: Record<string, number> = {
+    C: 0,
+    D: 2,
     E: 4,
-    F: 5, 'F#': 6, Gb: 6,
-    G: 7, 'G#': 8, Ab: 8,
-    A: 9, 'A#': 10, Bb: 10,
+    F: 5,
+    G: 7,
+    A: 9,
     B: 11,
   };
 
-  const key = rootChar + acc;
-  const semitone = semitones[key];
-  if (semitone === undefined) return null;
+  const base = baseSemitones[rootChar];
+  if (base === undefined) return null;
 
-  return (octave + 1) * 12 + semitone;
+  // Calculate accidental semitone shift
+  let shift = 0;
+  if (acc.includes('𝄪')) shift += 2;
+  else if (acc.includes('𝄫')) shift -= 2;
+  else {
+    for (const ch of acc) {
+      if (ch === '#' || ch === '♯') shift += 1;
+      else if (ch === 'b' || ch === '♭') shift -= 1;
+    }
+  }
+
+  return (octave + 1) * 12 + base + shift;
 }
 
 /**

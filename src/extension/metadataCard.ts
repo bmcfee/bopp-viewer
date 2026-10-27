@@ -252,7 +252,7 @@ export function createAnnotationMetadataCardDOM(
     confBadge.style.color = isDark ? '#ffffff' : '#0f172a';
     confBadge.style.border = isDark ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid #cbd5e1';
     const confRecord = annotation.confidence as unknown as Record<string, unknown>;
-    const nTotal = confRecord?.n_annotators_common;
+    const nTotal = confRecord?.num_annotators_common ?? confRecord?.n_annotators_common;
     const cType = annotation.confidence.confidence_type;
     confBadge.innerText = cType === 'agreement'
       ? (typeof nTotal === 'number' ? `👥 agreement (${nTotal})` : '👥 agreement')

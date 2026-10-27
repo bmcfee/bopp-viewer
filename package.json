@@ -11,6 +11,7 @@
   "types": "src/extension/index.ts",
   "type": "module",
   "scripts": {
+    "codegen": "node scripts/generate_types.mjs",
     "generate:types": "node scripts/generate_types.mjs",
     "predev": "node scripts/generate_types.mjs",
     "prebuild": "node scripts/generate_types.mjs",

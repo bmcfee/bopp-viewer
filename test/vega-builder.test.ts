@@ -330,7 +330,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('11. Playhead mapping directly matches mark timestamps with zero offset across all datasets', async () => {
     for (const sample of SAMPLE_DATASETS) {
       const extentType = sample.data.extent?.extent_type;
-      if (!extentType || extentType === 'pixel_box') continue;
+      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval') continue;
 
       const tabular = annotationToTabular(sample.data);
       const spec = buildBoppVegaLiteSpec(sample.data, tabular, {
@@ -483,7 +483,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('16. getVegaViewPlotOrigin accounts for both view.padding() and view.origin() so playhead aligns with canvas marks', async () => {
     for (const sample of SAMPLE_DATASETS) {
       const extentType = sample.data.extent?.extent_type;
-      if (!extentType || extentType === 'pixel_box') continue;
+      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval') continue;
 
       const tabular = annotationToTabular(sample.data);
       const spec = buildBoppVegaLiteSpec(sample.data, tabular, {
@@ -517,7 +517,9 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
       const sgRoot = (view as any).scenegraph?.()?.root?.items?.[0];
       const detailGroup = resolveVegaGroupItem(sgRoot, 'concat_0_group', 0);
       assert.ok(detailGroup, `resolveVegaGroupItem must resolve detailGroup for ${sample.id}`);
-      const detailScale = view.scale('concat_0_x') || view.scale('x');
+      const scaleNames = Object.keys((view as any)._runtime?.scales || {});
+      const detailScaleName = ['concat_0_x', 'x', 'layer_0_x'].find(k => scaleNames.includes(k));
+      const detailScale = detailScaleName ? view.scale(detailScaleName) : null;
       if (detailScale) {
         const span = getScaleRangeSpan(detailScale, 0);
         assert.ok(span > 0, `getScaleRangeSpan must return positive pixel width for ${sample.id}`);
@@ -528,7 +530,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('17. Demo audio synthesis and BoppAudioPlayer durations match timeline bounds across all extent types (including score Fractions)', () => {
     for (const sample of SAMPLE_DATASETS) {
       const extentType = sample.data.extent?.extent_type;
-      if (!extentType || extentType === 'pixel_box') continue;
+      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval') continue;
 
       const tabular = annotationToTabular(sample.data);
       const stats = computeSummaryStats(sample.data, tabular);
@@ -550,6 +552,55 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
         );
       }
     }
+  });
+
+  await t.test('18. BOPP v1 schemas and visualizations compile and bind properly', () => {
+    // A. time_uniform extent: dynamic time coordinates
+    const uniformDs = SAMPLE_DATASETS.find(d => d.id === 'time_uniform_frequency_hz_likelihood')!;
+    const uniformTabular = annotationToTabular(uniformDs.data);
+    const uniformSpec = buildBoppVegaLiteSpec(uniformDs.data, uniformTabular, { isDark: true }) as any;
+    assert.ok(uniformSpec, 'time_uniform spec must compile');
+    const compiledUniform = vl.compile(uniformSpec);
+    assert.ok(compiledUniform.spec, 'time_uniform spec must compile to valid Vega');
+
+    // B. pixel extent: 2D scatter plot with inverted Y toggle
+    const pixelDs = SAMPLE_DATASETS.find(d => d.id === 'spatial_pixel_notehead_centers')!;
+    const pixelTabular = annotationToTabular(pixelDs.data);
+    const pixelSpec = buildBoppVegaLiteSpec(pixelDs.data, pixelTabular, { isDark: false }) as any;
+    assert.ok(pixelSpec, 'pixel 2D spec must be generated');
+    const compiledPixel = vl.compile(pixelSpec);
+    assert.ok(compiledPixel.spec, 'pixel 2D spec must compile to valid Vega');
+
+    // C. text & text_interval extents: character offsets
+    const textIntervalDs = SAMPLE_DATASETS.find(d => d.id === 'text_interval_lyrics_word_spans')!;
+    const textTabular = annotationToTabular(textIntervalDs.data);
+    const textSpec = buildBoppVegaLiteSpec(textIntervalDs.data, textTabular, { isDark: true }) as any;
+    assert.ok(textSpec, 'text_interval spec must be generated');
+    const compiledText = vl.compile(textSpec);
+    assert.ok(compiledText.spec, 'text_interval spec must compile to valid Vega');
+
+    // D. spherical_time & cartesian_time: 3D/polar trajectories with overview brush
+    const sphericalDs = SAMPLE_DATASETS.find(d => d.id === 'spatial_spherical_time_trajectory')!;
+    const sphericalTabular = annotationToTabular(sphericalDs.data);
+    const sphericalSpec = buildBoppVegaLiteSpec(sphericalDs.data, sphericalTabular, { isDark: true }) as any;
+    assert.ok(sphericalSpec, 'spherical_time spec must be generated');
+    const compiledSpherical = vl.compile(sphericalSpec);
+    assert.ok(compiledSpherical.spec, 'spherical_time spec must compile to valid Vega');
+
+    const cartesianDs = SAMPLE_DATASETS.find(d => d.id === 'spatial_cartesian_time_trajectory')!;
+    const cartesianTabular = annotationToTabular(cartesianDs.data);
+    const cartesianSpec = buildBoppVegaLiteSpec(cartesianDs.data, cartesianTabular, { isDark: true }) as any;
+    assert.ok(cartesianSpec, 'cartesian_time spec must be generated');
+    const compiledCartesian = vl.compile(cartesianSpec);
+    assert.ok(compiledCartesian.spec, 'cartesian_time spec must compile to valid Vega');
+
+    // E. note (SPN) piano roll with numerical pitch axis
+    const spnDs = SAMPLE_DATASETS.find(d => d.id === 'interval_note_spn_pianoroll')!;
+    const spnTabular = annotationToTabular(spnDs.data);
+    const spnSpec = buildBoppVegaLiteSpec(spnDs.data, spnTabular, { isDark: true }) as any;
+    assert.ok(spnSpec, 'SPN note piano roll spec must be generated');
+    const compiledSpn = vl.compile(spnSpec);
+    assert.ok(compiledSpn.spec, 'SPN note piano roll spec must compile to valid Vega');
   });
 });
 

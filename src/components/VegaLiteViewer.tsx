@@ -34,6 +34,7 @@ import {
   Tag,
   Copy,
   Check,
+  FileText,
 } from 'lucide-react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import {
@@ -153,7 +154,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   // Identify global genres / tags without confidence rating
   const isGlobalNoConfGenres = useMemo(() => {
     const isGlobal = !extentType || (extentType as string) === 'none';
-    const isTag = payloadType === 'tag_open' || (payloadType as string) === 'genre' || (payloadType as string) === 'tag';
+    const isTag = payloadType === 'tag_open' || (payloadType as string) === 'genre' || payloadType === 'tag';
     const hasConf = Boolean(annotation.confidence?.confidence_type) && tabularData.some(d => typeof d.confidence === 'number');
     return isGlobal && isTag && !hasConf;
   }, [extentType, payloadType, annotation.confidence?.confidence_type, tabularData]);
@@ -182,6 +183,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const isTimeFrequency =
     extentType === 'time_frequency_box' ||
     payloadType === 'pitch_contour' ||
+    payloadType === 'frequency_hz' ||
     payloadType === 'note_hz';
 
   // Summary stats for metric indicators
@@ -1645,6 +1647,54 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               >
                 Dismiss
               </button>
+            </div>
+          )}
+
+          {/* Interactive Text & Transcript Offset Highlighting Viewer */}
+          {(extentType === 'text' || extentType === 'text_interval') && (
+            <div className="mt-4 p-3.5 bg-slate-50 dark:bg-neutral-850 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs shadow-2xs">
+              <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-200 dark:border-neutral-700/60">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-500" />
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    Text Transcript & Character Offset Spans
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-200 dark:bg-neutral-800 text-slate-700 dark:text-slate-300">
+                    {tabularData.length} spans
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Inspect character span offsets [start, end)
+                </span>
+              </div>
+              <div className="p-3 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-mono text-[12px] leading-relaxed break-words flex flex-wrap gap-1.5">
+                {tabularData.map((d, idx) => {
+                  const offset = d.offset ?? 0;
+                  const len = d.length ?? 1;
+                  const val = String(d.value ?? '');
+                  const isActive = activeItem && activeItem.__index === d.__index;
+                  return (
+                    <span
+                      key={idx}
+                      onClick={() => setActiveItem(d)}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-all border ${
+                        isActive
+                          ? 'border-blue-500 bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-white shadow-xs'
+                          : 'border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/70 text-blue-900 dark:text-blue-100'
+                      }`}
+                      title={`Offset: [${offset}, ${offset + len}) | Length: ${len} | Value: "${val}"`}
+                    >
+                      <span className="text-[10px] text-slate-400 select-none">[{offset}]</span>
+                      <span className="font-semibold">{val}</span>
+                      {d.confidence != null && (
+                        <span className="text-[10px] text-slate-500">
+                          ({Math.round(Number(d.confidence) * 100)}%)
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

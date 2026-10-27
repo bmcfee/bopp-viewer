@@ -1,16 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "payload/onset.json",
-  "title": "Onset Payload",
+  "$id": "payload/tag.json",
+  "title": "Tag Payload",
   "type": "object",
   "properties": {
     "payload_type": {
-      "const": "onset"
+      "const": "tag"
     },
     "value": {
       "$ref": "../core.json#/$defs/Array",
-      "description": "Onset event markers",
-      "items": {}
+      "description": "Tag vocabularies allow all strings",
+      "items": {
+        "type": "string"
+      }
     }
   },
   "required": [

@@ -27,10 +27,20 @@ export interface ValidationResult {
   };
 }
 
-const HARTE_CHORD_REGEX = new RegExp(
-  '^((N|X)|(([A-G](b*|#*))((:(maj|min|dim|aug|1|5|sus2|sus4|maj6|min6|7|maj7|min7|dim7|hdim7|minmaj7|aug7|9|maj9|min9|11|maj11|min11|13|maj13|min13)(\\((\\*?((b*|#*)([1-9]|1[0-3]?))(,\\*?((b*|#*)([1-9]|1[0-3]?)))*)\\))?)|(:\\((\\*?((b*|#*)([1-9]|1[0-3]?))(,\\*?((b*|#*)([1-9]|1[0-3]?)))*)\\)))?((/((b*|#*)([1-9]|1[0-3]?)))?)?))$'
+// Canonical Unicode accidental regexes matching BOPP v1 schemas
+export const HARTE_CHORD_REGEX = new RegExp(
+  '^((N|X)|(([A-G]([b♭]*|𝄫|[#♯]*|𝄪|♮))((:(maj|min|dim|aug|1|5|sus2|sus4|maj6|min6|7|maj7|min7|dim7|hdim7|minmaj7|aug7|9|maj9|min9|11|maj11|min11|13|maj13|min13)(\\((\\*?(([b♭]*|𝄫|[#♯]*|𝄪|♮)([1-9]|1[0-3]?))(,\\*?(([b♭]*|𝄫|[#♯]*|𝄪|♮)([1-9]|1[0-3]?)))*)\\))?)|(:\\((\\*?(([b♭]*|𝄫|[#♯]*|𝄪|♮)([1-9]|1[0-3]?))(,\\*?(([b♭]*|𝄫|[#♯]*|𝄪|♮)([1-9]|1[0-3]?)))*)\\)))?((/(([b♭]*|𝄫|[#♯]*|𝄪|♮)([1-9]|1[0-3]?)))?)?))$'
 );
-const KEY_MODE_REGEX = /^(?:N|X|([A-Ga-g][b#]?)(?::(maj|major|min|minor|m|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian))?)$/i;
+
+export const KEY_MODE_REGEX = new RegExp(
+  '^((N)|(([A-G]([b♭]*|𝄫|[#♯]*|𝄪|♮))(:(major|minor|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian))?))$',
+  'i'
+);
+
+export const NOTE_SPN_REGEX = /^[A-G]([b♭]*|𝄫|[#♯]*|𝄪|♮)-?[0-9]+$/;
+
+export const BCP47_LANG_REGEX = /^[a-zA-Z]{2,3}(-[a-zA-Z]{3})?(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?(-([a-zA-Z0-9]{5,8}|[0-9][a-zA-Z0-9]{3}))*(-[a-wy-z0-9](-[a-zA-Z0-9]{2,8})+)*(-x(-[a-zA-Z0-9]{1,8})+)?$/;
+
 const UUID_V5_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-5[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 const MEDIA_ID_REGEX = /^[a-zA-Z0-9]+:.*$/;
 const BOPP_VERSION_REGEX = /^1\.\d+$/;
@@ -200,8 +210,31 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
     }
   }
 
+  // 3e. groupings check
+  if (ann.groupings !== undefined) {
+    if (!Array.isArray(ann.groupings)) {
+      issues.push({ severity: 'error', path: 'groupings', message: '"groupings" must be an array.' });
+    } else {
+      for (let gi = 0; gi < ann.groupings.length; gi++) {
+        const grp = ann.groupings[gi];
+        if (!grp || typeof grp !== 'object') {
+          issues.push({ severity: 'error', path: `groupings[${gi}]`, message: 'Grouping item must be an object.' });
+        } else {
+          if (typeof grp.name !== 'string') {
+            issues.push({ severity: 'error', path: `groupings[${gi}].name`, message: 'Grouping requires string "name".' });
+          } else passedCount++;
+          if (!Array.isArray(grp.ids) || grp.ids.some(id => typeof id !== 'number' || !Number.isInteger(id))) {
+            issues.push({ severity: 'error', path: `groupings[${gi}].ids`, message: 'Grouping requires integer array "ids".' });
+          } else passedCount++;
+        }
+      }
+    }
+  }
+
   // 4. payload check
   let payloadLength = 0;
+  let isMarkerPayload = false;
+
   if (!ann.payload) {
     issues.push({ severity: 'error', path: 'payload', message: 'Missing required field "payload".' });
   } else if (typeof ann.payload !== 'object') {
@@ -214,63 +247,123 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
       passedCount++;
       const pType = payload.payload_type;
 
-      // Extract primary array and validate specific payload rules
-      let primaryArray: unknown[] | null = null;
-      if (Array.isArray(payload.value)) primaryArray = payload.value;
-      else if (Array.isArray(payload.label)) primaryArray = payload.label;
-      else if (Array.isArray(payload.valence)) primaryArray = payload.valence;
-
-      if (!primaryArray) {
-        issues.push({ severity: 'error', path: 'payload', message: `Payload "${pType}" does not contain expected observation array.` });
+      if (pType === 'marker') {
+        isMarkerPayload = true;
+        if (typeof payload.description !== 'string' || !payload.description.trim()) {
+          issues.push({ severity: 'error', path: 'payload.description', message: 'Marker payload requires a non-empty string "description".' });
+        } else {
+          passedCount++;
+        }
       } else {
-        payloadLength = primaryArray.length;
-        passedCount++;
+        // Extract primary array and validate specific payload rules
+        let primaryArray: unknown[] | null = null;
+        if (Array.isArray(payload.value)) primaryArray = payload.value;
+        else if (Array.isArray(payload.label)) primaryArray = payload.label;
+        else if (Array.isArray(payload.valence)) primaryArray = payload.valence;
 
-        // Detailed checks per payload type
-        if (pType === 'chord' && Array.isArray(payload.value)) {
-          let invalidChordCount = 0;
-          for (let i = 0; i < payload.value.length; i++) {
-            const chord = payload.value[i];
-            if (typeof chord !== 'string' || !HARTE_CHORD_REGEX.test(chord)) {
-              invalidChordCount++;
-              if (invalidChordCount <= 3) {
-                issues.push({
-                  severity: 'warning',
-                  path: `payload.value[${i}]`,
-                  message: `Chord "${chord}" does not strictly match Harte notation pattern.`,
-                });
+        if (!primaryArray) {
+          issues.push({ severity: 'error', path: 'payload', message: `Payload "${pType}" does not contain expected observation array.` });
+        } else {
+          payloadLength = primaryArray.length;
+          passedCount++;
+
+          // Detailed checks per payload type
+          if (pType === 'chord' && Array.isArray(payload.value)) {
+            let invalidChordCount = 0;
+            for (let i = 0; i < payload.value.length; i++) {
+              const chord = payload.value[i];
+              if (typeof chord !== 'string' || !HARTE_CHORD_REGEX.test(chord)) {
+                invalidChordCount++;
+                if (invalidChordCount <= 3) {
+                  issues.push({
+                    severity: 'warning',
+                    path: `payload.value[${i}]`,
+                    message: `Chord "${chord}" does not strictly match Harte notation pattern.`,
+                  });
+                }
               }
             }
-          }
-          if (invalidChordCount === 0) passedCount++;
-        } else if (pType === 'key_mode' && Array.isArray(payload.value)) {
-          let invalidKey = 0;
-          for (let i = 0; i < payload.value.length; i++) {
-            const km = payload.value[i];
-            if (typeof km !== 'string' || !KEY_MODE_REGEX.test(km)) {
-              invalidKey++;
+            if (invalidChordCount === 0) passedCount++;
+          } else if (pType === 'key_mode' && Array.isArray(payload.value)) {
+            let invalidKey = 0;
+            for (let i = 0; i < payload.value.length; i++) {
+              const km = payload.value[i];
+              if (typeof km !== 'string' || !KEY_MODE_REGEX.test(km)) {
+                invalidKey++;
+              }
             }
-          }
-          if (invalidKey > 0) {
-            issues.push({ severity: 'warning', path: 'payload.value', message: `${invalidKey} key_mode entries do not match key notation standard.` });
-          } else {
-            passedCount++;
-          }
-        } else if (pType === 'multi_segment') {
-          if (!Array.isArray(payload.label) || !Array.isArray(payload.level)) {
-            issues.push({ severity: 'error', path: 'payload', message: 'multi_segment requires both "label" and "level" arrays.' });
-          } else if (payload.label.length !== payload.level.length) {
-            issues.push({ severity: 'error', path: 'payload', message: `multi_segment "label" length (${payload.label.length}) != "level" length (${payload.level.length}).` });
-          } else {
-            passedCount++;
-          }
-        } else if (pType === 'mood_thayer') {
-          if (!Array.isArray(payload.valence) || !Array.isArray(payload.arousal)) {
-            issues.push({ severity: 'error', path: 'payload', message: 'mood_thayer requires both "valence" and "arousal" arrays.' });
-          } else if (payload.valence.length !== payload.arousal.length) {
-            issues.push({ severity: 'error', path: 'payload', message: `mood_thayer valence length (${payload.valence.length}) != arousal length (${payload.arousal.length}).` });
-          } else {
-            passedCount++;
+            if (invalidKey > 0) {
+              issues.push({ severity: 'warning', path: 'payload.value', message: `${invalidKey} key_mode entries do not match key notation standard.` });
+            } else {
+              passedCount++;
+            }
+          } else if (pType === 'note' && Array.isArray(payload.value)) {
+            let invalidNotes = 0;
+            for (let i = 0; i < payload.value.length; i++) {
+              const n = payload.value[i];
+              if (typeof n !== 'string' || !NOTE_SPN_REGEX.test(n)) {
+                invalidNotes++;
+                if (invalidNotes <= 3) {
+                  issues.push({
+                    severity: 'error',
+                    path: `payload.value[${i}]`,
+                    message: `Note "${n}" does not match scientific pitch notation pattern ^[A-G][♯♭𝄪𝄫♮]?-?[0-9]+$.`,
+                  });
+                }
+              }
+            }
+            if (invalidNotes === 0) passedCount++;
+          } else if (pType === 'lyrics') {
+            if (typeof payload.language !== 'string' || !BCP47_LANG_REGEX.test(payload.language)) {
+              issues.push({
+                severity: 'error',
+                path: 'payload.language',
+                message: `Lyrics language tag "${payload.language}" must conform to IETF BCP 47 (e.g. "en", "en-US", "fr", "ja").`,
+              });
+            } else {
+              passedCount++;
+            }
+          } else if (pType === 'frequency_hz') {
+            const freqArr = Array.isArray(payload.value) ? payload.value : [];
+            const hasNegHz = freqArr.some((v: any) => typeof v !== 'number' || v < 0);
+            if (hasNegHz) {
+              issues.push({ severity: 'error', path: 'payload.value', message: 'frequency_hz values must be non-negative numbers.' });
+            } else {
+              passedCount++;
+            }
+            if (payload.voiced !== undefined) {
+              if (!Array.isArray(payload.voiced) || payload.voiced.length !== freqArr.length) {
+                issues.push({
+                  severity: 'error',
+                  path: 'payload.voiced',
+                  message: `Voiced flag array length (${Array.isArray(payload.voiced) ? payload.voiced.length : 'not an array'}) must match frequency array length (${freqArr.length}).`,
+                });
+              } else {
+                passedCount++;
+              }
+            }
+          } else if (pType === 'object') {
+            if (payload.description !== undefined && typeof payload.description !== 'string') {
+              issues.push({ severity: 'error', path: 'payload.description', message: 'Object payload description must be a string.' });
+            } else {
+              passedCount++;
+            }
+          } else if (pType === 'multi_segment') {
+            if (!Array.isArray(payload.label) || !Array.isArray(payload.level)) {
+              issues.push({ severity: 'error', path: 'payload', message: 'multi_segment requires both "label" and "level" arrays.' });
+            } else if (payload.label.length !== payload.level.length) {
+              issues.push({ severity: 'error', path: 'payload', message: `multi_segment "label" length (${payload.label.length}) != "level" length (${payload.level.length}).` });
+            } else {
+              passedCount++;
+            }
+          } else if (pType === 'mood_thayer') {
+            if (!Array.isArray(payload.valence) || !Array.isArray(payload.arousal)) {
+              issues.push({ severity: 'error', path: 'payload', message: 'mood_thayer requires both "valence" and "arousal" arrays.' });
+            } else if (payload.valence.length !== payload.arousal.length) {
+              issues.push({ severity: 'error', path: 'payload', message: `mood_thayer valence length (${payload.valence.length}) != arousal length (${payload.arousal.length}).` });
+            } else {
+              passedCount++;
+            }
           }
         }
       }
@@ -278,6 +371,8 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
   }
 
   // 5. extent check & array parallelism
+  let extentObservationCount = 0;
+
   if (ann.extent) {
     const extent = (ann.extent as unknown) as Record<string, unknown>;
     if (!extent.extent_type || typeof extent.extent_type !== 'string') {
@@ -286,49 +381,97 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
       passedCount++;
       const eType = extent.extent_type;
 
-      // Check array fields and parallel lengths
-      const arrayFields: { name: string; arr: unknown[] }[] = [];
-      for (const [k, v] of Object.entries(extent)) {
-        if (k !== 'extent_type' && Array.isArray(v)) {
-          arrayFields.push({ name: k, arr: v });
+      if (eType === 'time_uniform') {
+        // time_uniform has implicit regular time grid without columnar arrays
+        if (typeof extent.start_time !== 'number' || !Number.isFinite(extent.start_time)) {
+          issues.push({ severity: 'error', path: 'extent.start_time', message: 'time_uniform requires numeric "start_time".' });
+        } else {
+          passedCount++;
         }
-      }
-
-      if (arrayFields.length === 0) {
-        issues.push({ severity: 'error', path: 'extent', message: `Extent "${eType}" has no columnar arrays.` });
+        if (typeof extent.sampling_period !== 'number' || !Number.isFinite(extent.sampling_period) || extent.sampling_period <= 0) {
+          issues.push({ severity: 'error', path: 'extent.sampling_period', message: 'time_uniform requires strictly positive (> 0) numeric "sampling_period".' });
+        } else {
+          passedCount++;
+        }
+        // Observation count is implicitly parallel to payload length
+        extentObservationCount = payloadLength;
       } else {
-        // Parallel array length check across all extent arrays
-        const extentLen = arrayFields[0].arr.length;
-        for (const f of arrayFields) {
-          if (f.arr.length !== extentLen) {
-            issues.push({
-              severity: 'error',
-              path: `extent.${f.name}`,
-              message: `Extent array "${f.name}" length (${f.arr.length}) does not match other extent arrays (${extentLen}).`,
-            });
+        // Columnar extent types
+        const arrayFields: { name: string; arr: unknown[] }[] = [];
+        for (const [k, v] of Object.entries(extent)) {
+          if (k !== 'extent_type' && Array.isArray(v)) {
+            arrayFields.push({ name: k, arr: v });
           }
         }
 
-        // Extent vs Payload length parallelism check (BOPP fundamental invariant)
-        if (payloadLength > 0 && extentLen !== payloadLength) {
-          issues.push({
-            severity: 'error',
-            path: 'extent',
-            message: `Extent length (${extentLen}) does not match parallel Payload length (${payloadLength}). In BOPP, extent and payload arrays must be strictly parallel.`,
-          });
-        } else if (payloadLength > 0) {
-          passedCount++;
-        }
+        if (arrayFields.length === 0) {
+          issues.push({ severity: 'error', path: 'extent', message: `Extent "${eType}" has no columnar arrays.` });
+        } else {
+          // Parallel array length check across all extent arrays
+          const extentLen = arrayFields[0].arr.length;
+          extentObservationCount = extentLen;
+          for (const f of arrayFields) {
+            if (f.arr.length !== extentLen) {
+              issues.push({
+                severity: 'error',
+                path: `extent.${f.name}`,
+                message: `Extent array "${f.name}" length (${f.arr.length}) does not match other extent arrays (${extentLen}).`,
+              });
+            }
+          }
 
-        // Specific extent checks
-        if (eType === 'time_interval' || eType === 'time_frequency_box') {
-          const durations = extent.duration as number[];
-          if (Array.isArray(durations)) {
-            const negDur = durations.some(d => typeof d === 'number' && d < 0);
-            if (negDur) {
-              issues.push({ severity: 'error', path: 'extent.duration', message: 'Extent duration values must be non-negative.' });
-            } else {
-              passedCount++;
+          // Extent vs Payload length parallelism check (BOPP fundamental invariant)
+          if (!isMarkerPayload && payloadLength > 0 && extentLen !== payloadLength) {
+            issues.push({
+              severity: 'error',
+              path: 'extent',
+              message: `Extent length (${extentLen}) does not match parallel Payload length (${payloadLength}). In BOPP, extent and payload arrays must be strictly parallel.`,
+            });
+          } else if (payloadLength > 0 || isMarkerPayload) {
+            passedCount++;
+          }
+
+          // Specific extent coordinate checks
+          if (eType === 'time_interval' || eType === 'time_frequency_box' || eType.endsWith('_interval')) {
+            const durations = extent.duration as number[];
+            if (Array.isArray(durations)) {
+              const negDur = durations.some(d => typeof d === 'number' && d < 0);
+              if (negDur) {
+                issues.push({ severity: 'error', path: 'extent.duration', message: 'Extent duration values must be non-negative.' });
+              } else {
+                passedCount++;
+              }
+            }
+          }
+
+          if (eType.startsWith('spherical')) {
+            const az = extent.azimuth as number[];
+            const el = extent.elevation as number[];
+            const rd = extent.radius as number[];
+            if (Array.isArray(az) && az.some(v => typeof v === 'number' && (v < -180 || v >= 180))) {
+              issues.push({ severity: 'error', path: 'extent.azimuth', message: 'Spherical azimuth must be in range [-180, +180).' });
+            } else if (Array.isArray(az)) passedCount++;
+
+            if (Array.isArray(el) && el.some(v => typeof v === 'number' && (v < -90 || v > 90))) {
+              issues.push({ severity: 'error', path: 'extent.elevation', message: 'Spherical elevation must be in range [-90, +90].' });
+            } else if (Array.isArray(el)) passedCount++;
+
+            if (Array.isArray(rd) && rd.some(v => typeof v === 'number' && v < 0)) {
+              issues.push({ severity: 'error', path: 'extent.radius', message: 'Spherical radius must be non-negative (>= 0).' });
+            } else if (Array.isArray(rd)) passedCount++;
+          }
+
+          if (eType.startsWith('text')) {
+            const offsets = extent.offset as number[];
+            if (Array.isArray(offsets) && offsets.some(o => typeof o !== 'number' || o < 0 || !Number.isInteger(o))) {
+              issues.push({ severity: 'error', path: 'extent.offset', message: 'Text offset must be non-negative integers.' });
+            } else if (Array.isArray(offsets)) passedCount++;
+
+            if (eType === 'text_interval') {
+              const lengths = extent.length as number[];
+              if (Array.isArray(lengths) && lengths.some(l => typeof l !== 'number' || l < 0 || !Number.isInteger(l))) {
+                issues.push({ severity: 'error', path: 'extent.length', message: 'Text interval length must be non-negative integers.' });
+              } else if (Array.isArray(lengths)) passedCount++;
             }
           }
         }
@@ -339,6 +482,8 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
     passedCount++;
   }
 
+  const effectiveObservationCount = payloadLength > 0 ? payloadLength : extentObservationCount;
+
   // 6. confidence check & parallelism
   if (ann.confidence) {
     const conf = (ann.confidence as unknown) as Record<string, unknown>;
@@ -347,11 +492,11 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
     } else {
       passedCount++;
       if (Array.isArray(conf.confidence)) {
-        if (payloadLength > 0 && conf.confidence.length !== payloadLength) {
+        if (effectiveObservationCount > 0 && conf.confidence.length !== effectiveObservationCount) {
           issues.push({
             severity: 'error',
             path: 'confidence.confidence',
-            message: `Confidence array length (${conf.confidence.length}) does not match Payload length (${payloadLength}).`,
+            message: `Confidence array length (${conf.confidence.length}) does not match observation count (${effectiveObservationCount}).`,
           });
         } else {
           passedCount++;
@@ -371,6 +516,42 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
             issues.push({ severity: 'error', path: 'confidence.confidence', message: 'Variance confidence values must be non-negative (>= 0).' });
           } else {
             passedCount++;
+          }
+        }
+
+        // agreement annotator count checks
+        if (conf.confidence_type === 'agreement') {
+          const numAnnotators = conf.num_annotators ?? conf.n_annotators;
+          const numCommon = conf.num_annotators_common ?? conf.n_annotators_common;
+
+          if (numAnnotators !== undefined && Array.isArray(numAnnotators)) {
+            if (numAnnotators.length !== conf.confidence.length) {
+              issues.push({
+                severity: 'error',
+                path: 'confidence.num_annotators',
+                message: `num_annotators length (${numAnnotators.length}) does not match confidence array length (${conf.confidence.length}).`,
+              });
+            } else if (numAnnotators.some((n: any) => typeof n !== 'number' || n < 1 || !Number.isInteger(n))) {
+              issues.push({
+                severity: 'error',
+                path: 'confidence.num_annotators',
+                message: 'num_annotators elements must be positive integers (>= 1).',
+              });
+            } else {
+              passedCount++;
+            }
+          }
+
+          if (numCommon !== undefined) {
+            if (typeof numCommon !== 'number' || numCommon < 1 || !Number.isInteger(numCommon)) {
+              issues.push({
+                severity: 'error',
+                path: 'confidence.num_annotators_common',
+                message: 'num_annotators_common must be a positive integer (>= 1).',
+              });
+            } else {
+              passedCount++;
+            }
           }
         }
       }
