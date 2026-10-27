@@ -3508,352 +3508,434 @@ export function buildBoppVegaLiteSpec(
     const isInterval = extentType === 'text_interval';
     const colorScale = resolveColorScale(colorScheme, payloadType);
     const textTransforms = [...transforms];
-    if (isInterval) {
-      textTransforms.push({
-        calculate: 'datum.offset + (datum.length != null && datum.length > 0 ? datum.length : 1)',
-        as: '_offset_end',
-      });
-    }
 
-    const uniqueValues = Array.from(new Set(data.map(d => String(d.value ?? d.label ?? '')))).filter(Boolean);
+    const maxOffset = Math.max(
+      ...data.map(d => Number(d._offset_end) || (Number(d.offset) || 0) + (Number(d.length) || 1)),
+      10
+    );
+
     const textLayers: Record<string, unknown>[] = [];
 
     if (isInterval) {
-      // Horizontal interval rect bars along character offset
+      const maxLane = Math.max(...data.map(d => Number(d._lane) || 0), 0);
+      const numLanes = maxLane + 1;
+      const textPlotHeight = Math.max(160, numLanes * 50 + 80);
+
+      // Horizontal interval span pill
       textLayers.push({
         mark: {
           type: 'rect',
           cornerRadius: 4,
-          stroke: isDark ? '#ffffff' : '#0f172a',
+          stroke: isDark ? '#38bdf8' : '#0284c7',
           strokeWidth: 1.5,
           opacity: 0.85,
         },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
-          x: { field: 'offset', type: 'quantitative', title: 'Character Offset', scale: { zero: true } },
+          x: {
+            field: 'offset',
+            type: 'quantitative',
+            title: 'Document Character Offset',
+            scale: { domain: [0, maxOffset + 2], zero: true },
+          },
           x2: { field: '_offset_end' },
           y: {
-            field: 'value',
-            type: 'nominal',
-            title: 'Span / Label',
-            scale: { domain: uniqueValues },
-            axis: { labelFontWeight: 'bold', labelPadding: 8, titlePadding: 14, minExtent: 70 },
+            field: '_lane',
+            type: 'ordinal',
+            title: null,
+            axis: null,
           },
           color: { field: 'value', type: 'nominal', title: 'Category', scale: colorScale },
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Text Span' },
-            { field: 'offset', type: 'quantitative', title: 'Char Offset' },
-            { field: 'length', type: 'quantitative', title: 'Length' },
-            { field: '_offset_end', type: 'quantitative', title: 'Char End' },
+            { field: 'offset', type: 'quantitative', title: 'Start Offset' },
+            { field: '_offset_end', type: 'quantitative', title: 'End Offset' },
+            { field: 'length', type: 'quantitative', title: 'Length (chars)' },
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
           ],
         },
       });
 
-      if (showLabels) {
-        textLayers.push({
+      // Centered text label inside the pill (uses _mid_offset without invalid x2)
+      textLayers.push({
+        mark: {
+          type: 'text',
+          align: 'center',
+          baseline: 'middle',
+          fontSize: 11,
+          fontWeight: 'bold',
+          fill: isDark ? '#ffffff' : '#0f172a',
+        },
+        encoding: {
+          x: { field: '_mid_offset', type: 'quantitative' },
+          y: { field: '_lane', type: 'ordinal', title: null, axis: null },
+          text: { field: 'value', type: 'nominal' },
+        },
+      });
+
+      return {
+        $schema: VEGA_LITE_SCHEMA,
+        width: chartWidth,
+        height: textPlotHeight,
+        title: { text: `BOPP Text Spans & Offsets: ${annotation.media_id}`, color: textColor },
+        data: { values: data },
+        transform: textTransforms,
+        config: baseConfig,
+        layer: textLayers,
+      };
+    } else {
+      // Point / tick markers at character offset with pin caret and label
+      textLayers.push(
+        // Vertical pin stem
+        {
           mark: {
-            type: 'text',
-            align: 'center',
-            baseline: 'middle',
-            fontSize: 10,
-            fontWeight: 'bold',
-            color: '#ffffff',
+            type: 'rule',
+            strokeWidth: 2,
+            stroke: isDark ? '#38bdf8' : '#0284c7',
+          },
+          ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+          encoding: {
+            x: {
+              field: 'offset',
+              type: 'quantitative',
+              title: 'Document Character Offset',
+              scale: { domain: [0, maxOffset + 2], zero: true },
+            },
+            y: { datum: 15 },
+            y2: { datum: 65 },
+            tooltip: [
+              { field: 'value', type: 'nominal', title: 'Token Label' },
+              { field: 'offset', type: 'quantitative', title: 'Char Offset' },
+              ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+            ],
+          },
+        },
+        // Pin head marker
+        {
+          mark: {
+            type: 'point',
+            shape: 'triangle-down',
+            size: 110,
+            filled: true,
+            color: isDark ? '#38bdf8' : '#0284c7',
           },
           encoding: {
             x: { field: 'offset', type: 'quantitative' },
-            x2: { field: '_offset_end' },
-            y: { field: 'value', type: 'nominal' },
+            y: { datum: 65 },
+          },
+        },
+        // Token label badge above the pin
+        {
+          mark: {
+            type: 'text',
+            align: 'center',
+            baseline: 'bottom',
+            dy: -6,
+            fontSize: 10,
+            fontWeight: 'bold',
+            fill: textColor,
+          },
+          encoding: {
+            x: { field: 'offset', type: 'quantitative' },
+            y: { datum: 15 },
             text: { field: 'value', type: 'nominal' },
           },
-        });
-      }
-    } else {
-      // Point / tick marks at character offset
-      textLayers.push({
-        mark: {
-          type: 'tick',
-          thickness: 3,
-          size: 28,
-        },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-        encoding: {
-          x: { field: 'offset', type: 'quantitative', title: 'Character Offset', scale: { zero: true } },
-          y: {
-            field: 'value',
-            type: 'nominal',
-            title: 'Offset Label',
-            scale: { domain: uniqueValues },
-            axis: { labelFontWeight: 'bold', labelPadding: 8, titlePadding: 14, minExtent: 70 },
-          },
-          color: { field: 'value', type: 'nominal', title: 'Category', scale: colorScale },
-          tooltip: [
-            { field: 'value', type: 'nominal', title: 'Label' },
-            { field: 'offset', type: 'quantitative', title: 'Char Offset' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
-          ],
-        },
-      });
-    }
+        }
+      );
 
-    return {
-      $schema: VEGA_LITE_SCHEMA,
-      width: chartWidth,
-      height: chartHeight,
-      title: { text: `BOPP Text Spans & Offsets: ${annotation.media_id}`, color: textColor },
-      data: { values: data },
-      transform: textTransforms,
-      config: baseConfig,
-      layer: textLayers,
-    };
+      return {
+        $schema: VEGA_LITE_SCHEMA,
+        width: chartWidth,
+        height: 180,
+        title: { text: `BOPP Token Offsets & Boundaries: ${annotation.media_id}`, color: textColor },
+        data: { values: data },
+        transform: textTransforms,
+        config: baseConfig,
+        layer: textLayers,
+      };
+    }
   }
 
   // =========================================================================
-  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (3D/Polar Trajectories)
+  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (Simultaneous 2D Projections)
   // =========================================================================
   if (extentType === 'spherical' || extentType === 'spherical_time' || extentType === 'spherical_time_interval') {
     const isTemporal = extentType === 'spherical_time' || extentType === 'spherical_time_interval';
     const colorScale = resolveColorScale(colorScheme, payloadType);
-
-    const detailLayers: Record<string, unknown>[] = [
-      // Trajectory path connecting points in order
+    const sphericalTransforms = [
+      ...transforms,
       {
-        mark: {
-          type: 'line',
-          interpolate: 'monotone',
-          strokeWidth: 2,
-          opacity: 0.65,
-          stroke: isDark ? '#38bdf8' : '#0284c7',
-        },
-        encoding: {
-          x: {
-            field: 'azimuth',
-            type: 'quantitative',
-            title: 'Azimuth (degrees [-180°, +180°))',
-            scale: { domain: [-180, 180] },
-          },
-          y: {
-            field: 'elevation',
-            type: 'quantitative',
-            title: 'Elevation (degrees [-90°, +90°])',
-            scale: { domain: [-90, 90] },
-          },
-          order: { field: '__index', type: 'quantitative' },
-        },
+        calculate: 'datum.radius * cos(datum.elevation * PI / 180) * sin(datum.azimuth * PI / 180)',
+        as: '_x_horiz',
       },
-      // Spatial coordinate points
       {
-        mark: {
-          type: 'circle',
-          stroke: isDark ? '#ffffff' : '#0f172a',
-          strokeWidth: 1.5,
-          opacity: 0.85,
-        },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-        encoding: {
-          x: {
-            field: 'azimuth',
-            type: 'quantitative',
-            title: 'Azimuth (degrees [-180°, +180°))',
-            scale: { domain: [-180, 180] },
-          },
-          y: {
-            field: 'elevation',
-            type: 'quantitative',
-            title: 'Elevation (degrees [-90°, +90°])',
-            scale: { domain: [-90, 90] },
-          },
-          size: {
-            field: 'radius',
-            type: 'quantitative',
-            title: 'Radius (r > 0)',
-            scale: { range: [60, 400] },
-          },
-          color: { field: 'value', type: 'nominal', title: 'Observation', scale: colorScale },
-          tooltip: [
-            { field: 'value', type: 'nominal', title: 'Observation' },
-            { field: 'azimuth', type: 'quantitative', format: '.1f', title: 'Azimuth (°)' },
-            { field: 'elevation', type: 'quantitative', format: '.1f', title: 'Elevation (°)' },
-            { field: 'radius', type: 'quantitative', format: '.2f', title: 'Radius' },
-            ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
-          ],
-        },
+        calculate: 'datum.radius * cos(datum.elevation * PI / 180) * cos(datum.azimuth * PI / 180)',
+        as: '_y_horiz',
       },
     ];
 
-    if (showLabels) {
-      detailLayers.push({
-        mark: {
-          type: 'text',
-          align: 'left',
-          dx: 8,
-          dy: -6,
-          fontSize: 10,
-          fontWeight: 'bold',
-          color: textColor,
+    const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
+    const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 300;
+    const subplotWidth = Math.max(180, Math.floor((totalWidth - 90) / 3));
+    const subplotHeight = Math.max(190, totalHeight - (isTemporal ? 130 : 60));
+
+    const hoverConditions = (activeVal: any, defaultVal: any) => ({
+      condition: [
+        { param: 'obs_hover_sph_1', empty: false, value: activeVal },
+        { param: 'obs_hover_sph_2', empty: false, value: activeVal },
+        { param: 'obs_hover_sph_3', empty: false, value: activeVal },
+      ],
+      value: defaultVal,
+    });
+
+    const sharedPointEncoding = {
+      size: hoverConditions(220, 75),
+      opacity: hoverConditions(1.0, 0.75),
+      stroke: { value: isDark ? '#ffffff' : '#0f172a' },
+      strokeWidth: hoverConditions(2.5, 1.2),
+      tooltip: [
+        { field: 'value', type: 'nominal', title: 'Observation' },
+        { field: 'azimuth', type: 'quantitative', format: '.1f', title: 'Azimuth (°)' },
+        { field: 'elevation', type: 'quantitative', format: '.1f', title: 'Elevation (°)' },
+        { field: 'radius', type: 'quantitative', format: '.2f', title: 'Radius' },
+        ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
+        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+      ],
+    };
+
+    // Subplot 1: Horizontal Plan View (Polar Projection: X_horiz vs Y_horiz)
+    const planView: Record<string, unknown> = {
+      title: { text: 'Horizontal Plan View (Polar Projection)', color: textColor, fontSize: 11 },
+      width: subplotWidth,
+      height: subplotHeight,
+      layer: [
+        {
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
+          encoding: {
+            x: { field: '_x_horiz', type: 'quantitative', title: 'Horizontal X (r·cosφ·sinθ)' },
+            y: { field: '_y_horiz', type: 'quantitative', title: 'Horizontal Y (r·cosφ·cosθ)' },
+            order: { field: '__index', type: 'quantitative' },
+          },
         },
-        encoding: {
-          x: { field: 'azimuth', type: 'quantitative' },
-          y: { field: 'elevation', type: 'quantitative' },
-          text: { field: 'value', type: 'nominal' },
+        {
+          params: [
+            { name: 'obs_hover_sph_1', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: '_x_horiz', type: 'quantitative', title: 'Horizontal X (r·cosφ·sinθ)' },
+            y: { field: '_y_horiz', type: 'quantitative', title: 'Horizontal Y (r·cosφ·cosθ)' },
+            color: { field: 'value', type: 'nominal', scale: colorScale, title: 'Observation' },
+            ...sharedPointEncoding,
+          },
         },
-      });
-    }
+      ],
+    };
+
+    // Subplot 2: Direction of Arrival Map (Azimuth vs Elevation)
+    const doaView: Record<string, unknown> = {
+      title: { text: 'Direction of Arrival (DoA Map)', color: textColor, fontSize: 11 },
+      width: subplotWidth,
+      height: subplotHeight,
+      layer: [
+        {
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
+          encoding: {
+            x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ [-180°, +180°)', scale: { domain: [-180, 180] } },
+            y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ [-90°, +90°]', scale: { domain: [-90, 90] } },
+            order: { field: '__index', type: 'quantitative' },
+          },
+        },
+        {
+          params: [
+            { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ [-180°, +180°)', scale: { domain: [-180, 180] } },
+            y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ [-90°, +90°]', scale: { domain: [-90, 90] } },
+            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+            ...sharedPointEncoding,
+          },
+        },
+      ],
+    };
+
+    // Subplot 3: Elevation Profile (Radius vs Elevation)
+    const profileView: Record<string, unknown> = {
+      title: { text: 'Elevation Profile (Radius vs Elevation)', color: textColor, fontSize: 11 },
+      width: subplotWidth,
+      height: subplotHeight,
+      layer: [
+        {
+          mark: { type: 'rule', strokeDash: [4, 4], opacity: 0.35, stroke: isDark ? '#94a3b8' : '#64748b' },
+          encoding: { y: { datum: 0 } },
+        },
+        {
+          params: [
+            { name: 'obs_hover_sph_3', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: 'radius', type: 'quantitative', title: 'Radius r (> 0)' },
+            y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ [-90°, +90°]', scale: { domain: [-90, 90] } },
+            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+            ...sharedPointEncoding,
+          },
+        },
+      ],
+    };
 
     const sphericalTitle = {
       text: `BOPP Spherical Coordinates Trajectory: ${annotation.media_id}`,
       color: textColor,
     };
 
-    if (isTemporal) {
-      const overviewLayers = [
-        {
-          mark: { type: 'line', stroke: '#38bdf8', strokeWidth: 1.5 },
-          encoding: {
-            x: { field: 'time', type: 'quantitative' },
-            y: { field: 'azimuth', type: 'quantitative' },
-          },
-        },
-      ];
-
-      return composeTimelineSpecWithOverview({
-        data,
-        transforms,
-        detailLayers,
-        overviewLayers,
-        xField: 'time',
-        xTitle: 'Time (seconds)',
-        minXVal: minX,
-        maxXVal: maxX,
-        plotTitle: sphericalTitle,
-        detailPlotHeight: chartHeight - 74,
-      });
-    }
-
     return {
       $schema: VEGA_LITE_SCHEMA,
-      width: chartWidth,
-      height: chartHeight,
       title: sphericalTitle,
       data: { values: data },
-      transform: transforms,
+      transform: sphericalTransforms,
       config: baseConfig,
-      layer: detailLayers,
+      hconcat: [planView, doaView, profileView],
     };
   }
 
   // =========================================================================
-  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (3D Spatial Trajectories)
+  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (Simultaneous 2D Projections)
   // =========================================================================
   if (extentType === 'cartesian' || extentType === 'cartesian_time' || extentType === 'cartesian_time_interval') {
     const isTemporal = extentType === 'cartesian_time' || extentType === 'cartesian_time_interval';
+    const colorScale = resolveColorScale(colorScheme, payloadType);
 
-    const detailLayers: Record<string, unknown>[] = [
-      // 3D trajectory connecting line in spatial space
-      {
-        mark: {
-          type: 'line',
-          interpolate: 'monotone',
-          strokeWidth: 2,
-          opacity: 0.65,
-          stroke: isDark ? '#94a3b8' : '#64748b',
-        },
-        encoding: {
-          x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
-          y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
-          order: { field: '__index', type: 'quantitative' },
-        },
-      },
-      // Point marks colored by Z coordinate
-      {
-        mark: {
-          type: 'circle',
-          size: 110,
-          stroke: isDark ? '#ffffff' : '#0f172a',
-          strokeWidth: 1.5,
-          opacity: 0.9,
-        },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
-        encoding: {
-          x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
-          y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
-          color: {
-            field: 'z',
-            type: 'quantitative',
-            title: 'Z Coordinate',
-            scale: { scheme: 'turbo' },
+    const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
+    const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 300;
+    const subplotWidth = Math.max(180, Math.floor((totalWidth - 90) / 3));
+    const subplotHeight = Math.max(190, totalHeight - (isTemporal ? 130 : 60));
+
+    const hoverConditions = (activeVal: any, defaultVal: any) => ({
+      condition: [
+        { param: 'obs_hover_cart_1', empty: false, value: activeVal },
+        { param: 'obs_hover_cart_2', empty: false, value: activeVal },
+        { param: 'obs_hover_cart_3', empty: false, value: activeVal },
+      ],
+      value: defaultVal,
+    });
+
+    const sharedPointEncoding = {
+      size: hoverConditions(220, 75),
+      opacity: hoverConditions(1.0, 0.75),
+      stroke: { value: isDark ? '#ffffff' : '#0f172a' },
+      strokeWidth: hoverConditions(2.5, 1.2),
+      tooltip: [
+        { field: 'value', type: 'nominal', title: 'Observation' },
+        { field: 'x', type: 'quantitative', format: '.2f', title: 'X' },
+        { field: 'y', type: 'quantitative', format: '.2f', title: 'Y' },
+        { field: 'z', type: 'quantitative', format: '.2f', title: 'Z' },
+        ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
+        ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+      ],
+    };
+
+    // Subplot 1: Top View (XY Plane)
+    const topView: Record<string, unknown> = {
+      title: { text: 'Top View (XY Plane)', color: textColor, fontSize: 11 },
+      width: subplotWidth,
+      height: subplotHeight,
+      layer: [
+        {
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
+            y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+            order: { field: '__index', type: 'quantitative' },
           },
-          tooltip: [
-            { field: 'value', type: 'nominal', title: 'Observation' },
-            { field: 'x', type: 'quantitative', format: '.2f', title: 'X' },
-            { field: 'y', type: 'quantitative', format: '.2f', title: 'Y' },
-            { field: 'z', type: 'quantitative', format: '.2f', title: 'Z' },
-            ...(isTemporal ? [{ field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' }] : []),
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+        },
+        {
+          params: [
+            { name: 'obs_hover_cart_1', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
           ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
+            y: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+            color: { field: 'value', type: 'nominal', scale: colorScale, title: 'Observation' },
+            ...sharedPointEncoding,
+          },
         },
-      },
-    ];
+      ],
+    };
 
-    if (showLabels) {
-      detailLayers.push({
-        mark: {
-          type: 'text',
-          align: 'left',
-          dx: 8,
-          dy: -6,
-          fontSize: 10,
-          fontWeight: 'bold',
-          color: textColor,
+    // Subplot 2: Front View (XZ Plane)
+    const frontView: Record<string, unknown> = {
+      title: { text: 'Front View (XZ Plane)', color: textColor, fontSize: 11 },
+      width: subplotWidth,
+      height: subplotHeight,
+      layer: [
+        {
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
+            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
+            order: { field: '__index', type: 'quantitative' },
+          },
         },
-        encoding: {
-          x: { field: 'x', type: 'quantitative' },
-          y: { field: 'y', type: 'quantitative' },
-          text: { field: 'value', type: 'nominal' },
+        {
+          params: [
+            { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative', title: 'X Coordinate' },
+            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
+            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+            ...sharedPointEncoding,
+          },
         },
-      });
-    }
+      ],
+    };
+
+    // Subplot 3: Side View (YZ Plane)
+    const sideView: Record<string, unknown> = {
+      title: { text: 'Side View (YZ Plane)', color: textColor, fontSize: 11 },
+      width: subplotWidth,
+      height: subplotHeight,
+      layer: [
+        {
+          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
+          encoding: {
+            x: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
+            order: { field: '__index', type: 'quantitative' },
+          },
+        },
+        {
+          params: [
+            { name: 'obs_hover_cart_3', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: 'y', type: 'quantitative', title: 'Y Coordinate' },
+            y: { field: 'z', type: 'quantitative', title: 'Z Coordinate' },
+            color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+            ...sharedPointEncoding,
+          },
+        },
+      ],
+    };
 
     const cartesianTitle = {
       text: `BOPP 3D Cartesian Coordinates Trajectory: ${annotation.media_id}`,
       color: textColor,
     };
 
-    if (isTemporal) {
-      const overviewLayers = [
-        {
-          mark: { type: 'line', stroke: '#38bdf8', strokeWidth: 1.5 },
-          encoding: {
-            x: { field: 'time', type: 'quantitative' },
-            y: { field: 'x', type: 'quantitative' },
-          },
-        },
-      ];
-
-      return composeTimelineSpecWithOverview({
-        data,
-        transforms,
-        detailLayers,
-        overviewLayers,
-        xField: 'time',
-        xTitle: 'Time (seconds)',
-        minXVal: minX,
-        maxXVal: maxX,
-        plotTitle: cartesianTitle,
-        detailPlotHeight: chartHeight - 74,
-      });
-    }
-
     return {
       $schema: VEGA_LITE_SCHEMA,
-      width: chartWidth,
-      height: chartHeight,
       title: cartesianTitle,
       data: { values: data },
       transform: transforms,
       config: baseConfig,
-      layer: detailLayers,
+      hconcat: [topView, frontView, sideView],
     };
   }
 
@@ -4557,10 +4639,16 @@ export function buildBoppVegaLiteSpec(
     const layers: Record<string, unknown>[] = [];
 
     if (isInterval) {
-      transforms.push({
-        calculate: `datum.${xTime} + (datum.duration != null ? datum.duration : 0)`,
-        as: '_calc_end',
-      });
+      transforms.push(
+        {
+          calculate: `datum.${xTime} + (datum.duration != null ? datum.duration : 0)`,
+          as: '_calc_end',
+        },
+        {
+          calculate: `datum.${xTime} + (datum.duration != null ? datum.duration / 2 : 0)`,
+          as: '_mid_time',
+        }
+      );
 
       // Horizontal Rubato Tempo Shelves (clean shelf line for each section)
       layers.push({
@@ -4579,7 +4667,10 @@ export function buildBoppVegaLiteSpec(
             { field: 'value', type: 'quantitative', format: '.1f', title: 'Rubato Tempo (BPM)' },
             { field: xTime, type: 'quantitative', format: '.2f', title: 'Start (s)' },
             { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+            ...(hasConfidence ? [
+              { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' },
+              { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
+            ] : []),
           ],
         },
       });
@@ -4630,20 +4721,41 @@ export function buildBoppVegaLiteSpec(
         }
       );
 
-      // Top-edge confidence meter for each rubato interval
+      // Variance error ribbons and whiskers or top-edge confidence meter for each rubato interval
       if (hasConfidence && confidenceChannel !== 'none') {
-        layers.push(...buildIntervalConfidenceLayers({
-          xField: xTime,
-          endField: '_calc_end',
-          durField: 'duration',
-          chartHeight,
-          isDark,
-          confidenceType: confidenceType as any,
-          channelMode: confidenceChannel,
-          yTop: 10,
-          yBottom: chartHeight - 60,
-          meterHeight: 12,
-        }));
+        if (confidenceType === 'variance') {
+          layers.push({
+            transform: [{ filter: 'datum.value_ci_lower != null && datum.value_ci_upper != null' }],
+            mark: { type: 'rect', opacity: 0.22, color: '#f59e0b' },
+            encoding: {
+              x: { field: xTime, type: 'quantitative', scale: { domain: [minX, maxX] } },
+              x2: { field: '_calc_end' },
+              y: { field: 'value_ci_lower', type: 'quantitative', scale: { zero: false } },
+              y2: { field: 'value_ci_upper' },
+            },
+          });
+          layers.push(...buildVarianceErrorBarLayers({
+            xField: '_mid_time',
+            yField: 'value',
+            lowerField: 'value_ci_lower',
+            upperField: 'value_ci_upper',
+            isDark,
+            whiskerColor: isDark ? '#fbbf24' : '#b45309',
+          }));
+        } else {
+          layers.push(...buildIntervalConfidenceLayers({
+            xField: xTime,
+            endField: '_calc_end',
+            durField: 'duration',
+            chartHeight,
+            isDark,
+            confidenceType: confidenceType as any,
+            channelMode: confidenceChannel,
+            yTop: 10,
+            yBottom: chartHeight - 60,
+            meterHeight: 12,
+          }));
+        }
       }
     } else {
       // Step line tempo trajectory

@@ -1650,24 +1650,29 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             </div>
           )}
 
-          {/* Interactive Text & Transcript Offset Highlighting Viewer */}
+          {/* Interactive Text Document Flow & Transcript Offset Highlighting Viewer */}
           {(extentType === 'text' || extentType === 'text_interval') && (
             <div className="mt-4 p-3.5 bg-slate-50 dark:bg-neutral-850 border border-slate-200 dark:border-neutral-800 rounded-lg text-xs shadow-2xs">
               <div className="flex items-center justify-between pb-2 mb-2.5 border-b border-slate-200 dark:border-neutral-700/60">
                 <div className="flex items-center gap-2">
                   <FileText className="w-4 h-4 text-blue-500" />
                   <span className="font-semibold text-slate-800 dark:text-slate-200">
-                    Text Transcript & Character Offset Spans
+                    Document Flow & Character Span Reader
                   </span>
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-200 dark:bg-neutral-800 text-slate-700 dark:text-slate-300">
                     {tabularData.length} spans
                   </span>
+                  {annotation.payload && (annotation.payload as any).language && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      BCP 47: {(annotation.payload as any).language}
+                    </span>
+                  )}
                 </div>
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Inspect character span offsets [start, end)
+                  Click span to link selection with data table
                 </span>
               </div>
-              <div className="p-3 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-mono text-[12px] leading-relaxed break-words flex flex-wrap gap-1.5">
+              <div className="p-3 bg-white dark:bg-neutral-900 border border-slate-200 dark:border-neutral-800 rounded font-mono text-[13px] leading-relaxed break-words flex flex-wrap items-center gap-2">
                 {tabularData.map((d, idx) => {
                   const offset = d.offset ?? 0;
                   const len = d.length ?? 1;
@@ -1677,18 +1682,22 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                     <span
                       key={idx}
                       onClick={() => setActiveItem(d)}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded cursor-pointer transition-all border ${
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md cursor-pointer transition-all border ${
                         isActive
-                          ? 'border-blue-500 bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-white shadow-xs'
-                          : 'border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/70 text-blue-900 dark:text-blue-100'
+                          ? 'border-blue-500 bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-white shadow-xs ring-2 ring-blue-400/40'
+                          : 'border-slate-300 dark:border-neutral-700 bg-slate-50 dark:bg-neutral-800/80 hover:border-blue-400 dark:hover:border-blue-500 text-slate-900 dark:text-slate-100'
                       }`}
                       title={`Offset: [${offset}, ${offset + len}) | Length: ${len} | Value: "${val}"`}
                     >
-                      <span className="text-[10px] text-slate-400 select-none">[{offset}]</span>
-                      <span className="font-semibold">{val}</span>
+                      <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500 select-none">
+                        {offset}:{offset + len}
+                      </span>
+                      <span className="font-semibold underline decoration-blue-400/50 underline-offset-2">
+                        {val}
+                      </span>
                       {d.confidence != null && (
-                        <span className="text-[10px] text-slate-500">
-                          ({Math.round(Number(d.confidence) * 100)}%)
+                        <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800/60">
+                          {Math.round(Number(d.confidence) * 100)}%
                         </span>
                       )}
                     </span>

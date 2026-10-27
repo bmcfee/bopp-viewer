@@ -103,19 +103,19 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
     }
   });
 
-  await t.test('4. Vocal melody with variance renders error whiskers (±1.96σ)', () => {
-    const vocalDs = SAMPLE_DATASETS.find(d => d.id.includes('puccini') || d.id === 'time_f0_puccini_variance')!;
-    const tabular = annotationToTabular(vocalDs.data);
-    const spec = buildBoppVegaLiteSpec(vocalDs.data, tabular, {
+  await t.test('4. Tempo rubato with variance renders error whiskers (±1.96σ)', () => {
+    const tempoDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tempo_rubato_variance')!;
+    const tabular = annotationToTabular(tempoDs.data);
+    const spec = buildBoppVegaLiteSpec(tempoDs.data, tabular, {
       isDark: true,
     }) as any;
 
     const layers = spec.vconcat ? spec.vconcat[0].layer : spec.layer;
-    const ruleLayer = layers.find((l: any) => l.mark?.type === 'rule' && l.encoding?.y2?.field === 'frequency_ci_upper');
-    assert.ok(ruleLayer, 'Vocal melody must render error whisker rules from lower to upper CI');
+    const ruleLayer = layers.find((l: any) => l.mark?.type === 'rule' && l.encoding?.y2?.field === 'value_ci_upper');
+    assert.ok(ruleLayer, 'Tempo rubato must render error whisker rules from lower to upper CI');
 
-    const tickLayer = layers.find((l: any) => l.mark?.type === 'tick' && l.encoding?.y?.field === 'frequency_ci_upper');
-    assert.ok(tickLayer, 'Vocal melody must render error bar cap ticks');
+    const tickLayer = layers.find((l: any) => l.mark?.type === 'tick' && l.encoding?.y?.field === 'value_ci_upper');
+    assert.ok(tickLayer, 'Tempo rubato must render error bar cap ticks');
   });
 
   await t.test('5. Bioacoustic TF boxes with likelihood compiles and parses in dark mode', () => {
@@ -330,7 +330,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('11. Playhead mapping directly matches mark timestamps with zero offset across all datasets', async () => {
     for (const sample of SAMPLE_DATASETS) {
       const extentType = sample.data.extent?.extent_type;
-      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval') continue;
+      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval' || extentType.startsWith('spherical') || extentType.startsWith('cartesian')) continue;
 
       const tabular = annotationToTabular(sample.data);
       const spec = buildBoppVegaLiteSpec(sample.data, tabular, {
@@ -453,12 +453,12 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   });
 
   await t.test('14. Confidence presentation is pinned to supported data encodings', () => {
-    // 1. Continuous pitch with variance pins to error whiskers
-    const vocalDs = SAMPLE_DATASETS.find(d => d.id === 'time_f0_puccini_variance')!;
-    const vocalSpec = buildBoppVegaLiteSpec(vocalDs.data, annotationToTabular(vocalDs.data), { chartWidth: 700 }) as any;
-    const vocalLayers = vocalSpec.vconcat ? vocalSpec.vconcat[0].layer : vocalSpec.layer;
-    const ruleLayer = vocalLayers?.find((l: any) => l.mark?.type === 'rule' && l.encoding?.y2);
-    assert.ok(ruleLayer, 'Continuous pitch contour with variance must include error bar whiskers');
+    // 1. Rubato tempo interval with variance pins to error whiskers
+    const tempoDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tempo_rubato_variance')!;
+    const tempoSpec = buildBoppVegaLiteSpec(tempoDs.data, annotationToTabular(tempoDs.data), { chartWidth: 700 }) as any;
+    const tempoLayers = tempoSpec.vconcat ? tempoSpec.vconcat[0].layer : tempoSpec.layer;
+    const ruleLayer = tempoLayers?.find((l: any) => l.mark?.type === 'rule' && l.encoding?.y2);
+    assert.ok(ruleLayer, 'Rubato tempo interval with variance must include error bar whiskers');
 
     // 2. Interval extents with likelihood pin to horizontal meter layers
     const chordDs = SAMPLE_DATASETS.find(d => d.id === 'interval_chord_overlapping_likelihood')!;
@@ -483,7 +483,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('16. getVegaViewPlotOrigin accounts for both view.padding() and view.origin() so playhead aligns with canvas marks', async () => {
     for (const sample of SAMPLE_DATASETS) {
       const extentType = sample.data.extent?.extent_type;
-      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval') continue;
+      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval' || extentType.startsWith('spherical') || extentType.startsWith('cartesian')) continue;
 
       const tabular = annotationToTabular(sample.data);
       const spec = buildBoppVegaLiteSpec(sample.data, tabular, {
@@ -530,7 +530,7 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
   await t.test('17. Demo audio synthesis and BoppAudioPlayer durations match timeline bounds across all extent types (including score Fractions)', () => {
     for (const sample of SAMPLE_DATASETS) {
       const extentType = sample.data.extent?.extent_type;
-      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval') continue;
+      if (!extentType || extentType === 'pixel_box' || extentType === 'pixel' || extentType === 'text' || extentType === 'text_interval' || extentType.startsWith('spherical') || extentType.startsWith('cartesian')) continue;
 
       const tabular = annotationToTabular(sample.data);
       const stats = computeSummaryStats(sample.data, tabular);

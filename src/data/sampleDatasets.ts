@@ -272,7 +272,7 @@ const NOTE_NAMES_PIANOROLL_DATA: BoppAnnotation = {
 };
 
 // Piano Roll with Note Frequencies in Hz (C3=130.81, D3=146.83, E3=164.81, G3=196.00, C4=261.63 Hz)
-const NOTE_HZ_PIANOROLL_DATA: BoppAnnotation = {
+const FREQUENCY_HZ_PIANOROLL_DATA: BoppAnnotation = {
   media_id: "audio:frequency_hz_pianoroll",
   bopp_version: "1.0",
   metadata: {
@@ -301,63 +301,6 @@ const NOTE_HZ_PIANOROLL_DATA: BoppAnnotation = {
   confidence: {
     confidence_type: "likelihood",
     confidence: [0.94, 0.91, 0.95, 0.93, 0.97, 0.96]
-  }
-};
-
-// Hierarchical Song Structure
-const sections = [
-  { t: 0.0, d: 12.5, label: "Intro", level: 0, conf: 0.95 },
-  { t: 12.5, d: 34.0, label: "Verse 1", level: 0, conf: 0.92 },
-  { t: 46.5, d: 28.0, label: "Chorus 1", level: 0, conf: 0.98 },
-  { t: 74.5, d: 22.0, label: "Verse 2", level: 0, conf: 0.89 },
-  { t: 96.5, d: 29.5, label: "Chorus 2", level: 0, conf: 0.97 },
-  { t: 126.0, d: 20.0, label: "Guitar Solo", level: 0, conf: 0.91 },
-  { t: 146.0, d: 32.0, label: "Chorus 3", level: 0, conf: 0.96 },
-  { t: 178.0, d: 15.0, label: "Outro", level: 0, conf: 0.94 },
-  // Level 1 sub-phrases
-  { t: 12.5, d: 17.0, label: "Verse 1A", level: 1, conf: 0.88 },
-  { t: 29.5, d: 17.0, label: "Verse 1B", level: 1, conf: 0.85 },
-  { t: 46.5, d: 14.0, label: "Chorus Part 1", level: 1, conf: 0.93 },
-  { t: 60.5, d: 14.0, label: "Chorus Hook", level: 1, conf: 0.95 },
-  { t: 74.5, d: 11.0, label: "Verse 2A", level: 1, conf: 0.87 },
-  { t: 85.5, d: 11.0, label: "Verse 2B", level: 1, conf: 0.86 },
-  { t: 96.5, d: 14.0, label: "Chorus Part 1", level: 1, conf: 0.92 },
-  { t: 110.5, d: 15.5, label: "Chorus Hook", level: 1, conf: 0.94 }
-].sort((a, b) => a.level - b.level || a.t - b.t);
-
-const STRUCTURE_DATA: BoppAnnotation = {
-  media_id: "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
-  bopp_version: "1.0",
-  metadata: {
-    metadata_type: "crowd",
-    platform: "Amazon Mechanical Turk",
-    num_annotators: 5,
-    consensus: "majority_vote"
-  },
-  sandbox: {
-    tool: "SalienceFormAnnotator",
-    description: "Multi-level hierarchical musical form analysis with inter-annotator agreement"
-  },
-  extent: {
-    extent_type: "time_interval",
-    time: sections.map(s => s.t),
-    duration: sections.map(s => s.d)
-  },
-  payload: {
-    payload_type: "tag",
-    value: sections.map(s => s.label)
-  },
-  groupings: [
-    {
-      name: "level",
-      ids: sections.map(s => s.level),
-      labels: { "section": 0, "sub_phrase": 1 }
-    }
-  ],
-  confidence: {
-    confidence_type: "agreement",
-    num_annotators_common: 5,
-    confidence: sections.map(s => s.conf)
   }
 };
 
@@ -399,104 +342,6 @@ const TF_DATA: BoppAnnotation = {
   confidence: {
     confidence_type: "likelihood",
     confidence: tfBoxes.map(b => b.conf)
-  }
-};
-
-// Continuous Pitch Contour (F0)
-const pitchContourPoints = Array.from({ length: 70 }, (_, i) => {
-  const t = +(i * 0.05).toFixed(3);
-  const base = 440 + 80 / (1 + Math.exp(-0.8 * (t - 1.5)));
-  const vibrato = t > 0.5 ? 6 * Math.sin(2 * Math.PI * 5.5 * t) : 0;
-  // Natural vocal phrasing: voiced phrases with an unvoiced breath pause (1.4s-1.7s) and unvoiced tail (>= 3.1s)
-  const isVoiced = (t >= 0.15 && t < 1.4) || (t >= 1.7 && t < 3.1);
-  return {
-    t,
-    frequency: +(base + vibrato).toFixed(2),
-    voicing: isVoiced ? 1 : 0
-  };
-});
-
-const PITCH_DATA: BoppAnnotation = {
-  media_id: "audio:vocal_melody_stem",
-  bopp_version: "1.0",
-  metadata: {
-    metadata_type: "algorithm",
-    algorithm_id: "CREPE",
-    version: "0.0.12",
-    parameters: { step_size_ms: 50, viterbi: true }
-  },
-  sandbox: {
-    tool: "CREPE_Pitch_Tracker",
-    description: "Fundamental frequency contour (F0 in Hz) with pitch vibrato and voicing"
-  },
-  extent: {
-    extent_type: "time",
-    time: pitchContourPoints.map(p => p.t)
-  },
-  payload: {
-    payload_type: "frequency_hz",
-    value: pitchContourPoints.map(p => p.frequency),
-    voiced: pitchContourPoints.map(p => p.voicing === 1)
-  },
-  confidence: {
-    confidence_type: "likelihood",
-    confidence: pitchContourPoints.map(p => {
-      // Voiced tones have high tracking confidence / activation likelihood (0.85 - 0.99)
-      // Unvoiced breath regions have low model activation (0.15 - 0.30)
-      return p.voicing === 1
-        ? +(0.85 + 0.13 * Math.sin(p.t * 3.5) ** 2).toFixed(2)
-        : 0.22;
-    })
-  }
-};
-
-// Expressive Vocal Aria Melody (Puccini - F0 with Variance Error Bars)
-const vocalAriaPoints = Array.from({ length: 45 }, (_, i) => {
-  const t = +(i * 0.08).toFixed(3);
-  // High lyric soprano phrase centered around 660 Hz (E5) curving to 784 Hz (G5) with rich vibrato
-  const centerF0 = 660 + 124 / (1 + Math.exp(-3.0 * (t - 1.8)));
-  const vibratoDepth = t > 0.4 && t < 3.2 ? 18.5 * Math.sin(2 * Math.PI * 5.6 * t) : 0;
-  const isVoiced = t >= 0.16 && t <= 3.25;
-  return {
-    t,
-    frequency: +(centerF0 + vibratoDepth).toFixed(2),
-    voicing: isVoiced ? 1 : 0
-  };
-});
-
-const VOCAL_ARIA_DATA: BoppAnnotation = {
-  media_id: "audio:puccini_aria_soprano_stem",
-  bopp_version: "1.0",
-  metadata: {
-    metadata_type: "algorithm",
-    algorithm_id: "pYIN_Pitch_Tracker",
-    version: "1.2.0",
-    parameters: { frame_length_ms: 46.4, hop_length_ms: 80, threshold: 0.15 }
-  },
-  sandbox: {
-    piece: "O Mio Babbino Caro",
-    composer: "Giacomo Puccini",
-    voice_type: "Lyric Soprano",
-    feature: "Vocal Vibrato & Pitch Stability with Error Bars (±1.96σ 95% CI)"
-  },
-  extent: {
-    extent_type: "time",
-    time: vocalAriaPoints.map(p => p.t)
-  },
-  payload: {
-    payload_type: "frequency_hz",
-    value: vocalAriaPoints.map(p => p.frequency),
-    voiced: vocalAriaPoints.map(p => p.voicing === 1)
-  },
-  confidence: {
-    confidence_type: "variance",
-    confidence: vocalAriaPoints.map(p => {
-      // Voiced notes have steady tracking with variance 8-22 Hz^2 (std 2.8-4.7 Hz)
-      // Unvoiced/breathing regions have higher uncertainty (75.0 Hz^2)
-      return p.voicing === 1
-        ? +(11.0 + 8.5 * Math.sin(p.t * 3.5) ** 2).toFixed(2)
-        : 75.0;
-    })
   }
 };
 
@@ -1102,7 +947,7 @@ const DRIVE_SCORE_QUARTERS_DATA: BoppAnnotation = {
 // ---------------------------------------------------------------------------
 
 const PERCUSSIVE_ONSETS = [0.12, 0.48, 0.96, 1.44, 1.92, 2.40, 2.88, 3.36, 3.84, 4.32, 4.80];
-const PERCUSSIVE_ONSET_LIKELIHOOD: BoppAnnotation = {
+const PERCUSSIVE_MARKER_LIKELIHOOD: BoppAnnotation = {
   media_id: "audio:funk_drum_solo_transients",
   bopp_version: "1.0",
   metadata: {
@@ -1128,8 +973,8 @@ const PERCUSSIVE_ONSET_LIKELIHOOD: BoppAnnotation = {
   },
 };
 
-const PERCUSSIVE_ONSET_NOCONF: BoppAnnotation = {
-  ...PERCUSSIVE_ONSET_LIKELIHOOD,
+const PERCUSSIVE_MARKER_NOCONF: BoppAnnotation = {
+  ...PERCUSSIVE_MARKER_LIKELIHOOD,
   confidence: undefined,
 };
 
@@ -1139,42 +984,6 @@ const BEAT_METRIC_LIKELIHOOD: BoppAnnotation = {
     confidence_type: "likelihood",
     confidence: (LONGBEATS_DATA.extent as { time: number[] }).time.map((_, i) => +(0.85 + 0.14 * Math.sin(i * 0.7) ** 2).toFixed(3)),
   },
-};
-
-const PITCH_DATA_NOCONF: BoppAnnotation = {
-  ...PITCH_DATA,
-  confidence: undefined,
-};
-
-const SEGMENT_OPEN_DISJOINT: BoppAnnotation = {
-  media_id: "audio:acoustic_folk_song_form",
-  bopp_version: "1.0",
-  metadata: {
-    metadata_type: "human",
-    annotator_id: "form_analyst",
-    tool: "sonic_annotator"
-  },
-  sandbox: {
-    description: "Single-level section segments with disjoint time intervals and likelihood confidence",
-  },
-  extent: {
-    extent_type: "time_interval",
-    time: [0.0, 15.0, 42.0, 68.0, 95.0, 120.0],
-    duration: [15.0, 27.0, 26.0, 27.0, 25.0, 18.0],
-  },
-  payload: {
-    payload_type: "tag",
-    value: ["Intro", "Verse 1", "Chorus 1", "Verse 2", "Chorus 2", "Outro"],
-  },
-  confidence: {
-    confidence_type: "likelihood",
-    confidence: [0.96, 0.92, 0.98, 0.91, 0.97, 0.95],
-  },
-};
-
-const SEGMENT_OPEN_NOCONF: BoppAnnotation = {
-  ...SEGMENT_OPEN_DISJOINT,
-  confidence: undefined,
 };
 
 const TEMPO_RUBATO_VARIANCE_DATA: BoppAnnotation = {
@@ -1223,11 +1032,6 @@ const KEY_MODAL_NOCONF: BoppAnnotation = {
 
 const KEY_MODULATION_NOCONF: BoppAnnotation = {
   ...MODAL_KEY_TIME_DATA,
-  confidence: undefined,
-};
-
-const STRUCTURE_DATA_NOCONF: BoppAnnotation = {
-  ...STRUCTURE_DATA,
   confidence: undefined,
 };
 
@@ -1715,8 +1519,8 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     data: BEAT_METRIC_LIKELIHOOD,
   },
   {
-    id: "time_onset_likelihood",
-    filename: "time_points/03_onset_percussive_likelihood.bopp",
+    id: "time_marker_likelihood",
+    filename: "time_points/03_marker_percussive_likelihood.bopp",
     title: "Percussive Markers (Likelihood)",
     category: "music",
     format: "json",
@@ -1724,53 +1528,18 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     extentType: "time",
     payloadType: "marker",
     confidenceType: "likelihood",
-    data: PERCUSSIVE_ONSET_LIKELIHOOD,
+    data: PERCUSSIVE_MARKER_LIKELIHOOD,
   },
   {
-    id: "time_onset_noconf",
-    filename: "time_points/04_onset_percussive_noconf.bopp",
+    id: "time_marker_noconf",
+    filename: "time_points/04_marker_percussive_noconf.bopp",
     title: "Percussive Markers (No Confidence)",
     category: "music",
     format: "json",
     description: "time extent with marker payload: percussive transient timestamps without confidence ratings.",
     extentType: "time",
     payloadType: "marker",
-    data: PERCUSSIVE_ONSET_NOCONF,
-  },
-  {
-    id: "time_f0_crepe_likelihood",
-    filename: "time_points/05_pitch_contour_f0_crepe_likelihood.bopp",
-    title: "Vocal Melody F0: CREPE (Likelihood)",
-    category: "music",
-    format: "json",
-    description: "time extent with frequency_hz payload: continuous vocal pitch contour tracked by CREPE with activation likelihood confidence ratings and voiced state trajectory.",
-    extentType: "time",
-    payloadType: "frequency_hz",
-    confidenceType: "likelihood",
-    data: PITCH_DATA,
-  },
-  {
-    id: "time_f0_puccini_variance",
-    filename: "time_points/06_pitch_contour_f0_puccini_variance.bopp",
-    title: "Puccini Vocal Aria F0: pYIN (Variance)",
-    category: "music",
-    format: "json",
-    description: "time extent with frequency_hz payload: Puccini soprano aria with rich vibrato, voicing state, statistical error whiskers, and line overview.",
-    extentType: "time",
-    payloadType: "frequency_hz",
-    confidenceType: "variance",
-    data: VOCAL_ARIA_DATA,
-  },
-  {
-    id: "time_f0_noconf",
-    filename: "time_points/07_pitch_contour_f0_noconf.bopp",
-    title: "Vocal Melody F0 (No Confidence)",
-    category: "music",
-    format: "json",
-    description: "time extent with frequency_hz payload: continuous fundamental frequency trajectory without confidence uncertainty ribbons.",
-    extentType: "time",
-    payloadType: "frequency_hz",
-    data: PITCH_DATA_NOCONF,
+    data: PERCUSSIVE_MARKER_NOCONF,
   },
   {
     id: "time_tempo_points_likelihood",
@@ -1870,44 +1639,9 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     data: KEY_MODULATION_NOCONF,
   },
   {
-    id: "interval_multi_segment_agreement",
-    filename: "time_intervals/06_multi_segment_hierarchical_agreement.bopp",
-    title: "Hierarchical Form: Multi-Segment (Agreement)",
-    category: "music",
-    format: "json",
-    description: "time_interval extent with tag payload: Level 0 sections and Level 1 sub-phrases with inter-annotator agreement consensus votes.",
-    extentType: "time_interval",
-    payloadType: "tag",
-    confidenceType: "agreement",
-    data: STRUCTURE_DATA,
-  },
-  {
-    id: "interval_multi_segment_noconf",
-    filename: "time_intervals/07_multi_segment_hierarchical_noconf.bopp",
-    title: "Hierarchical Form: Multi-Segment (No Confidence)",
-    category: "music",
-    format: "json",
-    description: "time_interval extent with tag payload: structural sections across multiple hierarchy levels without confidence meters.",
-    extentType: "time_interval",
-    payloadType: "tag",
-    data: STRUCTURE_DATA_NOCONF,
-  },
-  {
-    id: "interval_segment_open_likelihood",
-    filename: "time_intervals/08_segment_open_disjoint_likelihood.bopp",
-    title: "Song Sections: Disjoint Layout (Likelihood)",
-    category: "music",
-    format: "json",
-    description: "time_interval extent with tag payload: single-level song sections with likelihood confidence meters and interactive layout toggle.",
-    extentType: "time_interval",
-    payloadType: "tag",
-    confidenceType: "likelihood",
-    data: SEGMENT_OPEN_DISJOINT,
-  },
-  {
-    id: "interval_segment_open_agreement",
-    filename: "time_intervals/09_segment_open_disjoint_agreement.bopp",
-    title: "Song Sections: Crowd Agreement 25 Annotators",
+    id: "interval_tags_crowd_agreement",
+    filename: "time_intervals/06_tag_crowd_agreement_25_annotators.bopp",
+    title: "Song Form Tags: Crowd Agreement 25 Annotators",
     category: "music",
     format: "json",
     description: "time_interval extent with tag payload: 25-annotator crowd consensus agreement on song section boundaries.",
@@ -1915,17 +1649,6 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     payloadType: "tag",
     confidenceType: "agreement",
     data: CROWD_AGREEMENT_DATA,
-  },
-  {
-    id: "interval_segment_open_noconf",
-    filename: "time_intervals/10_segment_open_noconf.bopp",
-    title: "Song Sections: Disjoint Layout (No Confidence)",
-    category: "music",
-    format: "json",
-    description: "time_interval extent with tag payload: song sections without confidence meters.",
-    extentType: "time_interval",
-    payloadType: "tag",
-    data: SEGMENT_OPEN_NOCONF,
   },
   {
     id: "interval_tempo_rubato_variance",
@@ -2010,8 +1733,8 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     data: NOTE_NAMES_PIANOROLL_DATA,
   },
   {
-    id: "interval_note_hz_pianoroll",
-    filename: "time_intervals/18_note_hz_pianoroll.bopp",
+    id: "interval_frequency_hz_pianoroll",
+    filename: "time_intervals/18_frequency_hz_pianoroll.bopp",
     title: "Note Frequencies (Hz): Piano Roll (Log Pitch)",
     category: "music",
     format: "json",
@@ -2019,7 +1742,7 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     extentType: "time_interval",
     payloadType: "frequency_hz",
     confidenceType: "likelihood",
-    data: NOTE_HZ_PIANOROLL_DATA,
+    data: FREQUENCY_HZ_PIANOROLL_DATA,
   },
 
   // =========================================================================

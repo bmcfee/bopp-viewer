@@ -57,7 +57,7 @@ test('BOPP Parser & Serialization Test Suite', async (t) => {
   });
 
   await t.test('5. marker payload determines observation count from extent and sets description', () => {
-    const markerDs = SAMPLE_DATASETS.find(d => d.id === 'time_onset_likelihood')!;
+    const markerDs = SAMPLE_DATASETS.find(d => d.id === 'time_marker_likelihood')!;
     const rows = annotationToTabular(markerDs.data);
 
     assert.strictEqual(rows.length, (markerDs.data.extent as any).time.length);
@@ -105,7 +105,7 @@ test('BOPP Parser & Serialization Test Suite', async (t) => {
   });
 
   await t.test('9. agreement confidence extracts num_annotators and num_annotators_common', () => {
-    const agreeDs = SAMPLE_DATASETS.find(d => d.id === 'interval_segment_open_agreement')!;
+    const agreeDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tags_crowd_agreement')!;
     const rows = annotationToTabular(agreeDs.data);
 
     assert.strictEqual(rows.length, 7);

@@ -143,22 +143,49 @@ npm run clean
 
 ---
 
-## Supported BOPP Encodings & Features
+## Supported BOPP Encodings & Matrices
 
-| Extent Type | Payload Type | Vega-Lite Visualization | Sonification Support |
-| :--- | :--- | :--- | :--- |
-| `time_interval` / `score_interval` | `chord` | `mir_eval` Circle-of-Fifths timeline | Synthesized root triads / 7ths |
-| `time` / `interval` | `key_mode` | 24-tonic pitch axis (C at bottom) | Circle-of-fifths colormaps |
-| `none` (global) | `key_mode` | Two concentric donut plots (Outer: Major, Inner: Minor) | Harmonic mode inspection |
-| `none` (global) | `tempo` | KPI callout gauge with reference track | Metronome pulse click |
-| `none` (global) | `tag_open` | Labeled confidence bars or alphabetized badge grid | Metadata analysis |
-| `none` (global) | `mood_thayer` | Russell-Thayer 2D circumplex: 2D Gaussian density heatmap with 1σ/2σ uncertainty bounds (variance) or scatter plot (discrete) | Affective inspection |
-| `time` | `mood_thayer` | Dynamic 2D circumplex trajectory & V/A timeline | Continuous affect tracking |
-| `time` | `beat` / `onset` | Metric downbeat / upbeat bar chart & transient rules | Audio click synthesizer |
-| `time` / `midi_interval` / `score_interval` | `note_midi` / `note_hz` | Opaque piano roll with `mir_eval` pitch class | Polyphonic synth notes |
-| `time` | `pitch_contour` | Continuous F0 trajectory with voiced state & ±1.96σ whiskers | Pure sine F0 synth (voiced only) |
-| `time_frequency_box` | `tag_open` | Spectrogram-aligned TF bounding boxes | STFT spectrogram overlay & synth |
-| `pixel_box` | `tag_open` | Document image bounding boxes | Visual sheet music overlay |
+### 1. Extent–Payload Support Matrix
+
+The table below delineates supported visualization and interactive visual encodings across all 20 BOPP extents and payload schemas.
+
+| Extent Family | Extent Types | `marker` / `beat` | `chord` | `key_mode` | `tempo` | `note` / `note_midi` | `frequency_hz` | `tag` | `lyrics` | `mood_thayer` | `object` / `relation` |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Temporal Points** | `time`, `time_uniform` | Transient pulse & rules | Circle of Fifths ticks | 24-tonic mode ticks | Continuous step line | Ticks & SPN pitch marks | Continuous F0 trajectory | Event tag pins | Token timestamps | 2D circumplex trajectory | Event object markers |
+| **Temporal Intervals** | `time_interval` | — | Overlapping Circle of 5ths bands | Split-color tonic/mode shelf | Horizontal tempo shelves | Polyphonic piano roll | Log-Hz piano roll | Disjoint / stacked intervals | Word span ribbon | Interval affect blocks | Interval entity spans |
+| **Musical Metric Points** | `score_quarter`, `score_quarter_float`, `midi_tick` | Metric downbeat / beat bars | Beat chord events | Key change markers | Metric tempo markers | Metric score note marks | Metric pitch ticks | Metric tag ticks | Syllable metric offsets | Metric affect ticks | Metric score symbols |
+| **Musical Metric Intervals** | `score_interval`, `score_interval_float`, `midi_interval` | — | Measure/beat chord blocks | Structural key regions | Metric tempo rubato shelves | Score / MIDI piano roll | MIDI pitch bands | Measure structural spans | Lyric score note spans | Section affect intervals | Measure grouping spans |
+| **2D Spatial Coordinates** | `pixel`, `pixel_box` | Coordinate needles | Document chord stamps | Key signature boxes | — | Notehead centers / boxes | Stave pitch boxes | Document label bounding boxes | Text transcript word bounding boxes | Affective image regions | Spatial object detections |
+| **3D Cartesian** | `cartesian`, `cartesian_time`, `cartesian_time_interval` | 3D transducer markers | Spatial acoustic chords | Harmonic acoustic modes | Velocity / tempo vectors | 3D pitch points | 3D acoustic pitch trajectories | 3D multi-view orthogonal projections (Top XY, Front XZ, Side YZ) | Spatial subtitle positions | Spatial emotion coordinates | 3D spatial entity clusters |
+| **3D Spherical** | `spherical`, `spherical_time`, `spherical_time_interval` | Polar pulse markers | Ambisonic spatial chords | Polar modal zones | Polar speed trajectories | Ambisonic pitch points | Ambisonic pitch trajectories | Simultaneous 2D projections (Horizontal Polar Plan, DoA Map, Elevation Profile) | Directional speaker lyrics | Polar affect spheres | Spatial directional objects |
+| **Time-Frequency** | `time_frequency_box` | — | Harmonic spectral bins | Key salience regions | Spectral periodicity | Polyphonic pitch boxes | Spectrogram frequency bounds | Bioacoustic bounding boxes | Formant word regions | Affective soundscape boxes | Spectrogram object masks |
+| **Textual Offsets** | `text`, `text_interval` | Token start carets | Syllable chord tags | Modal section headings | Text tempo directives | SPN lyrics pitch labels | Pitch-accent text tags | Character boundary markers | Sequential reading spans & BCP 47 transcript reader | Textual affect spans | Named entity text spans |
+| **Global / File-Level** | `none` (Omitted extent) | Downbeat summary | Global harmonic profile | Concentric tonic / relative donut | KPI gauge with audio pulse | Pitch histogram / ambitus | Pitch range summary | Badge cloud & confidence bars | Document language card | 2D Gaussian circumplex heatmap | Media metadata card |
+
+---
+
+### 2. Payload–Confidence Support Matrix
+
+The table below summarizes supported uncertainty presentation channels for each payload type.
+
+| Payload Type | `likelihood` (Activation $[0, 1]$) | `variance` (Gaussian $\sigma^2$) | `agreement` (Consensus Count $N$) | `none` (Deterministic) |
+| :--- | :--- | :--- | :--- | :--- |
+| **`marker`** | Bar height & point opacity | — | Rater count badge & agreement glyph | Crisp event needle |
+| **`beat`** | Beat bar height & pulse opacity | — | Downbeat rater vote meter | Standard metric pulse |
+| **`chord`** | Embedded top-edge meter / alpha fill | — | Annotator consensus badge & agreement meter | Solid chord band |
+| **`key_mode`** | Embedded meter & outer ring opacity | — | Multi-annotator agreement badge | Solid modal split band |
+| **`tempo`** | Meter gauge & level bar | Shaded $\pm 1.96\sigma$ CI band & whiskers | Rater estimate consensus | Clean step trajectory |
+| **`note` / `note_midi`** | Embedded notehead meter & opacity | Pitch uncertainty whiskers | Transcription consensus vote | Opaque piano roll block |
+| **`frequency_hz`** | Activation envelope ribbon & opacity | Shaded $\pm 1.96\sigma$ CI band & whiskers | Rater consensus F0 bounds | Voiced / unvoiced continuous line |
+| **`tag`** | Embedded meter & bar length | — | Annotator count meter $[n / N]$ & Fleiss $\kappa$ | Solid categorical pill |
+| **`lyrics`** | Word score meter & underline | — | Transcription crowd agreement | Solid transcript span pill |
+| **`mood_thayer`** | Rater scatter opacity & radius | 2D bivariate Gaussian ellipses ($1\sigma, 2\sigma$) | Inter-rater valence/arousal agreement | Discrete trajectory line |
+| **`object`** | Bounding box border opacity | Spatial covariance whiskers | Multi-annotator object consensus | Crisp vector box |
+| **`relation`** | Edge weight & stroke opacity | — | Inter-rater graph consensus | Directed relational arc |
+
+> [!NOTE]
+> **Modulation via Groupings (Future Work)**
+> The combinations detailed above represent direct first-order extent and payload bindings. In future work, BOPP groupings (`groupings` schema) will modulate these pairings—allowing hierarchical nesting (e.g. multi-level musical form), multi-voice polyphony, and multi-track entity alignments to be rendered as coordinated layered visualizers without altering the underlying extent-payload schemas.
 
 ---
 

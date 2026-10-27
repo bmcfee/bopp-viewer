@@ -150,12 +150,19 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
           break;
         }
         case 'text': {
-          record.offset = extent.offset?.[i];
+          const off = extent.offset?.[i] ?? 0;
+          record.offset = off;
+          record._offset_end = off + 1;
+          record._mid_offset = off;
           break;
         }
         case 'text_interval': {
-          record.offset = extent.offset?.[i];
-          record.length = extent.length?.[i];
+          const off = extent.offset?.[i] ?? 0;
+          const len = extent.length?.[i] ?? 1;
+          record.offset = off;
+          record.length = len;
+          record._offset_end = off + len;
+          record._mid_offset = off + len / 2;
           break;
         }
         case 'spherical': {
@@ -513,6 +520,29 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
     }
 
     records.push(record);
+  }
+
+  // Assign greedy non-overlapping lanes for text_interval spans
+  if (annotation.extent?.extent_type === 'text_interval') {
+    const sorted = [...records].sort((a, b) => (Number(a.offset) || 0) - (Number(b.offset) || 0));
+    const laneEnds: number[] = [];
+    for (const r of sorted) {
+      const start = Number(r.offset) || 0;
+      const end = Number(r._offset_end) || start + 1;
+      let placedLane = -1;
+      for (let l = 0; l < laneEnds.length; l++) {
+        if (laneEnds[l] <= start) {
+          placedLane = l;
+          laneEnds[l] = end;
+          break;
+        }
+      }
+      if (placedLane === -1) {
+        placedLane = laneEnds.length;
+        laneEnds.push(end);
+      }
+      r._lane = placedLane;
+    }
   }
 
   return records;
