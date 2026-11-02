@@ -19,7 +19,7 @@ function boppSchemaCodegenPlugin(): Plugin {
     buildStart() {
       try {
         console.log('[Vite Build] Running automated BOPP JSON Schema to TypeScript codegen...');
-        execSync('npx tsx scripts/generate_types.ts', { stdio: 'inherit' });
+        execSync('node scripts/generate_types.mjs', { stdio: 'inherit' });
       } catch (err) {
         console.error('[Vite Build] Error generating BOPP schema types:', err);
       }
@@ -28,7 +28,7 @@ function boppSchemaCodegenPlugin(): Plugin {
       if (file.includes('/schemas/v1/')) {
         try {
           console.log(`[Vite Watch] Schema updated: ${file}. Regenerating types...`);
-          execSync('npx tsx scripts/generate_types.ts', { stdio: 'inherit' });
+          execSync('node scripts/generate_types.mjs', { stdio: 'inherit' });
         } catch (err) {
           console.error('[Vite Watch] Error regenerating BOPP schema types:', err);
         }
@@ -39,6 +39,7 @@ function boppSchemaCodegenPlugin(): Plugin {
 
 export default defineConfig(() => {
   return {
+    base: './',
     plugins: [boppSchemaCodegenPlugin(), react(), tailwindcss()],
     resolve: {
       alias: {
