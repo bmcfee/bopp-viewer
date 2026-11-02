@@ -3,25 +3,29 @@ import assert from 'node:assert';
 import * as vl from 'vega-lite';
 import {
   isIntervalExtentType,
-  toNumericCoordinate,
-  checkIntervalsDisjoint,
-  extractIntervalSpans,
-  analyzeIntervalAnnotation,
-} from '../src/utils/intervalOverlap';
+  getExtentTopology,
+  resolveDomainRange,
+  formatExtentBoundsSummary,
+  resolveActiveGrouping,
+} from '../src/utils/extentTopology';
+import { annotationToTabular } from '../src/utils/boppParser';
 import { buildBoppVegaLiteSpec } from '../src/utils/vegaLiteBuilder';
 import { SAMPLE_DATASETS } from '../src/data/sampleDatasets';
 import type { BoppAnnotation } from '../src/types/bopp';
 
-test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
-  await t.test('1. isIntervalExtentType recognizes time/score/midi interval extents', () => {
+test('Extent Topology & Coherent Grouping Routing Suite', async (t) => {
+  await t.test('1. isIntervalExtentType recognizes time/score/midi/text/spatial interval extents', () => {
     assert.strictEqual(isIntervalExtentType('time_interval'), true);
     assert.strictEqual(isIntervalExtentType('score_interval'), true);
+    assert.strictEqual(isIntervalExtentType('score_interval_float'), true);
     assert.strictEqual(isIntervalExtentType('midi_interval'), true);
-    assert.strictEqual(isIntervalExtentType('custom_time_interval'), true);
-    assert.strictEqual(isIntervalExtentType('beat_interval'), true);
+    assert.strictEqual(isIntervalExtentType('text_interval'), true);
+    assert.strictEqual(isIntervalExtentType('cartesian_time_interval'), true);
+    assert.strictEqual(isIntervalExtentType('spherical_time_interval'), true);
 
     // Non-intervals
     assert.strictEqual(isIntervalExtentType('time'), false);
+    assert.strictEqual(isIntervalExtentType('time_uniform'), false);
     assert.strictEqual(isIntervalExtentType('score_quarter'), false);
     assert.strictEqual(isIntervalExtentType('midi_tick'), false);
     assert.strictEqual(isIntervalExtentType('pixel_box'), false);
@@ -30,210 +34,121 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
     assert.strictEqual(isIntervalExtentType(undefined), false);
   });
 
-  await t.test('2. toNumericCoordinate handles numbers, rational tuples, and strings', () => {
-    assert.strictEqual(toNumericCoordinate(42), 42);
-    assert.strictEqual(toNumericCoordinate(0), 0);
-    assert.strictEqual(toNumericCoordinate(-15.5), -15.5);
+  await t.test('2. getExtentTopology and resolveDomainRange extract disjoint, exhaustive, and min/max bounds', () => {
+    const topo = getExtentTopology({
+      extent_type: 'time_interval',
+      disjoint: true,
+      exhaustive: false,
+      min_time: 0.0,
+      max_time: 120.0,
+      time: [5.0, 20.0],
+      duration: [10.0, 15.0],
+    });
 
-    // Rational tuples [num, den]
-    assert.strictEqual(toNumericCoordinate([4, 1]), 4);
-    assert.strictEqual(toNumericCoordinate([1, 2]), 0.5);
-    assert.strictEqual(toNumericCoordinate([3, 4]), 0.75);
-    assert.strictEqual(toNumericCoordinate([0, 1]), 0);
+    assert.strictEqual(topo.disjoint, true);
+    assert.strictEqual(topo.exhaustive, false);
+    assert.strictEqual(topo.minPrimary, 0.0);
+    assert.strictEqual(topo.maxPrimary, 120.0);
 
-    // Fractions in strings
-    assert.strictEqual(toNumericCoordinate('3/4'), 0.75);
-    assert.strictEqual(toNumericCoordinate('12.5'), 12.5);
+    const [lo, hi] = resolveDomainRange(5.0, 35.0, topo.minPrimary, topo.maxPrimary);
+    assert.strictEqual(lo, 0.0);
+    assert.strictEqual(hi, 120.0);
 
-    // Invalid coordinates
-    assert.strictEqual(toNumericCoordinate(null), null);
-    assert.strictEqual(toNumericCoordinate(undefined), null);
-    assert.strictEqual(toNumericCoordinate('invalid'), null);
+    const summary = formatExtentBoundsSummary({
+      extent_type: 'time_frequency_box',
+      disjoint: false,
+      exhaustive: false,
+      min_time: 0,
+      max_time: 10,
+      min_freq: 100,
+      max_freq: 8000,
+      time: [1],
+      duration: [2],
+      freq_min: [200],
+      freq_max: [400],
+    });
+    assert.ok(summary.some(s => s.includes('time: [0, 10]s')));
+    assert.ok(summary.some(s => s.includes('freq: [100, 8000] Hz')));
   });
 
-  await t.test('3. checkIntervalsDisjoint identifies disjoint vs overlapping intervals', () => {
-    // Empty or single
-    assert.strictEqual(checkIntervalsDisjoint([]), true);
-    assert.strictEqual(checkIntervalsDisjoint([{ start: 0, end: 10 }]), true);
-
-    // Contiguous abutting intervals (0-10, 10-20, 20-30) are disjoint!
-    const abutting = [
-      { start: 0, end: 10 },
-      { start: 10, end: 20 },
-      { start: 20, end: 30 },
-    ];
-    assert.strictEqual(checkIntervalsDisjoint(abutting), true);
-
-    // Spaced intervals (gaps between them) are disjoint
-    const spaced = [
-      { start: 0, end: 5 },
-      { start: 10, end: 15 },
-      { start: 20, end: 25 },
-    ];
-    assert.strictEqual(checkIntervalsDisjoint(spaced), true);
-
-    // Overlapping intervals
-    const overlapping = [
-      { start: 0, end: 12 },
-      { start: 10, end: 25 }, // overlaps with 0-12
-    ];
-    assert.strictEqual(checkIntervalsDisjoint(overlapping), false);
-
-    // Out-of-order intervals
-    const outOfOrderDisjoint = [
-      { start: 20, end: 30 },
-      { start: 0, end: 10 },
-      { start: 10, end: 20 },
-    ];
-    assert.strictEqual(checkIntervalsDisjoint(outOfOrderDisjoint), true);
-
-    const outOfOrderOverlap = [
-      { start: 20, end: 30 },
-      { start: 5, end: 15 },
-      { start: 0, end: 10 }, // overlaps with 5-15
-    ];
-    assert.strictEqual(checkIntervalsDisjoint(outOfOrderOverlap), false);
-  });
-
-  await t.test('4. Time interval annotations: disjoint vs overlapping analysis', () => {
-    // Disjoint time intervals (e.g. tags_time_intervals)
-    const disjointTimeDoc: BoppAnnotation = {
-      media_id: 'audio:solo_and_ensemble',
+  await t.test('3. resolveActiveGrouping resolves group IDs, inverted labels, and negative ungrouped sentinel', () => {
+    const doc: BoppAnnotation = {
+      media_id: 'audio:test_grouping',
       bopp_version: '1.0',
       extent: {
         extent_type: 'time_interval',
-        time: [0.0, 10.0, 25.0],
-        duration: [10.0, 15.0, 20.0],
+        disjoint: false,
+        exhaustive: true,
+        time: [0, 10, 0, 10, 5],
+        duration: [10, 10, 10, 10, 5],
       },
       payload: {
-        payload_type: 'tag_open',
-        value: ['Cello Solo', 'String Quartet', 'Orchestra'],
+        payload_type: 'tag',
+        value: ['A', 'B', 'a1', 'b1', 'noise'],
       },
+      groupings: [
+        {
+          name: 'Hierarchy',
+          disjoint: true,
+          exhaustive: true,
+          labels: { 'Coarse Level': 0, 'Fine Level': 1 },
+          ids: [0, 0, 1, 1, -1],
+        },
+        {
+          name: 'Secondary',
+          disjoint: false,
+          exhaustive: false,
+          ids: [0, 1, 0, 1, 0],
+        },
+      ],
     };
-    const analysisDisjoint = analyzeIntervalAnnotation(disjointTimeDoc);
-    assert.strictEqual(analysisDisjoint.isIntervalExtent, true);
-    assert.strictEqual(analysisDisjoint.coordinateAxis, 'time');
-    assert.strictEqual(analysisDisjoint.isDisjoint, true);
-    assert.strictEqual(analysisDisjoint.hasOverlap, false);
-    assert.strictEqual(analysisDisjoint.overlapCount, 0);
-    assert.strictEqual(analysisDisjoint.shouldUseSingleRow, true);
 
-    // Overlapping time intervals
-    const overlappingTimeDoc: BoppAnnotation = {
-      media_id: 'audio:concurrent_tracks',
-      bopp_version: '1.0',
-      extent: {
-        extent_type: 'time_interval',
-        time: [0.0, 5.0, 15.0],
-        duration: [20.0, 25.0, 20.0], // 0-20, 5-30, 15-35 all overlap!
-      },
-      payload: {
-        payload_type: 'tag_open',
-        value: ['Bass', 'Drums', 'Lead Guitar'],
-      },
-    };
-    const analysisOverlap = analyzeIntervalAnnotation(overlappingTimeDoc);
-    assert.strictEqual(analysisOverlap.isIntervalExtent, true);
-    assert.strictEqual(analysisOverlap.isDisjoint, false);
-    assert.strictEqual(analysisOverlap.hasOverlap, true);
-    assert.ok(analysisOverlap.overlapCount >= 2);
-    assert.strictEqual(analysisOverlap.shouldUseSingleRow, false);
+    const g0 = resolveActiveGrouping(doc, 0);
+    assert.ok(g0);
+    assert.strictEqual(g0.name, 'Hierarchy');
+    assert.strictEqual(g0.disjoint, true);
+    assert.strictEqual(g0.exhaustive, true);
+    assert.deepStrictEqual(g0.nonNegativeGroupIds, [0, 1]);
+    assert.deepStrictEqual(g0.nonNegativeGroupLabels, ['Coarse Level', 'Fine Level']);
+    assert.strictEqual(g0.hasUngrouped, true);
+    assert.deepStrictEqual(g0.orderedGroupLabels, ['Coarse Level', 'Fine Level', 'Ungrouped']);
+    assert.strictEqual(g0.getLabelForId(0), 'Coarse Level');
+    assert.strictEqual(g0.getLabelForId(-1), 'Ungrouped');
+
+    // Explicitly ungrouped (activeGroupingIndex = null)
+    const gNone = resolveActiveGrouping(doc, null);
+    assert.strictEqual(gNone, null);
+
+    // Second grouping with auto-generated fallback labels
+    const g1 = resolveActiveGrouping(doc, 1);
+    assert.ok(g1);
+    assert.strictEqual(g1.name, 'Secondary');
+    assert.strictEqual(g1.disjoint, false);
+    assert.strictEqual(g1.getLabelForId(0), 'Secondary 0');
+    assert.strictEqual(g1.getLabelForId(1), 'Secondary 1');
+
+    // Tabular injection
+    const rows = annotationToTabular(doc, 0);
+    assert.strictEqual(rows[0]._group_id, 0);
+    assert.strictEqual(rows[0]._group_label, 'Coarse Level');
+    assert.strictEqual(rows[4]._group_id, -1);
+    assert.strictEqual(rows[4]._group_label, 'Ungrouped');
   });
 
-  await t.test('5. Score interval annotations: rational fractions disjoint vs overlapping', () => {
-    // Disjoint score intervals with fractional notation
-    const disjointScoreDoc: BoppAnnotation = {
-      media_id: 'score:beethoven_phrasing',
-      bopp_version: '1.0',
-      extent: {
-        extent_type: 'score_interval',
-        quarter: [[0, 1], [4, 1], [8, 1]],
-        duration: [[4, 1], [4, 1], [4, 1]],
-      },
-      payload: {
-        payload_type: 'tag_open',
-        value: ['Phrase 1', 'Phrase 2', 'Phrase 3'],
-      },
-    };
-    const analysisScoreDisjoint = analyzeIntervalAnnotation(disjointScoreDoc);
-    assert.strictEqual(analysisScoreDisjoint.isIntervalExtent, true);
-    assert.strictEqual(analysisScoreDisjoint.coordinateAxis, 'score');
-    assert.strictEqual(analysisScoreDisjoint.isDisjoint, true);
-    assert.strictEqual(analysisScoreDisjoint.shouldUseSingleRow, true);
-
-    // Overlapping score intervals
-    const overlappingScoreDoc: BoppAnnotation = {
-      media_id: 'score:polyphony',
-      bopp_version: '1.0',
-      extent: {
-        extent_type: 'score_interval',
-        quarter: [[0, 1], [2, 1]],
-        duration: [[4, 1], [4, 1]], // [0, 4] and [2, 6] overlap!
-      },
-      payload: {
-        payload_type: 'tag_open',
-        value: ['Voice 1', 'Voice 2'],
-      },
-    };
-    const analysisScoreOverlap = analyzeIntervalAnnotation(overlappingScoreDoc);
-    assert.strictEqual(analysisScoreOverlap.isIntervalExtent, true);
-    assert.strictEqual(analysisScoreOverlap.isDisjoint, false);
-    assert.strictEqual(analysisScoreOverlap.shouldUseSingleRow, false);
-  });
-
-  await t.test('6. MIDI interval annotations: tick intervals disjoint vs overlapping', () => {
-    // Disjoint MIDI intervals
-    const disjointMidiDoc: BoppAnnotation = {
-      media_id: 'midi:arp_progression',
-      bopp_version: '1.0',
-      extent: {
-        extent_type: 'midi_interval',
-        tick: [0, 960, 1920],
-        duration: [960, 960, 960],
-      },
-      payload: {
-        payload_type: 'tag_open',
-        value: ['Part 1', 'Part 2', 'Part 3'],
-      },
-    };
-    const analysisMidiDisjoint = analyzeIntervalAnnotation(disjointMidiDoc);
-    assert.strictEqual(analysisMidiDisjoint.isIntervalExtent, true);
-    assert.strictEqual(analysisMidiDisjoint.coordinateAxis, 'midi');
-    assert.strictEqual(analysisMidiDisjoint.isDisjoint, true);
-    assert.strictEqual(analysisMidiDisjoint.shouldUseSingleRow, true);
-
-    // Overlapping MIDI intervals
-    const overlappingMidiDoc: BoppAnnotation = {
-      media_id: 'midi:poly_synth',
-      bopp_version: '1.0',
-      extent: {
-        extent_type: 'midi_interval',
-        tick: [0, 480],
-        duration: [960, 960], // [0, 960] and [480, 1440] overlap!
-      },
-      payload: {
-        payload_type: 'tag_open',
-        value: ['Layer A', 'Layer B'],
-      },
-    };
-    const analysisMidiOverlap = analyzeIntervalAnnotation(overlappingMidiDoc);
-    assert.strictEqual(analysisMidiOverlap.isIntervalExtent, true);
-    assert.strictEqual(analysisMidiOverlap.isDisjoint, false);
-    assert.strictEqual(analysisMidiOverlap.shouldUseSingleRow, false);
-  });
-
-  await t.test('7. Vega-Lite spec builder assigns single row for disjoint and multi rows for overlapping', () => {
-    // 7A: Disjoint annotation uses single row (_single_row)
+  await t.test('4. Vega-Lite spec builder routes disjoint vs overlapping interval extents via schema flags', () => {
+    // Disjoint annotation uses single row (_single_row)
     const disjointDoc: BoppAnnotation = {
       media_id: 'audio:disjoint_test',
       bopp_version: '1.0',
       extent: {
         extent_type: 'time_interval',
+        disjoint: true,
+        exhaustive: true,
         time: [0, 10, 20],
         duration: [10, 10, 10],
       },
       payload: {
-        payload_type: 'tag_open',
+        payload_type: 'tag',
         value: ['Tag A', 'Tag B', 'Tag C'],
       },
     };
@@ -241,26 +156,21 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
     const disjointLayers = (specDisjoint as any).vconcat ? (specDisjoint as any).vconcat[0].layer : (specDisjoint as any).layer;
     const layer0Disjoint = disjointLayers[0];
     assert.strictEqual(layer0Disjoint.encoding.y.field, '_single_row', 'Disjoint intervals must use _single_row for vertical axis');
-    assert.ok(
-      ((specDisjoint as any).transform as any[]).some((t: any) => t.as === '_single_row'),
-      'Must inject _single_row calculation transform'
-    );
+    assert.ok(vl.compile(specDisjoint as any).spec);
 
-    // Verify it compiles to valid Vega
-    const compiledDisjoint = vl.compile(specDisjoint as any);
-    assert.ok(compiledDisjoint.spec, 'Disjoint spec must compile cleanly');
-
-    // 7B: Overlapping annotation uses different row for each value (y: { field: "value" })
+    // Overlapping annotation uses different row for each value (y: { field: "value" })
     const overlapDoc: BoppAnnotation = {
       media_id: 'audio:overlap_test',
       bopp_version: '1.0',
       extent: {
         extent_type: 'time_interval',
+        disjoint: false,
+        exhaustive: false,
         time: [0, 5],
-        duration: [10, 10], // 0-10 and 5-15 overlap!
+        duration: [10, 10],
       },
       payload: {
-        payload_type: 'tag_open',
+        payload_type: 'tag',
         value: ['Tag A', 'Tag B'],
       },
     };
@@ -268,80 +178,53 @@ test('Interval Disjoint vs Overlap Analysis Suite', async (t) => {
     const overlapLayers = (specOverlap as any).vconcat ? (specOverlap as any).vconcat[0].layer : (specOverlap as any).layer;
     const layer0Overlap = overlapLayers[0];
     assert.strictEqual(layer0Overlap.encoding.y.field, 'value', 'Overlapping intervals must use field "value" to allocate different rows');
-
-    // Verify it compiles to valid Vega
-    const compiledOverlap = vl.compile(specOverlap as any);
-    assert.ok(compiledOverlap.spec, 'Overlapping spec must compile cleanly');
+    assert.ok(vl.compile(specOverlap as any).spec);
   });
 
-  await t.test('8. Sample dataset tags_time_intervals renders as single row while tags_overlapping renders as multi-row', () => {
-    const disjointDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tags_disjoint_noconf');
-    assert.ok(disjointDs, 'interval_tags_disjoint_noconf must exist');
-    const specDisjoint: any = buildBoppVegaLiteSpec(disjointDs.data);
-    const layersDisjoint = specDisjoint.vconcat ? specDisjoint.vconcat[0].layer : specDisjoint.layer;
-    assert.strictEqual(layersDisjoint[0].encoding.y.field, '_single_row');
+  await t.test('5. Multi-level hierarchical segmentation (grouping.disjoint = true) routes to 1 row per group level', () => {
+    const hierDs = SAMPLE_DATASETS.find(d => d.id === 'hierarchical_segmentation_salami')!;
+    assert.ok(hierDs, 'hierarchical_segmentation_salami dataset must exist');
 
-    const overlapDs = SAMPLE_DATASETS.find(d => d.id === 'interval_tags_overlapping_likelihood');
-    assert.ok(overlapDs, 'interval_tags_overlapping_likelihood must exist');
-    const specOverlap: any = buildBoppVegaLiteSpec(overlapDs.data);
-    const layersOverlap = specOverlap.vconcat ? specOverlap.vconcat[0].layer : specOverlap.layer;
-    assert.strictEqual(layersOverlap[0].encoding.y.field, 'value');
+    // Grouping 0: Hierarchy Level (disjoint: true) -> 1 horizontal row per group ID (_group_label on Y axis)
+    const tabular0 = annotationToTabular(hierDs.data, 0);
+    const specG0: any = buildBoppVegaLiteSpec(hierDs.data, tabular0, { activeGroupingIndex: 0 });
+    const detailG0 = specG0.vconcat ? specG0.vconcat[0] : specG0;
+    assert.strictEqual(detailG0.layer[0].encoding.y.field, '_group_label', 'Disjoint grouping on intervals must map _group_label to Y axis rows');
+    assert.ok(vl.compile(specG0).spec);
+
+    // Grouping 1: Thematic Family (disjoint: false) -> ordered vertical subplots (vconcat)
+    const tabular1 = annotationToTabular(hierDs.data, 1);
+    const specG1: any = buildBoppVegaLiteSpec(hierDs.data, tabular1, { activeGroupingIndex: 1 });
+    assert.ok(Array.isArray(specG1.vconcat), 'Non-disjoint tag grouping must render ordered vertical subplots via vconcat');
+    assert.ok(specG1.vconcat.length >= 3, 'Must have a subplot for each thematic family group');
+    assert.ok(vl.compile(specG1).spec);
+
+    // Ungrouped (activeGroupingIndex: null) -> falls back to extent.disjoint = false (one row per tag value)
+    const tabularNone = annotationToTabular(hierDs.data, null);
+    const specNone: any = buildBoppVegaLiteSpec(hierDs.data, tabularNone, { activeGroupingIndex: null });
+    const detailNone = specNone.vconcat ? specNone.vconcat[0] : specNone;
+    assert.strictEqual(detailNone.layer[0].encoding.y.field, 'value');
+    assert.ok(vl.compile(specNone).spec);
   });
 
-  await t.test('9. Key mode time interval annotations use disjoint single-row vs overlapping multi-row logic', () => {
-    // Disjoint modal progression -> single row track
-    const disjointKeyDs = SAMPLE_DATASETS.find(d => d.id === 'interval_key_noconf');
-    assert.ok(disjointKeyDs, 'interval_key_noconf must exist');
-    const analysisDisjoint = analyzeIntervalAnnotation(disjointKeyDs.data);
-    assert.strictEqual(analysisDisjoint.isDisjoint, true);
-    assert.strictEqual(analysisDisjoint.shouldUseSingleRow, true);
+  await t.test('6. Polyphonic F0 trajectories with groupings render colored group outlines and trajectory lines', () => {
+    const duetDs = SAMPLE_DATASETS.find(d => d.id === 'polyphonic_f0_duet_grouped')!;
+    assert.ok(duetDs, 'polyphonic_f0_duet_grouped dataset must exist');
 
-    const specDisjoint: any = buildBoppVegaLiteSpec(disjointKeyDs.data);
-    const layers = specDisjoint.vconcat ? specDisjoint.vconcat[0].layer : specDisjoint.layer;
-    assert.strictEqual(layers[0].encoding.y.field, '_single_row', 'Disjoint key mode intervals must render on single row');
-    const compiledDisjoint = vl.compile(specDisjoint as any);
-    assert.ok(compiledDisjoint.spec, 'Disjoint key mode spec must compile cleanly');
+    // Grouping 0: Voice Stream (disjoint: true) -> connected trajectory lines per group + colored outer casing
+    const tab0 = annotationToTabular(duetDs.data, 0);
+    const spec0: any = buildBoppVegaLiteSpec(duetDs.data, tab0, { activeGroupingIndex: 0 });
+    const detail0 = spec0.vconcat ? spec0.vconcat[0] : spec0;
+    const lineLayers0 = detail0.layer.filter((l: any) => l.mark?.type === 'line');
+    assert.ok(lineLayers0.length >= 2, 'Voice Stream (disjoint=true) must render both outer group casing line and inner trajectory line');
+    assert.ok(vl.compile(spec0).spec);
 
-    // Overlapping key intervals -> multi-row
-    const overlappingKeyDoc: BoppAnnotation = {
-      media_id: 'audio:polytonal_overlap',
-      bopp_version: '1.0',
-      extent: {
-        extent_type: 'time_interval',
-        time: [0.0, 5.0],
-        duration: [15.0, 15.0], // 0-15 and 5-20 overlap (polytonal)
-      },
-      payload: {
-        payload_type: 'key_mode',
-        value: ['C:maj', 'F#:maj'],
-      },
-    };
-    const analysisOverlap = analyzeIntervalAnnotation(overlappingKeyDoc);
-    assert.strictEqual(analysisOverlap.isDisjoint, false);
-    assert.strictEqual(analysisOverlap.shouldUseSingleRow, false);
-
-    const specOverlap: any = buildBoppVegaLiteSpec(overlappingKeyDoc);
-    const layersOverlap = specOverlap.vconcat ? specOverlap.vconcat[0].layer : specOverlap.layer;
-    assert.strictEqual(layersOverlap[0].encoding.y.field, 'value', 'Overlapping key mode must use multi-row value field');
-    const compiledOverlap = vl.compile(specOverlap as any);
-    assert.ok(compiledOverlap.spec, 'Overlapping polytonal key spec must compile cleanly');
-  });
-
-  await t.test('10. Modal key split coloring displays tonic on top/outer and relative major on bottom/inner in static and time-varying cases', () => {
-    const staticDs = SAMPLE_DATASETS.find(d => d.id === 'global_key_noconf');
-    assert.ok(staticDs, 'global_key_noconf dataset must exist');
-    const specStatic: any = buildBoppVegaLiteSpec(staticDs.data);
-    const compiledStatic = vl.compile(specStatic as any);
-    assert.ok(compiledStatic.spec, 'Static modal key spec must compile cleanly');
-
-    const timeDs = SAMPLE_DATASETS.find(d => d.id === 'interval_key_noconf');
-    assert.ok(timeDs, 'interval_key_noconf dataset must exist');
-    const specTime: any = buildBoppVegaLiteSpec(timeDs.data);
-    const compiledTime = vl.compile(specTime as any);
-    assert.ok(compiledTime.spec, 'Time-varying modal key spec must compile cleanly');
-
-    // Verify split patches are included in layers
-    const timeLayers = (specTime.vconcat ? specTime.vconcat[0].layer : specTime.layer) as any[];
-    assert.ok(timeLayers.length >= 4, 'Must contain base, top half, bottom half, and label layers');
+    // Ungrouped (activeGroupingIndex: null) -> extent.disjoint is false, so multipitch scatter points without connecting line
+    const tabNone = annotationToTabular(duetDs.data, null);
+    const specNone: any = buildBoppVegaLiteSpec(duetDs.data, tabNone, { activeGroupingIndex: null });
+    const detailNone = specNone.vconcat ? specNone.vconcat[0] : specNone;
+    const lineLayersNone = detailNone.layer.filter((l: any) => l.mark?.type === 'line');
+    assert.strictEqual(lineLayersNone.length, 0, 'Ungrouped polyphonic F0 (extent.disjoint=false) must render as multipitch scatter without trajectory line');
+    assert.ok(vl.compile(specNone).spec);
   });
 });

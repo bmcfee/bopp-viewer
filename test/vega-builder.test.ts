@@ -209,14 +209,14 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
     const dsList = ['interval_chord_overlapping_likelihood', 'interval_key_likelihood', 'interval_tags_overlapping_likelihood'];
     for (const id of dsList) {
       const ds = SAMPLE_DATASETS.find(d => d.id === id)!;
-      const tabular = annotationToTabular(ds.data);
-      for (const multiRow of [false, true]) {
+      for (const activeGroupingIndex of [null, 0]) {
+        const tabular = annotationToTabular(ds.data, activeGroupingIndex);
         const spec = buildBoppVegaLiteSpec(ds.data, tabular, {
           chartWidth: 700,
           chartHeight: 300,
-          isDark: true,
+          theme: 'dark',
           confidenceChannel: 'meter',
-          forceMultiRow: multiRow,
+          activeGroupingIndex,
         }) as any;
 
         const compiled = vl.compile(spec);
@@ -243,8 +243,8 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
           const mTop = mItem.y;
           const mBottom = mItem.y + mItem.height;
 
-          assert.ok(mTop >= pTop - 0.5, `Meter top ${mTop} must not be above box top ${pTop} in ${id} (multiRow=${multiRow})`);
-          assert.ok(mBottom <= pBottom + 0.5, `Meter bottom ${mBottom} must not be below box bottom ${pBottom} in ${id} (multiRow=${multiRow})`);
+          assert.ok(mTop >= pTop - 0.5, `Meter top ${mTop} must not be above box top ${pTop} in ${id}`);
+          assert.ok(mBottom <= pBottom + 0.5, `Meter bottom ${mBottom} must not be below box bottom ${pBottom} in ${id}`);
         }
       }
     }
@@ -372,12 +372,13 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
     }
   });
 
-  await t.test('12. Global genres/tags with no confidence render as an alphabetized collection of badges', () => {
+  await t.test('12. Global genres/tags with no confidence render as an alphabetized collection of badges (ungrouped) or ordered subplots (grouped)', () => {
     const globalNoConf = SAMPLE_DATASETS.find(d => d.id === 'global_tags_noconf')!;
-    const tabular = annotationToTabular(globalNoConf.data);
+    const tabular = annotationToTabular(globalNoConf.data, null);
     const spec = buildBoppVegaLiteSpec(globalNoConf.data, tabular, {
       chartWidth: 760,
-      isDark: true,
+      theme: 'dark',
+      activeGroupingIndex: null,
     }) as any;
 
     assert.ok(spec, 'Spec must be generated for global tags without confidence');
@@ -415,6 +416,20 @@ test('Vega-Lite Visualizer Builder Test Suite', async (t) => {
     assert.doesNotThrow(() => {
       parseVega(compiled.spec);
     }, 'Vega parser failed for global tags badge spec');
+
+    // Also test grouped mode (activeGroupingIndex: 0) -> ordered subplots via vconcat
+    const groupedTabular = annotationToTabular(globalNoConf.data, 0);
+    const groupedSpec = buildBoppVegaLiteSpec(globalNoConf.data, groupedTabular, {
+      chartWidth: 760,
+      theme: 'dark',
+      activeGroupingIndex: 0,
+    }) as any;
+    assert.ok(Array.isArray(groupedSpec.vconcat), 'Grouped global tags must arrange into ordered vertical subplots');
+    assert.strictEqual(groupedSpec.vconcat.length, 3, 'Must have 3 group subplots for Tag Facet');
+    const compiledGrouped = vl.compile(groupedSpec);
+    assert.doesNotThrow(() => {
+      parseVega(compiledGrouped.spec);
+    }, 'Vega parser failed for grouped global tags spec');
   });
 
   await t.test('13. Bidirectional confidence filter supports min and max ranges to isolate low or high confidence regions', () => {

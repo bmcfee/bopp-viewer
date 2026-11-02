@@ -7,7 +7,7 @@
  */
 
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
-import { getRecordStartSeconds, getRecordDurationSeconds } from './boppParser';
+import { getRecordStartSeconds, getRecordDurationSeconds, computeSummaryStats } from './boppParser';
 
 /**
  * Standard MIDI timing constants
@@ -37,10 +37,7 @@ export function isSonifiablePayload(payloadType?: string, extentType?: string): 
     'note',
     'note_midi',
     'frequency_hz',
-    'note_hz',
     'marker',
-    'onset',
-    'pitch_contour',
   ]);
   return Boolean(payloadType && sonifiableTypes.has(payloadType));
 }
@@ -122,18 +119,8 @@ export class BoppAudioPlayer {
     // Calculate duration strictly in seconds, matching computeSummaryStats & vegaLiteBuilder:
     // For MIDI ticks at standard 480 PPQ and 120 BPM: 1 tick = 1 / 960 seconds.
     // For Score quarters at 120 BPM: 1 quarter = 0.50 seconds.
-    let maxSec = 0;
-    const isMidiExtent = Boolean(annotation.extent?.extent_type?.includes('midi') || (records.length > 0 && typeof records[0].tick === 'number'));
-    const isScoreExtent = Boolean(annotation.extent?.extent_type?.includes('score') || (records.length > 0 && typeof records[0].quarter === 'number'));
-
-    for (const r of records) {
-      const startSec = getRecordStartSeconds(r, { isMidiExtent, isScoreExtent }) ?? 0;
-      const durSec = getRecordDurationSeconds(r, 0, { isMidiExtent, isScoreExtent });
-      const endSec = startSec + durSec;
-      if (endSec > maxSec) {
-        maxSec = endSec;
-      }
-    }
+    const stats = computeSummaryStats(annotation, records);
+    const maxSec = stats.duration ?? 0;
 
     this.annotationMaxSec = maxSec;
     if (this.linkedAudioEl && !isNaN(this.linkedAudioEl.duration) && this.linkedAudioEl.duration > 0) {
@@ -151,6 +138,20 @@ export class BoppAudioPlayer {
 
   public onEnded(cb: () => void) {
     this.onEndedCallback = cb;
+  }
+
+  private isMonophonicF0Contour(): boolean {
+    if (this.annotation?.payload.payload_type !== 'frequency_hz') return false;
+    const ext = this.annotation?.extent;
+    if (!ext) return false;
+    const eType = ext.extent_type;
+    const isPointTemporal =
+      eType === 'time' ||
+      eType === 'time_uniform' ||
+      eType === 'midi_tick' ||
+      eType === 'score_quarter' ||
+      eType === 'score_quarter_float';
+    return isPointTemporal && Boolean(ext.disjoint);
   }
 
   public play() {
@@ -171,7 +172,7 @@ export class BoppAudioPlayer {
       this.linkedAudioEl.currentTime = this.currentPlayhead;
       this.linkedAudioEl.playbackRate = this.speed;
       this.linkedAudioEl.play().catch(e => console.warn('Linked audio play error:', e));
-    } else if (this.annotation?.payload.payload_type === 'pitch_contour') {
+    } else if (this.isMonophonicF0Contour()) {
       this.startF0Synthesizer();
       this.updateF0Pitch(this.currentPlayhead);
     } else {
@@ -215,7 +216,7 @@ export class BoppAudioPlayer {
     if (this.linkedAudioEl) {
       this.linkedAudioEl.currentTime = this.currentPlayhead;
     } else if (this.isPlaying) {
-      if (this.annotation?.payload.payload_type === 'pitch_contour') {
+      if (this.isMonophonicF0Contour()) {
         this.updateF0Pitch(this.currentPlayhead);
       } else {
         this.triggerActiveIntervalsAt(this.currentPlayhead);
@@ -384,7 +385,7 @@ export class BoppAudioPlayer {
         this.onEndedCallback?.();
         return;
       }
-      if (this.annotation?.payload.payload_type === 'pitch_contour') {
+      if (this.isMonophonicF0Contour()) {
         this.updateF0Pitch(this.currentPlayhead);
       }
     } else {
@@ -406,7 +407,7 @@ export class BoppAudioPlayer {
 
       if (this.currentPlayhead >= this.duration) {
         this.currentPlayhead = this.duration;
-        if (this.annotation?.payload.payload_type !== 'pitch_contour') {
+        if (!this.isMonophonicF0Contour()) {
           this.triggerSounds(prevTime, this.duration, true);
         }
         this.pause();
@@ -416,7 +417,7 @@ export class BoppAudioPlayer {
       }
 
       // Check if continuous F0 pitch contour needs update
-      if (this.annotation?.payload.payload_type === 'pitch_contour') {
+      if (this.isMonophonicF0Contour()) {
         this.updateF0Pitch(this.currentPlayhead);
       } else {
         // Trigger discrete event sounds crossed between prevTime and currentPlayhead
@@ -483,20 +484,18 @@ export class BoppAudioPlayer {
     } else if (payloadType === 'beat') {
       const isDownbeat = r.value === 1;
       this.playClick(isDownbeat);
-    } else if (payloadType === 'marker' || payloadType === 'onset') {
+    } else if (payloadType === 'marker') {
       this.playClick(true);
     } else if ((payloadType === 'note_midi' || payloadType === 'note') && typeof r.midi === 'number') {
       this.playMidiNote(r.midi, durSec);
     } else if (payloadType === 'note_midi' && typeof r.value === 'number') {
       this.playMidiNote(r.value, durSec);
-    } else if ((payloadType === 'frequency_hz' || payloadType === 'note_hz') && typeof r.hz === 'number') {
+    } else if (payloadType === 'frequency_hz' && typeof r.hz === 'number') {
       if (r.voiced !== false) {
         this.playTone(r.hz, durSec);
       }
-    } else if (payloadType === 'note_hz' && typeof r.value === 'number') {
-      this.playTone(r.value, durSec);
-    } else if (payloadType !== 'pitch_contour') {
-      // Default click for other events (onsets, segments)
+    } else {
+      // Default click for other events
       this.playClick(false);
     }
   }

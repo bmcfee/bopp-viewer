@@ -37,6 +37,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'time',
+        disjoint: true,
+        exhaustive: false,
         time: [0.0, 1.0, 2.0], // 3 items
       },
       payload: {
@@ -55,6 +57,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'time_uniform',
+        disjoint: true,
+        exhaustive: true,
         start_time: 0.0,
         sampling_period: 0.05,
       },
@@ -70,6 +74,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       ...validUniform,
       extent: {
         extent_type: 'time_uniform',
+        disjoint: true,
+        exhaustive: true,
         start_time: 0.0,
         sampling_period: -0.1, // Invalid non-positive period
       },
@@ -85,6 +91,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'time',
+        disjoint: true,
+        exhaustive: false,
         time: [0.1, 0.5, 0.9],
       },
       payload: {
@@ -113,6 +121,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'time_interval',
+        disjoint: true,
+        exhaustive: false,
         time: [0.0, 1.0, 2.0],
         duration: [1.0, 1.0, 1.0],
       },
@@ -142,6 +152,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'spherical',
+        disjoint: true,
+        exhaustive: false,
         azimuth: [-180.0, 0.0, 179.9],
         elevation: [-90.0, 0.0, 90.0],
         radius: [1.0, 2.5, 10.0],
@@ -158,6 +170,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       ...validSpherical,
       extent: {
         extent_type: 'spherical',
+        disjoint: true,
+        exhaustive: false,
         azimuth: [200.0], // Out of [-180, 180) range
         elevation: [100.0], // Out of [-90, 90] range
         radius: [-1.0], // Non-positive radius
@@ -178,6 +192,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'text_interval',
+        disjoint: true,
+        exhaustive: false,
         offset: [0, 5],
         length: [4, 4],
       },
@@ -208,6 +224,8 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
       bopp_version: '1.0',
       extent: {
         extent_type: 'time',
+        disjoint: true,
+        exhaustive: false,
         time: [0.0, 1.0],
       },
       payload: {
@@ -235,5 +253,49 @@ test('BOPP Schema Validation & Integrity Test Suite', async (t) => {
     const invalidRes = validateBoppAnnotation(invalidAgreement);
     assert.strictEqual(invalidRes.isValid, false);
     assert.ok(invalidRes.issues.some(i => i.path.includes('num_annotators_common')));
+  });
+
+  await t.test('10. Schema validator validates extent.disjoint/exhaustive and grouping.disjoint/exhaustive/ids', () => {
+    const missingDisjoint: any = {
+      media_id: 'audio:missing_flags',
+      bopp_version: '1.0',
+      extent: {
+        extent_type: 'time',
+        time: [0.0, 1.0],
+      },
+      payload: {
+        payload_type: 'tag',
+        value: ['A', 'B'],
+      },
+    };
+    const resMissing = validateBoppAnnotation(missingDisjoint);
+    assert.strictEqual(resMissing.isValid, false);
+    assert.ok(resMissing.issues.some(i => i.path.includes('disjoint') || i.message.includes('disjoint')));
+
+    const mismatchedGroupingIds: any = {
+      media_id: 'audio:bad_grouping',
+      bopp_version: '1.0',
+      extent: {
+        extent_type: 'time',
+        disjoint: true,
+        exhaustive: false,
+        time: [0.0, 1.0],
+      },
+      payload: {
+        payload_type: 'tag',
+        value: ['A', 'B'],
+      },
+      groupings: [
+        {
+          name: 'Level',
+          disjoint: true,
+          exhaustive: false,
+          ids: [0], // length 1 != 2 observations
+        },
+      ],
+    };
+    const resBadGroup = validateBoppAnnotation(mismatchedGroupingIds);
+    assert.strictEqual(resBadGroup.isValid, false);
+    assert.ok(resBadGroup.issues.some(i => i.path.includes('groupings')));
   });
 });

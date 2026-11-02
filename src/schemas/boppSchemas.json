@@ -244,13 +244,47 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all spatial points (x, y, z) are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether spatial observations cover the 3D space without missing observations."
+      },
+      "min_x": {
+        "type": "number",
+        "description": "Lower bound along x-axis in space."
+      },
+      "max_x": {
+        "type": "number",
+        "description": "Upper bound along x-axis in space."
+      },
+      "min_y": {
+        "type": "number",
+        "description": "Lower bound along y-axis in space."
+      },
+      "max_y": {
+        "type": "number",
+        "description": "Upper bound along y-axis in space."
+      },
+      "min_z": {
+        "type": "number",
+        "description": "Lower bound along z-axis in space."
+      },
+      "max_z": {
+        "type": "number",
+        "description": "Upper bound along z-axis in space."
       }
     },
     "required": [
       "extent_type",
       "x",
       "y",
-      "z"
+      "z",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/cartesian_time.json": {
@@ -290,6 +324,46 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all spatiotemporal points (time, x, y, z) are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether spatiotemporal observations cover the range without missing observations."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
+      },
+      "min_x": {
+        "type": "number",
+        "description": "Lower bound along x-axis in space."
+      },
+      "max_x": {
+        "type": "number",
+        "description": "Upper bound along x-axis in space."
+      },
+      "min_y": {
+        "type": "number",
+        "description": "Lower bound along y-axis in space."
+      },
+      "max_y": {
+        "type": "number",
+        "description": "Upper bound along y-axis in space."
+      },
+      "min_z": {
+        "type": "number",
+        "description": "Lower bound along z-axis in space."
+      },
+      "max_z": {
+        "type": "number",
+        "description": "Upper bound along z-axis in space."
       }
     },
     "required": [
@@ -297,7 +371,9 @@
       "time",
       "x",
       "y",
-      "z"
+      "z",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/cartesian_time_interval.json": {
@@ -345,6 +421,46 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether time intervals at identical spatial coordinates are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether time intervals cover the time range without gaps."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
+      },
+      "min_x": {
+        "type": "number",
+        "description": "Lower bound along x-axis in space."
+      },
+      "max_x": {
+        "type": "number",
+        "description": "Upper bound along x-axis in space."
+      },
+      "min_y": {
+        "type": "number",
+        "description": "Lower bound along y-axis in space."
+      },
+      "max_y": {
+        "type": "number",
+        "description": "Upper bound along y-axis in space."
+      },
+      "min_z": {
+        "type": "number",
+        "description": "Lower bound along z-axis in space."
+      },
+      "max_z": {
+        "type": "number",
+        "description": "Upper bound along z-axis in space."
       }
     },
     "required": [
@@ -353,7 +469,9 @@
       "duration",
       "x",
       "y",
-      "z"
+      "z",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/midi_interval.json": {
@@ -379,12 +497,30 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all MIDI intervals in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether MIDI intervals fully cover the tick range without gaps."
+      },
+      "min_tick": {
+        "type": "number",
+        "description": "Lower bound in MIDI ticks."
+      },
+      "max_tick": {
+        "type": "number",
+        "description": "Upper bound in MIDI ticks."
       }
     },
     "required": [
       "extent_type",
       "tick",
-      "duration"
+      "duration",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/midi_tick.json": {
@@ -402,11 +538,29 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all MIDI tick values are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether MIDI tick observations cover the range without missing observations."
+      },
+      "min_tick": {
+        "type": "number",
+        "description": "Lower bound in MIDI ticks."
+      },
+      "max_tick": {
+        "type": "number",
+        "description": "Upper bound in MIDI ticks."
       }
     },
     "required": [
       "extent_type",
-      "tick"
+      "tick",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/pixel.json": {
@@ -432,12 +586,38 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all pixel coordinates are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether the pixel observations cover the coordinate range without missing observations."
+      },
+      "min_x": {
+        "type": "number",
+        "description": "Lower bound along x-axis in pixels."
+      },
+      "max_x": {
+        "type": "number",
+        "description": "Upper bound along x-axis in pixels."
+      },
+      "min_y": {
+        "type": "number",
+        "description": "Lower bound along y-axis in pixels."
+      },
+      "max_y": {
+        "type": "number",
+        "description": "Upper bound along y-axis in pixels."
       }
     },
     "required": [
       "extent_type",
       "x",
-      "y"
+      "y",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/pixel_box.json": {
@@ -478,6 +658,30 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all pixel boxes in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether the pixel boxes fully cover the pixel range without gaps."
+      },
+      "min_x": {
+        "type": "number",
+        "description": "Lower bound along x-axis in pixels."
+      },
+      "max_x": {
+        "type": "number",
+        "description": "Upper bound along x-axis in pixels."
+      },
+      "min_y": {
+        "type": "number",
+        "description": "Lower bound along y-axis in pixels."
+      },
+      "max_y": {
+        "type": "number",
+        "description": "Upper bound along y-axis in pixels."
       }
     },
     "required": [
@@ -485,7 +689,9 @@
       "x",
       "width",
       "y",
-      "height"
+      "height",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/score_interval.json": {
@@ -510,12 +716,30 @@
         "items": {
           "$ref": "../core.json#/$defs/FractionNonnegative"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all quarter intervals in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether quarter intervals fully cover the range without gaps."
+      },
+      "min_quarter": {
+        "$ref": "../core.json#/$defs/Fraction",
+        "description": "Lower bound in quarter notes."
+      },
+      "max_quarter": {
+        "$ref": "../core.json#/$defs/Fraction",
+        "description": "Upper bound in quarter notes."
       }
     },
     "required": [
       "extent_type",
       "quarter",
-      "duration"
+      "duration",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/score_interval_float.json": {
@@ -541,12 +765,30 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all quarter intervals in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether quarter intervals fully cover the range without gaps."
+      },
+      "min_quarter": {
+        "type": "number",
+        "description": "Lower bound in quarter notes."
+      },
+      "max_quarter": {
+        "type": "number",
+        "description": "Upper bound in quarter notes."
       }
     },
     "required": [
       "extent_type",
       "quarter",
-      "duration"
+      "duration",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/score_quarter.json": {
@@ -564,11 +806,29 @@
         "items": {
           "$ref": "../core.json#/$defs/Fraction"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all quarter positions are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether quarter observations cover the range without missing observations."
+      },
+      "min_quarter": {
+        "$ref": "../core.json#/$defs/Fraction",
+        "description": "Lower bound in quarter notes."
+      },
+      "max_quarter": {
+        "$ref": "../core.json#/$defs/Fraction",
+        "description": "Upper bound in quarter notes."
       }
     },
     "required": [
       "extent_type",
-      "quarter"
+      "quarter",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/score_quarter_float.json": {
@@ -586,11 +846,29 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all quarter positions are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether quarter observations cover the range without missing observations."
+      },
+      "min_quarter": {
+        "type": "number",
+        "description": "Lower bound in quarter notes."
+      },
+      "max_quarter": {
+        "type": "number",
+        "description": "Upper bound in quarter notes."
       }
     },
     "required": [
       "extent_type",
-      "quarter"
+      "quarter",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/spherical.json": {
@@ -628,13 +906,57 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all spherical coordinates (azimuth, elevation, radius) are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether spherical observations cover the space without missing observations."
+      },
+      "min_azimuth": {
+        "type": "number",
+        "minimum": -180,
+        "exclusiveMaximum": 180,
+        "description": "Lower bound of azimuth angle in degrees in [-180, +180)."
+      },
+      "max_azimuth": {
+        "type": "number",
+        "minimum": -180,
+        "exclusiveMaximum": 180,
+        "description": "Upper bound of azimuth angle in degrees in [-180, +180)."
+      },
+      "min_elevation": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Lower bound of elevation angle in degrees in [-90, +90]."
+      },
+      "max_elevation": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Upper bound of elevation angle in degrees in [-90, +90]."
+      },
+      "min_radius": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Lower bound of non-negative radial distance."
+      },
+      "max_radius": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Upper bound of non-negative radial distance."
       }
     },
     "required": [
       "extent_type",
       "azimuth",
       "elevation",
-      "radius"
+      "radius",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/spherical_time.json": {
@@ -679,6 +1001,56 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all spatiotemporal coordinates are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether spatiotemporal observations cover the range without missing observations."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
+      },
+      "min_azimuth": {
+        "type": "number",
+        "minimum": -180,
+        "exclusiveMaximum": 180,
+        "description": "Lower bound of azimuth angle in degrees in [-180, +180)."
+      },
+      "max_azimuth": {
+        "type": "number",
+        "minimum": -180,
+        "exclusiveMaximum": 180,
+        "description": "Upper bound of azimuth angle in degrees in [-180, +180)."
+      },
+      "min_elevation": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Lower bound of elevation angle in degrees in [-90, +90]."
+      },
+      "max_elevation": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Upper bound of elevation angle in degrees in [-90, +90]."
+      },
+      "min_radius": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Lower bound of non-negative radial distance."
+      },
+      "max_radius": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Upper bound of non-negative radial distance."
       }
     },
     "required": [
@@ -686,7 +1058,9 @@
       "time",
       "azimuth",
       "elevation",
-      "radius"
+      "radius",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/spherical_time_interval.json": {
@@ -739,6 +1113,56 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether time intervals at identical spatial coordinates are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether time intervals cover the time range without gaps."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
+      },
+      "min_azimuth": {
+        "type": "number",
+        "minimum": -180,
+        "exclusiveMaximum": 180,
+        "description": "Lower bound of azimuth angle in degrees in [-180, +180)."
+      },
+      "max_azimuth": {
+        "type": "number",
+        "minimum": -180,
+        "exclusiveMaximum": 180,
+        "description": "Upper bound of azimuth angle in degrees in [-180, +180)."
+      },
+      "min_elevation": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Lower bound of elevation angle in degrees in [-90, +90]."
+      },
+      "max_elevation": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Upper bound of elevation angle in degrees in [-90, +90]."
+      },
+      "min_radius": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Lower bound of non-negative radial distance."
+      },
+      "max_radius": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Upper bound of non-negative radial distance."
       }
     },
     "required": [
@@ -747,7 +1171,9 @@
       "duration",
       "azimuth",
       "elevation",
-      "radius"
+      "radius",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/text.json": {
@@ -767,11 +1193,31 @@
           "type": "integer",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all character offsets are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether all character positions in the range are observed."
+      },
+      "min_offset": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Lower bound character offset."
+      },
+      "max_offset": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Upper bound character offset."
       }
     },
     "required": [
       "extent_type",
-      "offset"
+      "offset",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/text_interval.json": {
@@ -799,12 +1245,32 @@
           "type": "integer",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all text intervals in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether character intervals fully cover the text range without gaps."
+      },
+      "min_offset": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Lower bound character offset."
+      },
+      "max_offset": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Upper bound character offset."
       }
     },
     "required": [
       "extent_type",
       "offset",
-      "length"
+      "length",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/time.json": {
@@ -822,11 +1288,29 @@
         "items": {
           "type": "number"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all time values are unique."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether the observations cover the time range with no missing observations."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
       }
     },
     "required": [
       "extent_type",
-      "time"
+      "time",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/time_frequency_box.json": {
@@ -842,8 +1326,7 @@
         "$ref": "../core.json#/$defs/Array",
         "description": "Array of start times in seconds.",
         "items": {
-          "type": "number",
-          "minimum": 0
+          "type": "number"
         }
       },
       "duration": {
@@ -869,6 +1352,32 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all time-frequency boxes in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether the boxes fully cover the time-frequency range without gaps."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
+      },
+      "min_freq": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Lower bound of the frequency extent in Hz."
+      },
+      "max_freq": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Upper bound of the frequency extent in Hz."
       }
     },
     "required": [
@@ -876,7 +1385,9 @@
       "time",
       "duration",
       "freq_min",
-      "freq_max"
+      "freq_max",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/time_interval.json": {
@@ -902,12 +1413,30 @@
           "type": "number",
           "minimum": 0
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether all intervals in the extent are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether the intervals fully cover the time range without gaps."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
       }
     },
     "required": [
       "extent_type",
       "time",
-      "duration"
+      "duration",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extent/time_uniform.json": {
@@ -928,12 +1457,31 @@
         "type": "number",
         "exclusiveMinimum": 0,
         "description": "Sampling period (time step) between consecutive observations in seconds."
+      },
+      "disjoint": {
+        "type": "boolean",
+        "const": true,
+        "description": "Uniformly sampled times are implicitly disjoint."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether the sampled timesteps cover the time range without gaps."
+      },
+      "min_time": {
+        "type": "number",
+        "description": "Lower bound of the time extent in seconds."
+      },
+      "max_time": {
+        "type": "number",
+        "description": "Upper bound of the time extent in seconds."
       }
     },
     "required": [
       "extent_type",
       "start_time",
-      "sampling_period"
+      "sampling_period",
+      "disjoint",
+      "exhaustive"
     ]
   },
   "extents.json": {
@@ -1030,11 +1578,21 @@
         "additionalProperties": {
           "type": "integer"
         }
+      },
+      "disjoint": {
+        "type": "boolean",
+        "description": "Indicates whether observations within each group (non-negative group ID) are non-overlapping."
+      },
+      "exhaustive": {
+        "type": "boolean",
+        "description": "Indicates whether observations within each group (non-negative group ID) cover the extent bounds without gaps."
       }
     },
     "required": [
       "name",
-      "ids"
+      "ids",
+      "disjoint",
+      "exhaustive"
     ],
     "additionalProperties": false
   },

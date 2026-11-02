@@ -8,6 +8,7 @@
  */
 
 import type { BoppAnnotation } from '../types/bopp';
+import { getExtentTopology, formatExtentBoundsSummary } from '../utils/extentTopology';
 
 export interface MetadataCardOptions {
   defaultExpanded?: boolean;
@@ -225,7 +226,11 @@ export function createAnnotationMetadataCardDOM(
   extentBadge.style.backgroundColor = isDark ? 'rgba(245, 158, 11, 0.15)' : '#fef3c7';
   extentBadge.style.color = isDark ? '#fcd34d' : '#92400e';
   extentBadge.style.border = `1px solid ${isDark ? '#78350f' : '#fde68a'}`;
-  extentBadge.innerText = `extent: ${annotation.extent?.extent_type || 'none (global)'}`;
+  const topology = getExtentTopology(annotation.extent);
+  const boundsSummary = formatExtentBoundsSummary(annotation.extent);
+  extentBadge.innerText = annotation.extent?.extent_type && (annotation.extent.extent_type as string) !== 'none'
+    ? `extent: ${annotation.extent.extent_type} (${topology.disjoint ? 'disjoint' : 'overlapping'}, ${topology.exhaustive ? 'exhaustive' : 'partial'}${boundsSummary.length > 0 ? `, ${boundsSummary.join(' · ')}` : ''})`
+    : `extent: none (global)`;
   rightSection.appendChild(extentBadge);
 
   // Annotator or Metadata Type Badge

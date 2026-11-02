@@ -13,6 +13,8 @@ export interface Grouping {
   name: string;
   ids: number[];
   labels?: Record<string, number>;
+  disjoint: boolean;
+  exhaustive: boolean;
 }
 
 export interface BoppAnnotation {
@@ -56,6 +58,10 @@ export type ExtentType =
 export interface TimeExtent {
   extent_type: 'time';
   time: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
 }
 export type TimesExtent = TimeExtent;
 
@@ -63,6 +69,10 @@ export interface TimeIntervalExtent {
   extent_type: 'time_interval';
   time: number[];
   duration: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
 }
 
 export interface TimeFrequencyBoxExtent {
@@ -71,12 +81,22 @@ export interface TimeFrequencyBoxExtent {
   duration: number[];
   freq_min: number[];
   freq_max: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
+  min_freq?: number;
+  max_freq?: number;
 }
 
 export interface UniformTimeExtent {
   extent_type: 'time_uniform';
   start_time: number;
   sampling_period: number;
+  disjoint: true;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
 }
 export type TimeUniformExtent = UniformTimeExtent;
 
@@ -84,6 +104,12 @@ export interface PixelExtent {
   extent_type: 'pixel';
   x: number[];
   y: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_x?: number;
+  max_x?: number;
+  min_y?: number;
+  max_y?: number;
 }
 
 export interface PixelBoxExtent {
@@ -92,17 +118,31 @@ export interface PixelBoxExtent {
   width: number[];
   y: number[];
   height: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_x?: number;
+  max_x?: number;
+  min_y?: number;
+  max_y?: number;
 }
 
 export interface TextExtent {
   extent_type: 'text';
   offset: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_offset?: number;
+  max_offset?: number;
 }
 
 export interface TextIntervalExtent {
   extent_type: 'text_interval';
   offset: number[];
   length: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_offset?: number;
+  max_offset?: number;
 }
 
 export interface SphericalExtent {
@@ -110,6 +150,14 @@ export interface SphericalExtent {
   azimuth: number[];
   elevation: number[];
   radius: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_azimuth?: number;
+  max_azimuth?: number;
+  min_elevation?: number;
+  max_elevation?: number;
+  min_radius?: number;
+  max_radius?: number;
 }
 
 export interface SphericalTimeExtent {
@@ -118,6 +166,16 @@ export interface SphericalTimeExtent {
   azimuth: number[];
   elevation: number[];
   radius: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
+  min_azimuth?: number;
+  max_azimuth?: number;
+  min_elevation?: number;
+  max_elevation?: number;
+  min_radius?: number;
+  max_radius?: number;
 }
 
 export interface SphericalTimeIntervalExtent {
@@ -127,6 +185,16 @@ export interface SphericalTimeIntervalExtent {
   azimuth: number[];
   elevation: number[];
   radius: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
+  min_azimuth?: number;
+  max_azimuth?: number;
+  min_elevation?: number;
+  max_elevation?: number;
+  min_radius?: number;
+  max_radius?: number;
 }
 
 export interface CartesianExtent {
@@ -134,6 +202,14 @@ export interface CartesianExtent {
   x: number[];
   y: number[];
   z: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_x?: number;
+  max_x?: number;
+  min_y?: number;
+  max_y?: number;
+  min_z?: number;
+  max_z?: number;
 }
 
 export interface CartesianTimeExtent {
@@ -142,6 +218,16 @@ export interface CartesianTimeExtent {
   x: number[];
   y: number[];
   z: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
+  min_x?: number;
+  max_x?: number;
+  min_y?: number;
+  max_y?: number;
+  min_z?: number;
+  max_z?: number;
 }
 
 export interface CartesianTimeIntervalExtent {
@@ -151,6 +237,16 @@ export interface CartesianTimeIntervalExtent {
   x: number[];
   y: number[];
   z: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_time?: number;
+  max_time?: number;
+  min_x?: number;
+  max_x?: number;
+  min_y?: number;
+  max_y?: number;
+  min_z?: number;
+  max_z?: number;
 }
 
 export type Fraction = [number, number]; // [numerator, denominator]
@@ -158,34 +254,58 @@ export type Fraction = [number, number]; // [numerator, denominator]
 export interface ScoreQuarterExtent {
   extent_type: 'score_quarter';
   quarter: Fraction[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_quarter?: Fraction;
+  max_quarter?: Fraction;
 }
 
 export interface ScoreIntervalExtent {
   extent_type: 'score_interval';
   quarter: Fraction[];
   duration: Fraction[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_quarter?: Fraction;
+  max_quarter?: Fraction;
 }
 
 export interface ScoreQuarterFloatExtent {
   extent_type: 'score_quarter_float';
   quarter: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_quarter?: number;
+  max_quarter?: number;
 }
 
 export interface ScoreIntervalFloatExtent {
   extent_type: 'score_interval_float';
   quarter: number[];
   duration: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_quarter?: number;
+  max_quarter?: number;
 }
 
 export interface MidiTickExtent {
   extent_type: 'midi_tick';
   tick: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_tick?: number;
+  max_tick?: number;
 }
 
 export interface MidiIntervalExtent {
   extent_type: 'midi_interval';
   tick: number[];
   duration: number[];
+  disjoint: boolean;
+  exhaustive: boolean;
+  min_tick?: number;
+  max_tick?: number;
 }
 
 export type BoppExtent =
@@ -211,7 +331,7 @@ export type BoppExtent =
   | MidiIntervalExtent;
 
 // ==========================================
-// Payloads
+// Payloads (14 Canonical Payloads in BOPP v1)
 // ==========================================
 export type PayloadType =
   | 'beat'
@@ -227,14 +347,7 @@ export type PayloadType =
   | 'object'
   | 'relation'
   | 'tag'
-  | 'tempo'
-  // Deprecated schemas kept for transitional compatibility
-  | 'note_hz'
-  | 'onset'
-  | 'pitch_contour'
-  | 'multi_segment'
-  | 'segment_open'
-  | 'tag_open';
+  | 'tempo';
 
 export interface BeatPayload {
   payload_type: 'beat';
@@ -313,44 +426,6 @@ export interface TempoPayload {
   value: number[];
 }
 
-// Deprecated payload interfaces
-export interface NoteHzPayload {
-  payload_type: 'note_hz';
-  value: (number | string)[];
-  voiced?: boolean[];
-}
-
-export interface OnsetPayload {
-  payload_type: 'onset';
-  value?: unknown[];
-  description?: string;
-}
-
-export interface PitchContourPayload {
-  payload_type: 'pitch_contour';
-  value: {
-    index?: number;
-    frequency: number;
-    voicing?: number | boolean;
-  }[];
-}
-
-export interface MultiSegmentPayload {
-  payload_type: 'multi_segment';
-  label: string[];
-  level: number[];
-}
-
-export interface SegmentOpenPayload {
-  payload_type: 'segment_open';
-  value: string[];
-}
-
-export interface TagOpenPayload {
-  payload_type: 'tag_open';
-  value: string[];
-}
-
 export type BoppPayload =
   | BeatPayload
   | ChordPayload
@@ -365,13 +440,7 @@ export type BoppPayload =
   | ObjectPayload
   | RelationPayload
   | TagPayload
-  | TempoPayload
-  | NoteHzPayload
-  | OnsetPayload
-  | PitchContourPayload
-  | MultiSegmentPayload
-  | SegmentOpenPayload
-  | TagOpenPayload;
+  | TempoPayload;
 
 // ==========================================
 // Confidences
@@ -450,7 +519,6 @@ export interface TabularRecord {
   tick?: number;
   value?: string | number | boolean | Record<string, unknown>;
   label?: string;
-  level?: number;
   valence?: number;
   arousal?: number;
   hz?: number | null;
@@ -489,5 +557,8 @@ export interface TabularRecord {
   valence_ci_upper?: number;
   arousal_ci_lower?: number;
   arousal_ci_upper?: number;
+  _group_id?: number;
+  _group_label?: string;
+  _group_order?: number;
   [key: string]: unknown;
 }

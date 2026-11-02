@@ -47,7 +47,7 @@ import {
 } from '../utils/vegaLiteBuilder';
 import { BoppAudioPlayer, isSonifiablePayload } from '../utils/audioSynthesizer';
 import { computeSummaryStats } from '../utils/boppParser';
-import { analyzeIntervalAnnotation } from '../utils/intervalOverlap';
+import { getExtentTopology, resolveActiveGrouping } from '../utils/extentTopology';
 import { AnnotationMetadataCard } from './AnnotationMetadataCard';
 import {
   LinkedMedia,
@@ -97,13 +97,15 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     height: number;
   } | null>(null);
 
-  // Vega-Lite composition states: bidirectional confidence filter
+  // Vega-Lite composition states: bidirectional confidence filter & active grouping selector
   const [minConfidenceFilter, setMinConfidenceFilter] = useState<number>(0);
   const [maxConfidenceFilter, setMaxConfidenceFilter] = useState<number>(1);
-  const [userMultiRowOverride, setUserMultiRowOverride] = useState<boolean | null>(null);
+  const [activeGroupingIndex, setActiveGroupingIndex] = useState<number | null>(
+    annotation.groupings && annotation.groupings.length > 0 ? 0 : null
+  );
 
   useEffect(() => {
-    setUserMultiRowOverride(null);
+    setActiveGroupingIndex(annotation.groupings && annotation.groupings.length > 0 ? 0 : null);
   }, [annotation]);
 
   const audioPlayerRef = useRef<BoppAudioPlayer | null>(null);
@@ -137,12 +139,12 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       setIsPlaying(false);
       setCurrentTime(0);
       setPlotBounds(null);
-      setUserMultiRowOverride(null);
+      setActiveGroupingIndex(annotation.groupings && annotation.groupings.length > 0 ? 0 : null);
       setBadgeSearchQuery('');
       setMinConfidenceFilter(0);
       setMaxConfidenceFilter(1);
     }
-  }, [annotationUniqueKey, linkedMedia]);
+  }, [annotationUniqueKey, linkedMedia, annotation.groupings]);
 
   // Selected / Hovered item details
   const [activeItem, setActiveItem] = useState<TabularRecord | null>(null);
@@ -154,7 +156,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   // Identify global genres / tags without confidence rating
   const isGlobalNoConfGenres = useMemo(() => {
     const isGlobal = !extentType || (extentType as string) === 'none';
-    const isTag = payloadType === 'tag_open' || (payloadType as string) === 'genre' || payloadType === 'tag';
+    const isTag = (payloadType as string) === 'genre' || payloadType === 'tag';
     const hasConf = Boolean(annotation.confidence?.confidence_type) && tabularData.some(d => typeof d.confidence === 'number');
     return isGlobal && isTag && !hasConf;
   }, [extentType, payloadType, annotation.confidence?.confidence_type, tabularData]);
@@ -182,15 +184,15 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
   const isTimeFrequency =
     extentType === 'time_frequency_box' ||
-    payloadType === 'pitch_contour' ||
-    payloadType === 'frequency_hz' ||
-    payloadType === 'note_hz';
+    payloadType === 'frequency_hz';
 
-  // Summary stats for metric indicators
+  // Summary stats and topology for metric indicators
   const stats = useMemo(() => computeSummaryStats(annotation, tabularData), [annotation, tabularData]);
-  const intervalAnalysis = useMemo(() => analyzeIntervalAnnotation(annotation, tabularData), [annotation, tabularData]);
-  const defaultMultiRow = intervalAnalysis.isIntervalExtent ? !intervalAnalysis.isDisjoint : false;
-  const effectiveMultiRow = userMultiRowOverride !== null ? userMultiRowOverride : defaultMultiRow;
+  const extentTopology = useMemo(() => getExtentTopology(annotation.extent), [annotation.extent]);
+  const activeGrouping = useMemo(
+    () => resolveActiveGrouping(annotation, activeGroupingIndex),
+    [annotation, activeGroupingIndex]
+  );
   const duration = linkedMedia?.duration || stats.duration || 10;
   const durationRef = useRef<number>(duration);
   durationRef.current = duration;
@@ -606,12 +608,12 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
   const optimalChartHeight = useMemo(
     () =>
       computeOptimalChartHeight(annotation, tabularData.length, {
-        effectiveMultiRow,
+        activeGroupingIndex,
         isGlobalNoConfGenres,
         filteredRowCount: filteredTabularData.length,
         containerWidth,
       }),
-    [annotation, tabularData.length, effectiveMultiRow, isGlobalNoConfGenres, filteredTabularData.length, containerWidth]
+    [annotation, tabularData.length, activeGroupingIndex, isGlobalNoConfGenres, filteredTabularData.length, containerWidth]
   );
 
   // Build the Vega-Lite specification - decoupled from currentTime to prevent view re-embedding during playback
@@ -628,7 +630,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
       currentTime: null, // Playhead cursor is rendered via high-performance SVG overlay for glitch-free timeline zooming during playback
       chartWidth: containerWidth,
       chartHeight: optimalChartHeight,
-      forceMultiRow: effectiveMultiRow,
+      activeGroupingIndex,
     };
     return buildBoppVegaLiteSpec(annotation, isGlobalNoConfGenres ? filteredTabularData : tabularData, options);
   }, [
@@ -641,7 +643,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     maxConfidenceFilter,
     containerWidth,
     optimalChartHeight,
-    effectiveMultiRow,
+    activeGroupingIndex,
   ]);
 
   // Embed Vega-Lite into DOM
@@ -1215,6 +1217,7 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
             imageName={linkedMedia.name}
             theme={theme}
             onUnlinkImage={handleUnlinkMedia}
+            activeGroupingIndex={activeGroupingIndex}
           />
         </div>
       ) : (
@@ -1494,33 +1497,57 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               </div>
             )}
 
-            <div className="flex items-center gap-2.5 ml-auto">
-              {/* Interval Layout Continuity Badge & Toggle Button */}
-              {intervalAnalysis.isIntervalExtent && (
-                <button
-                  type="button"
-                  onClick={() => setUserMultiRowOverride(!effectiveMultiRow)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-mono font-medium transition-all shadow-2xs cursor-pointer ${
-                    effectiveMultiRow
-                      ? 'border-indigo-400 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60'
-                      : 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
+            <div className="flex flex-wrap items-center gap-2.5 ml-auto">
+              {/* Interactive Grouping Selector (when annotation.groupings is present) */}
+              {annotation.groupings && annotation.groupings.length > 0 && (
+                <div className="flex items-center gap-1.5 bg-indigo-50/90 dark:bg-indigo-950/50 px-2.5 py-1 rounded border border-indigo-300 dark:border-indigo-700/80 shadow-2xs">
+                  <Layers className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span className="text-[11px] font-bold text-indigo-900 dark:text-indigo-200">
+                    Grouping:
+                  </span>
+                  <select
+                    value={activeGroupingIndex !== null ? activeGroupingIndex : -1}
+                    onChange={e => {
+                      const val = parseInt(e.target.value, 10);
+                      setActiveGroupingIndex(val >= 0 ? val : null);
+                    }}
+                    className="text-[11px] font-mono font-semibold bg-white dark:bg-neutral-900 text-slate-900 dark:text-slate-100 border border-indigo-200 dark:border-indigo-800 rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    title="Select which grouping to apply to the visualization"
+                  >
+                    {annotation.groupings.map((g, idx) => (
+                      <option key={idx} value={idx}>
+                        {g.name} ({g.disjoint ? 'disjoint' : 'overlapping'}, {g.exhaustive ? 'exhaustive' : 'partial'})
+                      </option>
+                    ))}
+                    <option value={-1}>None (Ungrouped)</option>
+                  </select>
+                  {activeGrouping && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/70 text-indigo-800 dark:text-indigo-300">
+                      {activeGrouping.orderedGroupIds.length} groups
+                      {activeGrouping.hasUngrouped ? ' + ungrouped' : ''}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Extent Topology Badge (disjoint / exhaustive) */}
+              {annotation.extent && (
+                <div
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-[11px] font-mono font-medium shadow-2xs ${
+                    extentTopology.disjoint
+                      ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300'
+                      : 'border-amber-300 dark:border-amber-700 bg-amber-50/80 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300'
                   }`}
-                  title={
-                    effectiveMultiRow
-                      ? 'Currently displayed in Multi-Row layout. Click to switch to Single-Row.'
-                      : 'Currently displayed in Single-Row layout. Click to switch to Multi-Row.'
-                  }
+                  title={`Extent topology: disjoint=${String(extentTopology.disjoint)}, exhaustive=${String(extentTopology.exhaustive)}`}
                 >
-                  <Layers className="w-3 h-3 text-current" />
                   <span className="font-semibold">
-                    {effectiveMultiRow
-                      ? `Multi-Row${!intervalAnalysis.isDisjoint ? ` (${intervalAnalysis.overlapCount} overlaps)` : ''}`
-                      : 'Single Row (Consolidated)'}
+                    {extentTopology.disjoint ? 'Disjoint' : 'Overlapping'}
                   </span>
-                  <span className="text-[10px] px-1 py-0.2 rounded bg-black/10 dark:bg-white/10 uppercase tracking-wider font-bold">
-                    Toggle
+                  <span className="text-slate-400 dark:text-slate-600">·</span>
+                  <span>
+                    {extentTopology.exhaustive ? 'Exhaustive' : 'Non-Exhaustive'}
                   </span>
-                </button>
+                </div>
               )}
 
               {/* Timeline Zoom Presets */}
@@ -1587,6 +1614,12 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
                 <Info className="w-4 h-4 text-blue-600 flex-shrink-0" />
                 <span className="font-bold text-blue-800 dark:text-blue-300">Selected Event:</span>
                 <span>val: <strong className="text-slate-900 dark:text-white font-bold">{String(activeItem.value ?? activeItem.label ?? '')}</strong></span>
+                {typeof activeItem._group_label === 'string' && activeItem._group_label && (
+                  <>
+                    <span className="text-slate-400 dark:text-slate-600">·</span>
+                    <span>group: <span className="font-semibold text-indigo-700 dark:text-indigo-300">{activeItem._group_label}</span></span>
+                  </>
+                )}
                 {typeof activeItem.time === 'number' && (
                   <>
                     <span className="text-slate-400 dark:text-slate-600">·</span>

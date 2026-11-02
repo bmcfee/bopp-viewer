@@ -14,7 +14,7 @@ import {
   annotationToTabular,
   exportToBoppCsv
 } from '../utils/boppParser';
-import { buildBoppVegaLiteSpec } from '../utils/vegaLiteBuilder';
+import { buildBoppVegaLiteSpec, computeOptimalChartHeight } from '../utils/vegaLiteBuilder';
 import { validateBoppAnnotation } from '../utils/schemaValidator';
 import { createAnnotationMetadataCardDOM } from '../extension/metadataCard';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
@@ -42,6 +42,7 @@ class StandaloneBoppViewer {
   private _tabularData: TabularRecord[] = [];
 
   private _activeTab: 'visualizer' | 'table' | 'raw' | 'validation' = 'visualizer';
+  private _activeGroupingIndex: number | null = 0;
   private _isDark: boolean = false;
   private _filename: string = 'annotation.bopp';
   private _filePath: string = '';
@@ -113,7 +114,7 @@ class StandaloneBoppViewer {
       }
 
       document.title = `${this._filename} — BOPP Visualizer`;
-      this._tabularData = annotationToTabular(this._currentAnnotation);
+      this._tabularData = annotationToTabular(this._currentAnnotation, this._activeGroupingIndex);
       this.render();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -167,6 +168,7 @@ class StandaloneBoppViewer {
   public render(): void {
     if (!this._currentAnnotation) return;
     const annotation = this._currentAnnotation;
+    this._tabularData = annotationToTabular(annotation, this._activeGroupingIndex);
     const tabular = this._tabularData;
     const validation = validateBoppAnnotation(annotation);
 
@@ -280,6 +282,39 @@ class StandaloneBoppViewer {
     rightActions.style.alignItems = 'center';
     rightActions.style.gap = '8px';
 
+    if (annotation.groupings && annotation.groupings.length > 0) {
+      const groupSelect = document.createElement('select');
+      groupSelect.style.fontSize = '11px';
+      groupSelect.style.fontWeight = '500';
+      groupSelect.style.padding = '6px 10px';
+      groupSelect.style.borderRadius = '6px';
+      groupSelect.style.border = `1px solid ${border}`;
+      groupSelect.style.background = surfaceBg;
+      groupSelect.style.color = fg;
+      groupSelect.style.cursor = 'pointer';
+
+      const noneOpt = document.createElement('option');
+      noneOpt.value = 'none';
+      noneOpt.textContent = 'Group: None (Ungrouped)';
+      if (this._activeGroupingIndex === null) noneOpt.selected = true;
+      groupSelect.appendChild(noneOpt);
+
+      annotation.groupings.forEach((g, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `Group: ${g.name || `Grouping #${idx + 1}`} (${g.disjoint ? 'disjoint' : 'overlapping'})`;
+        if (this._activeGroupingIndex === idx) opt.selected = true;
+        groupSelect.appendChild(opt);
+      });
+
+      groupSelect.onchange = () => {
+        const val = groupSelect.value;
+        this._activeGroupingIndex = val === 'none' ? null : Number(val);
+        this.render();
+      };
+      rightActions.appendChild(groupSelect);
+    }
+
     // Theme Toggle
     const themeBtn = document.createElement('button');
     themeBtn.title = `Switch to ${this._isDark ? 'Light' : 'Dark'} mode`;
@@ -379,30 +414,15 @@ class StandaloneBoppViewer {
     // Compute optimal height
     const payloadType = annotation.payload?.payload_type as string | undefined;
     const extentType = annotation.extent?.extent_type as string | undefined;
-    let optimalHeight = 440;
+    const isGlobal = !extentType || extentType === 'none';
+    const isTag = payloadType === 'genre' || payloadType === 'tag';
+    const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
 
-    if (payloadType === 'key_mode') {
-      optimalHeight = extentType?.includes('interval') ? 240 : 540;
-    } else if (payloadType === 'note_midi' || payloadType === 'piano_roll') {
-      optimalHeight = 500;
-    } else if (payloadType === 'chord') {
-      optimalHeight = 400;
-    } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
-      if (!extentType || extentType === 'none') {
-        const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
-        if (!hasConf) {
-          const numCols = Math.max(1, Math.min(tabular.length, Math.floor(640 / 194)));
-          const numRows = Math.ceil(tabular.length / numCols);
-          optimalHeight = Math.max(140, numRows * 50 + 70);
-        } else {
-          optimalHeight = Math.max(200, Math.min(460, tabular.length * 44 + 80));
-        }
-      } else {
-        optimalHeight = 280;
-      }
-    } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
-      optimalHeight = 440;
-    }
+    const optimalHeight = computeOptimalChartHeight(annotation, tabular.length, {
+      isGlobalNoConfGenres: isGlobal && isTag && !hasConf,
+      containerWidth: 960,
+      activeGroupingIndex: this._activeGroupingIndex,
+    });
 
     // Chart Card Container
     const chartCard = document.createElement('div');
@@ -426,6 +446,7 @@ class StandaloneBoppViewer {
         chartHeight: optimalHeight,
         enableOverviewBrush: true,
         enableZoomPan: true,
+        activeGroupingIndex: this._activeGroupingIndex,
       });
 
       void embed(chartDiv, spec as any, {

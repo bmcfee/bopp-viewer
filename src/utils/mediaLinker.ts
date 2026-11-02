@@ -13,6 +13,7 @@ import {
   annotationToTabular,
   getRecordStartSeconds,
   getRecordDurationSeconds,
+  computeSummaryStats,
 } from './boppParser';
 
 export type LinkedMediaType = 'audio' | 'image' | null;
@@ -90,9 +91,7 @@ export function checkMediaCompatibility(
 
     const hasSpectrogram =
       extentType === 'time_frequency_box' ||
-      payloadType === 'pitch_contour' ||
-      payloadType === 'frequency_hz' ||
-      payloadType === 'note_hz';
+      payloadType === 'frequency_hz';
 
     return {
       compatible: true,
@@ -249,13 +248,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
   const getRecordStartSec = (r: any): number => getRecordStartSeconds(r) ?? 0;
   const getRecordExplicitDurSec = (r: any): number => getRecordDurationSeconds(r, 0);
 
-  let timelineMaxSec = 0;
-  for (const r of records) {
-    const endSec = getRecordStartSec(r) + getRecordExplicitDurSec(r);
-    if (endSec > timelineMaxSec) {
-      timelineMaxSec = endSec;
-    }
-  }
+  const stats = computeSummaryStats(annotation, records);
+  const timelineMaxSec = stats.duration ?? 0;
 
   // 1. Time-Frequency Boxes (e.g. Bioacoustics / Birds)
   if (extentType === 'time_frequency_box') {
@@ -307,8 +301,16 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     };
   }
 
-  // 2. Pitch Contour (Continuous Vocal F0) - Strictly Sonifies Voiced Segments
-  if (payloadType === 'pitch_contour') {
+  // 2. Pitch Contour (Continuous Vocal F0: frequency_hz on point/uniform disjoint extent)
+  const isPointF0 =
+    payloadType === 'frequency_hz' &&
+    Boolean(annotation.extent?.disjoint) &&
+    (extentType === 'time' ||
+      extentType === 'time_uniform' ||
+      extentType === 'midi_tick' ||
+      extentType === 'score_quarter' ||
+      extentType === 'score_quarter_float');
+  if (isPointF0) {
     const maxT = timelineMaxSec > 0 ? timelineMaxSec : 3.5;
     let phase = 0;
     let timePtr = 0;
@@ -323,12 +325,7 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
         : typeof pt?.value === 'number'
         ? pt.value
         : 440;
-      const rawVoicing = pt?.voicing ?? (pt as any)?.voiced;
-      const isVoiced =
-        rawVoicing === 1 ||
-        rawVoicing === true ||
-        (typeof rawVoicing === 'number' && rawVoicing >= 0.5) ||
-        (typeof rawVoicing === 'string' && ['voiced', 'true', '1', 'v'].includes(rawVoicing.toLowerCase().trim()));
+      const isVoiced = pt?.voiced !== false && freq > 0;
 
       if (isVoiced && freq >= 40 && freq <= 3200) {
         phase += (2 * Math.PI * freq) / sampleRate;
@@ -473,8 +470,8 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
     };
   }
 
-  // 6. Onsets & Markers (Event Transient Detection Events matching exact timestamps)
-  if (payloadType === 'marker' || payloadType === 'onset') {
+  // 6. Markers (Event Transient Detection Events matching exact timestamps)
+  if (payloadType === 'marker') {
     const maxOnsetEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
     const url = synthesizeMonoWavBlobUrl(maxOnsetEnd, sampleRate, (t) => {
       let sampleVal = 0;
@@ -491,13 +488,13 @@ export function generateDemoAudioForAnnotation(annotation: BoppAnnotation): { ur
 
     return {
       url,
-      name: payloadType === 'marker' ? 'Markers_Click_Track.wav' : 'Onsets_Click_Track.wav',
+      name: 'Markers_Click_Track.wav',
       duration: maxOnsetEnd,
     };
   }
 
   // 7. Tone Frequencies in Hz & Notes
-  if (payloadType === 'frequency_hz' || payloadType === 'note_hz' || payloadType === 'note' || (payloadType as string) === 'hz') {
+  if (payloadType === 'frequency_hz' || payloadType === 'note') {
     const maxToneEnd = timelineMaxSec > 0 ? timelineMaxSec : 4.0;
     const url = synthesizeMonoWavBlobUrl(maxToneEnd, sampleRate, (t) => {
       let sampleVal = 0;

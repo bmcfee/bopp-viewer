@@ -23,6 +23,7 @@ import type { BoppAnnotation } from '../types/bopp';
 export class BOPPWidget extends DocumentWidget<Widget> {
   private _themeManager: IThemeManager | null;
   private _activeTab: 'visualizer' | 'table' | 'raw' | 'validation' = 'visualizer';
+  private _activeGroupingIndex: number | null = 0;
   private _cachedAnnotation: BoppAnnotation | null = null;
   private _containerNode: HTMLDivElement;
 
@@ -97,7 +98,7 @@ export class BOPPWidget extends DocumentWidget<Widget> {
   }
 
   private _renderUI(annotation: BoppAnnotation, isDark: boolean): void {
-    const tabular = annotationToTabular(annotation);
+    const tabular = annotationToTabular(annotation, this._activeGroupingIndex);
     const validation = validateBoppAnnotation(annotation);
     const extentType = annotation.extent?.extent_type ?? 'none';
     const payloadType = annotation.payload?.payload_type ?? 'unknown';
@@ -178,6 +179,38 @@ export class BOPPWidget extends DocumentWidget<Widget> {
     actions.style.alignItems = 'center';
     actions.style.gap = '6px';
 
+    if (annotation.groupings && annotation.groupings.length > 0) {
+      const groupSelect = document.createElement('select');
+      groupSelect.style.fontSize = '11px';
+      groupSelect.style.padding = '4px 8px';
+      groupSelect.style.borderRadius = '4px';
+      groupSelect.style.border = `1px solid ${border}`;
+      groupSelect.style.background = isDark ? '#27272a' : '#f1f5f9';
+      groupSelect.style.color = fg;
+      groupSelect.style.cursor = 'pointer';
+
+      const noneOpt = document.createElement('option');
+      noneOpt.value = 'none';
+      noneOpt.textContent = 'Group: None (Ungrouped)';
+      if (this._activeGroupingIndex === null) noneOpt.selected = true;
+      groupSelect.appendChild(noneOpt);
+
+      annotation.groupings.forEach((g, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `Group: ${g.name || `Grouping #${idx + 1}`} (${g.disjoint ? 'disjoint' : 'overlapping'})`;
+        if (this._activeGroupingIndex === idx) opt.selected = true;
+        groupSelect.appendChild(opt);
+      });
+
+      groupSelect.onchange = () => {
+        const val = groupSelect.value;
+        this._activeGroupingIndex = val === 'none' ? null : Number(val);
+        this._renderUI(annotation, isDark);
+      };
+      actions.appendChild(groupSelect);
+    }
+
     const exportCsvBtn = document.createElement('button');
     exportCsvBtn.innerText = 'Export CSV';
     exportCsvBtn.style.fontSize = '11px';
@@ -237,11 +270,12 @@ export class BOPPWidget extends DocumentWidget<Widget> {
     const extentType = annotation.extent?.extent_type as string | undefined;
     const payloadType = annotation.payload?.payload_type as string | undefined;
     const isGlobal = !extentType || extentType === 'none';
-    const isTag = payloadType === 'tag_open' || payloadType === 'genre' || payloadType === 'tag';
+    const isTag = payloadType === 'genre' || payloadType === 'tag';
     const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
     const optimalHeight = computeOptimalChartHeight(annotation, tabular.length, {
       isGlobalNoConfGenres: isGlobal && isTag && !hasConf,
       containerWidth: 720,
+      activeGroupingIndex: this._activeGroupingIndex,
     });
 
     const chartDiv = document.createElement('div');
@@ -256,7 +290,8 @@ export class BOPPWidget extends DocumentWidget<Widget> {
         theme: isDark ? 'dark' : 'light',
         chartHeight: optimalHeight,
         enableOverviewBrush: true,
-        enableZoomPan: true
+        enableZoomPan: true,
+        activeGroupingIndex: this._activeGroupingIndex,
       });
 
       void embed(chartDiv, spec as any, {

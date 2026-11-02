@@ -210,27 +210,6 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
     }
   }
 
-  // 3e. groupings check
-  if (ann.groupings !== undefined) {
-    if (!Array.isArray(ann.groupings)) {
-      issues.push({ severity: 'error', path: 'groupings', message: '"groupings" must be an array.' });
-    } else {
-      for (let gi = 0; gi < ann.groupings.length; gi++) {
-        const grp = ann.groupings[gi];
-        if (!grp || typeof grp !== 'object') {
-          issues.push({ severity: 'error', path: `groupings[${gi}]`, message: 'Grouping item must be an object.' });
-        } else {
-          if (typeof grp.name !== 'string') {
-            issues.push({ severity: 'error', path: `groupings[${gi}].name`, message: 'Grouping requires string "name".' });
-          } else passedCount++;
-          if (!Array.isArray(grp.ids) || grp.ids.some(id => typeof id !== 'number' || !Number.isInteger(id))) {
-            issues.push({ severity: 'error', path: `groupings[${gi}].ids`, message: 'Grouping requires integer array "ids".' });
-          } else passedCount++;
-        }
-      }
-    }
-  }
-
   // 4. payload check
   let payloadLength = 0;
   let isMarkerPayload = false;
@@ -258,7 +237,6 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
         // Extract primary array and validate specific payload rules
         let primaryArray: unknown[] | null = null;
         if (Array.isArray(payload.value)) primaryArray = payload.value;
-        else if (Array.isArray(payload.label)) primaryArray = payload.label;
         else if (Array.isArray(payload.valence)) primaryArray = payload.valence;
 
         if (!primaryArray) {
@@ -348,14 +326,6 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
             } else {
               passedCount++;
             }
-          } else if (pType === 'multi_segment') {
-            if (!Array.isArray(payload.label) || !Array.isArray(payload.level)) {
-              issues.push({ severity: 'error', path: 'payload', message: 'multi_segment requires both "label" and "level" arrays.' });
-            } else if (payload.label.length !== payload.level.length) {
-              issues.push({ severity: 'error', path: 'payload', message: `multi_segment "label" length (${payload.label.length}) != "level" length (${payload.level.length}).` });
-            } else {
-              passedCount++;
-            }
           } else if (pType === 'mood_thayer') {
             if (!Array.isArray(payload.valence) || !Array.isArray(payload.arousal)) {
               issues.push({ severity: 'error', path: 'payload', message: 'mood_thayer requires both "valence" and "arousal" arrays.' });
@@ -381,6 +351,21 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
       passedCount++;
       const eType = extent.extent_type;
 
+      // Required topological flags on all extents
+      if (typeof extent.disjoint !== 'boolean') {
+        issues.push({ severity: 'error', path: 'extent.disjoint', message: 'Extent requires boolean field "disjoint".' });
+      } else if (eType === 'time_uniform' && extent.disjoint !== true) {
+        issues.push({ severity: 'error', path: 'extent.disjoint', message: 'time_uniform extent requires "disjoint" to be true.' });
+      } else {
+        passedCount++;
+      }
+
+      if (typeof extent.exhaustive !== 'boolean') {
+        issues.push({ severity: 'error', path: 'extent.exhaustive', message: 'Extent requires boolean field "exhaustive".' });
+      } else {
+        passedCount++;
+      }
+
       if (eType === 'time_uniform') {
         // time_uniform has implicit regular time grid without columnar arrays
         if (typeof extent.start_time !== 'number' || !Number.isFinite(extent.start_time)) {
@@ -396,10 +381,10 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
         // Observation count is implicitly parallel to payload length
         extentObservationCount = payloadLength;
       } else {
-        // Columnar extent types
+        // Columnar extent types (exclude scalar Fraction bounds like min_quarter / max_quarter)
         const arrayFields: { name: string; arr: unknown[] }[] = [];
         for (const [k, v] of Object.entries(extent)) {
-          if (k !== 'extent_type' && Array.isArray(v)) {
+          if (k !== 'extent_type' && !k.startsWith('min_') && !k.startsWith('max_') && Array.isArray(v)) {
             arrayFields.push({ name: k, arr: v });
           }
         }
@@ -483,6 +468,43 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
   }
 
   const effectiveObservationCount = payloadLength > 0 ? payloadLength : extentObservationCount;
+
+  // 5b. groupings check & parallelism
+  if (ann.groupings !== undefined) {
+    if (!Array.isArray(ann.groupings)) {
+      issues.push({ severity: 'error', path: 'groupings', message: '"groupings" must be an array.' });
+    } else {
+      for (let gi = 0; gi < ann.groupings.length; gi++) {
+        const grp = ann.groupings[gi] as unknown as Record<string, unknown>;
+        if (!grp || typeof grp !== 'object') {
+          issues.push({ severity: 'error', path: `groupings[${gi}]`, message: 'Grouping item must be an object.' });
+        } else {
+          if (typeof grp.name !== 'string') {
+            issues.push({ severity: 'error', path: `groupings[${gi}].name`, message: 'Grouping requires string "name".' });
+          } else passedCount++;
+          if (!Array.isArray(grp.ids) || grp.ids.some(id => typeof id !== 'number' || !Number.isInteger(id))) {
+            issues.push({ severity: 'error', path: `groupings[${gi}].ids`, message: 'Grouping requires integer array "ids".' });
+          } else {
+            if (effectiveObservationCount > 0 && grp.ids.length !== effectiveObservationCount) {
+              issues.push({
+                severity: 'error',
+                path: `groupings[${gi}].ids`,
+                message: `Grouping "ids" length (${grp.ids.length}) does not match observation count (${effectiveObservationCount}).`,
+              });
+            } else {
+              passedCount++;
+            }
+          }
+          if (typeof grp.disjoint !== 'boolean') {
+            issues.push({ severity: 'error', path: `groupings[${gi}].disjoint`, message: 'Grouping requires boolean field "disjoint".' });
+          } else passedCount++;
+          if (typeof grp.exhaustive !== 'boolean') {
+            issues.push({ severity: 'error', path: `groupings[${gi}].exhaustive`, message: 'Grouping requires boolean field "exhaustive".' });
+          } else passedCount++;
+        }
+      }
+    }
+  }
 
   // 6. confidence check & parallelism
   if (ann.confidence) {
@@ -572,8 +594,8 @@ export function validateBoppAnnotation(data: unknown): ValidationResult {
     schemaVersion: ann.bopp_version || '1.0',
     checksSummary: {
       passed: passedCount,
-      warnings,
-      errors,
+      warnings: warnings,
+      errors: errors,
     },
   };
 }

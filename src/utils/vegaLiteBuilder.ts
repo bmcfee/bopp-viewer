@@ -35,8 +35,10 @@ import {
 } from './confidenceGrammar';
 import {
   isIntervalExtentType,
-  analyzeIntervalAnnotation,
-} from './intervalOverlap';
+  getExtentTopology,
+  resolveActiveGrouping,
+  resolveDomainRange,
+} from './extentTopology';
 
 // Ensure mir_eval schemes are registered with Vega
 registerMirEvalSchemes();
@@ -58,7 +60,7 @@ export interface VegaLiteBuilderOptions {
   currentTime?: number | null; // For synchronized playback head
   chartWidth?: number | string;
   chartHeight?: number;
-  forceMultiRow?: boolean; // When true, flips disjoint interval plots to multi-row overlapping display style
+  activeGroupingIndex?: number | null; // Index of active grouping in annotation.groupings, or null for ungrouped
 }
 
 /**
@@ -162,27 +164,45 @@ export function computeOptimalChartHeight(
     isGlobalNoConfGenres?: boolean;
     filteredRowCount?: number;
     containerWidth?: number;
+    activeGroupingIndex?: number | null;
   } = {}
 ): number {
   const {
-    effectiveMultiRow = false,
     isGlobalNoConfGenres = false,
     filteredRowCount = rowCount,
     containerWidth = 760,
+    activeGroupingIndex = 0,
   } = options;
   const pType = annotation.payload?.payload_type as string | undefined;
   const eType = annotation.extent?.extent_type as string | undefined;
+  const topology = getExtentTopology(annotation.extent);
+  const activeGrouping = resolveActiveGrouping(annotation, activeGroupingIndex);
+  const hasActiveGrouping = Boolean(activeGrouping && activeGrouping.nonNegativeGroupIds.length > 0);
+  const effectiveMultiRow =
+    options.effectiveMultiRow ??
+    Boolean(!topology.disjoint || (hasActiveGrouping && activeGrouping?.disjoint));
 
   if (pType === 'key_mode') {
     if (eType?.includes('interval')) {
+      if (hasActiveGrouping && activeGrouping?.disjoint) {
+        return Math.max(240, activeGrouping.orderedGroupLabels.length * 64 + 80);
+      }
       return effectiveMultiRow ? 340 : 220;
     }
     return 540;
   }
-  if (pType === 'note_midi' || pType === 'piano_roll') return 460;
-  if (pType === 'chord') return effectiveMultiRow ? 420 : 320;
-  if (pType === 'multi_segment' || pType === 'segment_open' || pType === 'tag_open') {
+  if (pType === 'note_midi' || pType === 'note') return 460;
+  if (pType === 'chord') {
+    if (hasActiveGrouping && activeGrouping?.disjoint) {
+      return Math.max(260, activeGrouping.orderedGroupLabels.length * 56 + 90);
+    }
+    return effectiveMultiRow ? 420 : 320;
+  }
+  if (pType === 'tag') {
     if (!eType || eType === 'none') {
+      if (hasActiveGrouping && activeGrouping) {
+        return Math.max(220, activeGrouping.orderedGroupLabels.length * 140 + 60);
+      }
       if (isGlobalNoConfGenres) {
         const numCols = Math.max(1, Math.min(filteredRowCount, Math.floor((containerWidth - 80) / 194)));
         const numRows = Math.ceil(filteredRowCount / numCols);
@@ -190,9 +210,15 @@ export function computeOptimalChartHeight(
       }
       return Math.max(180, Math.min(420, rowCount * 44 + 80));
     }
+    if (hasActiveGrouping && activeGrouping) {
+      if (activeGrouping.disjoint && eType.includes('interval')) {
+        return Math.max(220, activeGrouping.orderedGroupLabels.length * 56 + 80);
+      }
+      return Math.max(260, activeGrouping.orderedGroupLabels.length * 150 + 70);
+    }
     return effectiveMultiRow ? 360 : 240;
   }
-  if (pType === 'pitch_contour' || pType === 'note_hz' || pType === 'frequency_hz') return 380;
+  if (pType === 'frequency_hz') return 380;
   if (!eType || eType === 'none') return 440;
   return effectiveMultiRow ? 420 : 340;
 }
@@ -291,12 +317,8 @@ export function resolveColorScale(
 
   const isPitchPayload =
     payloadType === 'note_midi' ||
-    payloadType === 'note_hz' ||
     payloadType === 'frequency_hz' ||
-    payloadType === 'note' ||
-    payloadType === 'hz' ||
-    payloadType === 'pitch_contour' ||
-    payloadType === 'piano_roll';
+    payloadType === 'note';
 
   if (isPitchPayload) {
     if (isMirEval) {
@@ -1009,8 +1031,6 @@ export function buildBoppVegaLiteSpec(
   data?: TabularRecord[],
   options: VegaLiteBuilderOptions = {}
 ): Record<string, unknown> {
-  const effectiveData = (data && data.length > 0) ? data : annotationToTabular(annotation);
-  data = effectiveData;
   const {
     theme = 'dark',
     colorScheme = 'mir_eval_fifths',
@@ -1023,8 +1043,42 @@ export function buildBoppVegaLiteSpec(
     currentTime = null,
     chartWidth = 760,
     chartHeight = 320,
-    forceMultiRow,
+    activeGroupingIndex,
   } = options;
+
+  const extentTopology = getExtentTopology(annotation.extent);
+  const activeGrouping = resolveActiveGrouping(annotation, activeGroupingIndex);
+
+  const rawData = (data && data.length > 0) ? data : annotationToTabular(annotation, activeGroupingIndex);
+  data = activeGrouping
+    ? rawData.map((d, idx) => {
+        const rowIdx = typeof d.__index === 'number' ? d.__index : idx;
+        const gid = activeGrouping.grouping.ids[rowIdx] ?? -1;
+        return {
+          ...d,
+          _group_id: gid,
+          _group_label: activeGrouping.getLabelForId(gid),
+          _group_order: activeGrouping.getOrderForId(gid),
+        };
+      })
+    : rawData;
+
+  const groupColorScale = activeGrouping
+    ? {
+        scheme: 'category10',
+        domain:
+          activeGrouping.nonNegativeGroupLabels.length > 0
+            ? activeGrouping.nonNegativeGroupLabels
+            : activeGrouping.orderedGroupLabels,
+      }
+    : undefined;
+
+  const groupTooltipFields = activeGrouping
+    ? [
+        { field: '_group_label', type: 'nominal', title: `Group (${activeGrouping.name})` },
+        { field: '_group_id', type: 'quantitative', title: 'Group ID' },
+      ]
+    : [];
 
   const resolvedWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
 
@@ -1044,7 +1098,7 @@ export function buildBoppVegaLiteSpec(
   const textFill = isDark ? '#f8fafc' : '#0f172a';
 
   // Base Vega-Lite config (transparent for time-frequency charts to allow underlying spectrogram overlay)
-  const isTimeFrequencyPlot = extentType === 'time_frequency_box' || payloadType === 'pitch_contour' || payloadType === 'note_hz' || payloadType === 'frequency_hz';
+  const isTimeFrequencyPlot = extentType === 'time_frequency_box' || payloadType === 'frequency_hz';
   const baseConfig = {
     autosize: {
       type: (chartWidth === 'container' ? 'fit-x' : 'pad') as 'fit-x' | 'pad',
@@ -1099,7 +1153,7 @@ export function buildBoppVegaLiteSpec(
     }
   }
 
-  // Pre-calculate time domain if applicable without assuming injected time_end
+  // Pre-calculate primary axis domain, incorporating explicit extent min_*/max_* bounds
   let minX = 0;
   let maxX = 10;
   if (data.length > 0) {
@@ -1120,6 +1174,8 @@ export function buildBoppVegaLiteSpec(
       if (maxX <= minX) maxX = minX + 1;
     }
   }
+  [minX, maxX] = resolveDomainRange(minX, maxX, extentTopology.minPrimary, extentTopology.maxPrimary);
+  if (maxX <= minX) maxX = minX + 1;
 
   // Helper for playback cursor layer (converts currentTime to continuous axis unit)
   const makeCursorLayer = (timeField = 'time') => {
@@ -1683,283 +1739,279 @@ export function buildBoppVegaLiteSpec(
     // Note: mood_thayer static affect is processed in section 8 below (Russell Circumplex)
     if (payloadType !== 'mood_thayer') {
       const colorScale = resolveColorScale(colorScheme, payloadType);
-
-      // When NO confidence rating is provided, full-width quantitative bars are completely redundant.
-      // Instead, render as an alphabetized collection of badges!
       const hasConfidenceData = hasConfidence && data.some(d => typeof d.confidence === 'number');
 
-      if (!hasConfidenceData) {
-        // Strictly alphabetize tags/genres
-        const alphabetizedData = [...data].sort((a, b) =>
-          String(a.value ?? '').localeCompare(String(b.value ?? ''), undefined, {
-            sensitivity: 'base',
-            numeric: true,
-          })
-        );
+      const buildGlobalTagPanel = (panelData: TabularRecord[], panelTitle?: string, isSubpanel = false): Record<string, unknown> => {
+        if (!hasConfidenceData) {
+          // Strictly alphabetize tags/genres
+          const alphabetizedData = [...panelData].sort((a, b) =>
+            String(a.value ?? '').localeCompare(String(b.value ?? ''), undefined, {
+              sensitivity: 'base',
+              numeric: true,
+            })
+          );
 
-        const count = alphabetizedData.length;
-        const availableW = typeof chartWidth === 'number' && chartWidth > 0 ? Math.max(300, chartWidth - 80) : 680;
-        const badgeHeight = 38;
-        const gapX = 14;
-        const gapY = 12;
-        const minBadgeWidth = 180;
-        const numCols = Math.max(1, Math.min(count, Math.floor(availableW / (minBadgeWidth + gapX))));
-        const numRows = Math.ceil(count / numCols);
-        const actualColCount = Math.min(numCols, count);
-        const actualBadgeWidth = Math.floor((availableW - (actualColCount - 1) * gapX) / actualColCount);
-        const totalW = actualColCount * actualBadgeWidth + (actualColCount - 1) * gapX;
-        const totalH = numRows * badgeHeight + (numRows - 1) * gapY;
+          const count = alphabetizedData.length;
+          const availableW = typeof chartWidth === 'number' && chartWidth > 0 ? Math.max(300, chartWidth - 80) : 680;
+          const badgeHeight = 38;
+          const gapX = 14;
+          const gapY = 12;
+          const minBadgeWidth = 180;
+          const numCols = Math.max(1, Math.min(count, Math.floor(availableW / (minBadgeWidth + gapX))));
+          const numRows = Math.max(1, Math.ceil(count / numCols));
+          const actualColCount = Math.max(1, Math.min(numCols, count));
+          const actualBadgeWidth = Math.floor((availableW - (actualColCount - 1) * gapX) / actualColCount);
+          const totalW = actualColCount * actualBadgeWidth + (actualColCount - 1) * gapX;
+          const totalH = numRows * badgeHeight + (numRows - 1) * gapY;
 
-        // Flow alphabetized badges in rows: left-to-right, then top-to-bottom
-        const badgeValues = alphabetizedData.map((d, i) => {
-          const col = i % numCols;
-          const row = Math.floor(i / numCols);
-          const x1 = col * (actualBadgeWidth + gapX);
-          const x2 = x1 + actualBadgeWidth;
-          const y1 = row * (badgeHeight + gapY);
-          const y2 = y1 + badgeHeight;
-          const valStr = String(d.value ?? '');
+          const badgeValues = alphabetizedData.map((d, i) => {
+            const col = i % numCols;
+            const row = Math.floor(i / numCols);
+            const x1 = col * (actualBadgeWidth + gapX);
+            const x2 = x1 + actualBadgeWidth;
+            const y1 = row * (badgeHeight + gapY);
+            const y2 = y1 + badgeHeight;
+            const valStr = String(d.value ?? '');
+            return {
+              ...d,
+              value: valStr,
+              x1,
+              x2,
+              y1,
+              y2,
+              dotX: x1 + 16,
+              textX: x1 + 30,
+              cy: y1 + badgeHeight / 2,
+              rank: `#${i + 1} of ${count}`,
+              scope: panelTitle ? `Group: ${panelTitle}` : 'Global (Entire Media Object)',
+            };
+          });
+
           return {
-            value: valStr,
-            x1,
-            x2,
-            y1,
-            y2,
-            dotX: x1 + 16,
-            textX: x1 + 30,
-            cy: y1 + badgeHeight / 2,
-            rank: `#${i + 1} of ${count}`,
-            scope: 'Global (Entire Media Object)',
+            width: totalW,
+            height: totalH,
+            title: {
+              text: panelTitle || `Global ${payloadType === 'tag' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
+              subtitle: isSubpanel
+                ? `${count} ${count === 1 ? 'tag' : 'tags'}`
+                : `Alphabetized collection · Scope: Entire Media Object · ${count} ${count === 1 ? 'badge' : 'badges'} (No confidence rating)`,
+              anchor: 'start',
+              fontSize: isSubpanel ? 12.5 : 14,
+              fontWeight: 'bold',
+              subtitleFontSize: 11,
+              color: textColor,
+              subtitleColor: axisColor,
+              offset: isSubpanel ? 10 : 20,
+            },
+            data: { values: badgeValues },
+            layer: [
+              {
+                mark: {
+                  type: 'rect',
+                  cornerRadius: 19,
+                  strokeWidth: 1.5,
+                  cursor: 'pointer',
+                  fillOpacity: isDark ? 0.22 : 0.12,
+                },
+                encoding: {
+                  x: { field: 'x1', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
+                  x2: { field: 'x2' },
+                  y: { field: 'y1', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
+                  y2: { field: 'y2' },
+                  color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+                  stroke: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+                  tooltip: [
+                    { field: 'value', type: 'nominal', title: 'Tag / Genre' },
+                    ...groupTooltipFields,
+                    { field: 'rank', type: 'nominal', title: 'Alphabetical Order' },
+                    { field: 'scope', type: 'nominal', title: 'Scope' },
+                  ],
+                },
+              },
+              {
+                mark: {
+                  type: 'circle',
+                  size: 55,
+                  cursor: 'pointer',
+                },
+                encoding: {
+                  x: { field: 'dotX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
+                  y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
+                  color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
+                },
+              },
+              {
+                mark: {
+                  type: 'text',
+                  align: 'left',
+                  baseline: 'middle',
+                  fontSize: 12.5,
+                  fontWeight: 'bold',
+                  fill: textColor,
+                  font: 'system-ui, -apple-system, sans-serif',
+                  limit: actualBadgeWidth - 42,
+                  cursor: 'pointer',
+                },
+                encoding: {
+                  x: { field: 'textX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
+                  y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
+                  text: { field: 'value', type: 'nominal' },
+                },
+              },
+            ],
           };
-        });
+        }
+
+        const tagHeight = Math.max(isSubpanel ? 110 : 180, Math.min(420, panelData.length * 44 + (isSubpanel ? 40 : 80)));
+        const sortedData = [...panelData].sort(
+          (a, b) => (typeof b.confidence === 'number' ? b.confidence : 1) - (typeof a.confidence === 'number' ? a.confidence : 1)
+        );
+        const barWidth = typeof chartWidth === 'number' ? Math.max(260, chartWidth - 140) : chartWidth;
 
         return {
-          $schema: VEGA_LITE_SCHEMA,
-          width: totalW,
-          height: totalH,
+          width: barWidth,
+          height: tagHeight,
           title: {
-            text: `Global ${payloadType === 'tag' || payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
-            subtitle: `Alphabetized collection · Scope: Entire Media Object · ${count} ${count === 1 ? 'badge' : 'badges'} (No confidence rating)`,
-            anchor: 'start',
-            fontSize: 14,
-            fontWeight: 'bold',
-            subtitleFontSize: 11,
+            text: panelTitle || `Global ${payloadType === 'tag' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
+            subtitle: isSubpanel ? undefined : 'Scope: Entire Media Object (Global classification and metadata tags)',
             color: textColor,
             subtitleColor: axisColor,
-            offset: 20,
           },
-          data: { values: badgeValues },
-          config: {
-            ...baseConfig,
-            view: { stroke: 'transparent' },
+          data: { values: sortedData },
+          encoding: {
+            y: {
+              field: 'value',
+              type: 'nominal',
+              title: isSubpanel ? panelTitle || 'Tag' : 'Tag / Genre / Mood',
+              sort: null,
+              axis: {
+                labelFontSize: 12,
+                labelFontWeight: 'bold',
+                labelColor: textColor,
+                titleColor: textColor,
+                titleFontSize: 12,
+                titleFontWeight: 'bold',
+                titlePadding: 16,
+                labelPadding: 12,
+                minExtent: 160,
+                labelLimit: 300,
+                domain: true,
+                domainColor: axisColor,
+                ticks: true,
+                tickColor: axisColor,
+              },
+            },
           },
           layer: [
-            // Badge background pill card
             {
+              transform: [{ calculate: '1.0', as: 'full_scale' }],
               mark: {
-                type: 'rect',
-                cornerRadius: 19,
-                strokeWidth: 1.5,
-                cursor: 'pointer',
-                fillOpacity: isDark ? 0.22 : 0.12,
+                type: 'bar',
+                height: 24,
+                cornerRadius: 4,
+                fill: isDark ? '#1e293b' : '#f1f5f9',
               },
               encoding: {
-                x: { field: 'x1', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
-                x2: { field: 'x2' },
-                y: { field: 'y1', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
-                y2: { field: 'y2' },
+                x: { field: 'full_scale', type: 'quantitative', scale: { domain: [0, 1] }, axis: null },
+              },
+            },
+            {
+              transform: [{ calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' }],
+              mark: { type: 'bar', height: 24, cornerRadius: 4 },
+              encoding: {
+                x: {
+                  field: 'conf_val',
+                  type: 'quantitative',
+                  title: 'Confidence / Relevance (0–100%)',
+                  scale: { domain: [0, 1] },
+                  axis: {
+                    format: '%',
+                    grid: true,
+                    tickCount: 5,
+                    titleColor: textColor,
+                    titleFontSize: 11,
+                    titleFontWeight: 'bold',
+                    labelColor: axisColor,
+                    labelFontSize: 11,
+                  },
+                },
                 color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
-                stroke: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
                 tooltip: [
                   { field: 'value', type: 'nominal', title: 'Tag / Genre' },
-                  { field: 'rank', type: 'nominal', title: 'Alphabetical Order' },
-                  { field: 'scope', type: 'nominal', title: 'Scope' },
+                  ...groupTooltipFields,
+                  { field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' },
                 ],
               },
             },
-            // Badge accent circle / indicator dot
-            {
-              mark: {
-                type: 'circle',
-                size: 55,
-                cursor: 'pointer',
-              },
-              encoding: {
-                x: { field: 'dotX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
-                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
-                color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
-                tooltip: [
-                  { field: 'value', type: 'nominal', title: 'Tag / Genre' },
-                ],
-              },
-            },
-            // Badge text label
             {
               mark: {
                 type: 'text',
                 align: 'left',
                 baseline: 'middle',
-                fontSize: 12.5,
+                dx: 8,
+                fontSize: 11,
                 fontWeight: 'bold',
-                fill: textColor,
-                font: 'system-ui, -apple-system, sans-serif',
-                limit: actualBadgeWidth - 42,
-                cursor: 'pointer',
+                fill: '#ffffff',
               },
               encoding: {
-                x: { field: 'textX', type: 'quantitative', scale: { domain: [0, totalW] }, axis: null },
-                y: { field: 'cy', type: 'quantitative', scale: { domain: [0, totalH], reverse: true }, axis: null },
+                x: { value: 0 },
                 text: { field: 'value', type: 'nominal' },
-                tooltip: [
-                  { field: 'value', type: 'nominal', title: 'Tag / Genre' },
-                  { field: 'rank', type: 'nominal', title: 'Alphabetical Order' },
-                ],
+              },
+            },
+            {
+              transform: [
+                { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
+                { calculate: "datum.confidence != null ? round(datum.confidence * 1000) / 10 + '%' : ''", as: 'display_txt' },
+              ],
+              mark: {
+                type: 'text',
+                align: 'left',
+                baseline: 'middle',
+                dx: 8,
+                fontSize: 11,
+                fontWeight: 'bold',
+                fill: textColor,
+              },
+              encoding: {
+                x: { field: 'conf_val', type: 'quantitative' },
+                text: { field: 'display_txt', type: 'nominal' },
               },
             },
           ],
         };
+      };
+
+      // When an active grouping is present, arrange Global Tags into ordered vertical subplots by group ID!
+      if (activeGrouping && activeGrouping.orderedGroupLabels.length > 0) {
+        const subplots = activeGrouping.orderedGroupLabels
+          .map(grpLabel => {
+            const grpRows = data.filter(d => d._group_label === grpLabel);
+            if (grpRows.length === 0) return null;
+            return buildGlobalTagPanel(grpRows, `${activeGrouping.name}: ${grpLabel}`, true);
+          })
+          .filter(Boolean);
+
+        return {
+          $schema: VEGA_LITE_SCHEMA,
+          title: {
+            text: `Global ${payloadType === 'tag' ? 'Genres & Tags' : payloadType.toUpperCase()} (Grouped by ${activeGrouping.name}): ${annotation.media_id}`,
+            subtitle: `Ordered subplots by group (${activeGrouping.orderedGroupLabels.join(' → ')})`,
+            color: textColor,
+            subtitleColor: axisColor,
+          },
+          config: hasConfidenceData ? baseConfig : { ...baseConfig, view: { stroke: 'transparent' } },
+          vconcat: subplots,
+          resolve: {
+            scale: { y: 'independent' },
+          },
+        };
       }
 
-      // WITH Confidence rating: full horizontal quantitative axis with visible bars representing confidence %
-      const tagHeight = Math.max(180, Math.min(420, data.length * 44 + 80));
-      const sortedData = [...data].sort(
-        (a, b) => (typeof b.confidence === 'number' ? b.confidence : 1) - (typeof a.confidence === 'number' ? a.confidence : 1)
-      );
-      const barWidth = typeof chartWidth === 'number' ? Math.max(260, chartWidth - 140) : chartWidth;
-
+      const singlePanel = buildGlobalTagPanel(data);
       return {
         $schema: VEGA_LITE_SCHEMA,
-        width: barWidth,
-        height: tagHeight,
-        title: {
-          text: `Global ${payloadType === 'tag_open' ? 'Genres & Tags' : payloadType.toUpperCase()}: ${annotation.media_id}`,
-          subtitle: 'Scope: Entire Media Object (Global classification and metadata tags)',
-          color: textColor,
-          subtitleColor: axisColor,
-        },
-        data: { values: sortedData },
-        config: baseConfig,
-        encoding: {
-          y: {
-            field: 'value',
-            type: 'nominal',
-            title: 'Tag / Genre / Mood',
-            sort: null,
-            axis: {
-              labelFontSize: 12,
-              labelFontWeight: 'bold',
-              labelColor: textColor,
-              titleColor: textColor,
-              titleFontSize: 12,
-              titleFontWeight: 'bold',
-              titlePadding: 16,
-              labelPadding: 12,
-              minExtent: 160,
-              labelLimit: 300,
-              domain: true,
-              domainColor: axisColor,
-              ticks: true,
-              tickColor: axisColor,
-            },
-          },
-        },
-        layer: [
-          // Background track bar (0 to 100%)
-          {
-            transform: [
-              { calculate: '1.0', as: 'full_scale' },
-            ],
-            mark: {
-              type: 'bar',
-              height: 24,
-              cornerRadius: 4,
-              fill: isDark ? '#1e293b' : '#f1f5f9',
-            },
-            encoding: {
-              x: {
-                field: 'full_scale',
-                type: 'quantitative',
-                scale: { domain: [0, 1] },
-                axis: null,
-              },
-            },
-          },
-          // Active confidence / relevance bar with full horizontal axis
-          {
-            transform: [
-              { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
-            ],
-            mark: {
-              type: 'bar',
-              height: 24,
-              cornerRadius: 4,
-            },
-            encoding: {
-              x: {
-                field: 'conf_val',
-                type: 'quantitative',
-                title: 'Confidence / Relevance (0–100%)',
-                scale: { domain: [0, 1] },
-                axis: {
-                  format: '%',
-                  grid: true,
-                  tickCount: 5,
-                  titleColor: textColor,
-                  titleFontSize: 11,
-                  titleFontWeight: 'bold',
-                  labelColor: axisColor,
-                  labelFontSize: 11,
-                },
-              },
-              color: {
-                field: 'value',
-                type: 'nominal',
-                scale: colorScale,
-                legend: null,
-              },
-              tooltip: [
-                { field: 'value', type: 'nominal', title: 'Tag / Genre' },
-                { field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' },
-              ],
-            },
-          },
-          // In-bar Tag label annotation
-          {
-            mark: {
-              type: 'text',
-              align: 'left',
-              baseline: 'middle',
-              dx: 8,
-              fontSize: 11,
-              fontWeight: 'bold',
-              fill: '#ffffff',
-            },
-            encoding: {
-              x: { value: 0 },
-              text: { field: 'value', type: 'nominal' },
-            },
-          },
-          // Numeric percentage annotation at bar end
-          {
-            transform: [
-              { calculate: 'datum.confidence != null ? datum.confidence : 1.0', as: 'conf_val' },
-              { calculate: "datum.confidence != null ? round(datum.confidence * 1000) / 10 + '%' : ''", as: 'display_txt' },
-            ],
-            mark: {
-              type: 'text',
-              align: 'left',
-              baseline: 'middle',
-              dx: 8,
-              fontSize: 11,
-              fontWeight: 'bold',
-              fill: textColor,
-            },
-            encoding: {
-              x: { field: 'conf_val', type: 'quantitative' },
-              text: { field: 'display_txt', type: 'nominal' },
-            },
-          },
-        ],
+        config: hasConfidenceData ? baseConfig : { ...baseConfig, view: { stroke: 'transparent' } },
+        ...singlePanel,
       };
     }
   }
@@ -1996,16 +2048,22 @@ export function buildBoppVegaLiteSpec(
     const isPointExtent = extentType === 'score_quarter' || extentType === 'midi_tick' || extentType === 'time';
     const isInstantaneous = isPointExtent && data.every(d => d.duration === undefined || d.duration === null || d.duration === 0);
 
-    const intervalAnalysis = isInstantaneous ? null : analyzeIntervalAnnotation(annotation, data);
-    const isOverlapping = Boolean(!isInstantaneous && intervalAnalysis && !intervalAnalysis.isDisjoint);
-    const shouldMultiRow = Boolean(!isInstantaneous && (forceMultiRow !== undefined ? forceMultiRow : isOverlapping));
+    const isGroupDisjoint = !isInstantaneous && Boolean(activeGrouping && activeGrouping.disjoint);
+    const shouldMultiRow = Boolean(!isInstantaneous && (isGroupDisjoint || !extentTopology.disjoint));
 
-    // Assign rows per base chord label (ignoring inversions so e.g. C:maj and C:maj/3 share the same row)
+    // Assign rows per group (when grouping.disjoint is true) or per base chord label (when overlapping)
     const chordDataWithLanes = enrichedChordData.map(d => {
       const rawVal = String(d.value ?? '');
       const baseLabel = toUnicodeAccidentals(getBaseChordLabel(rawVal));
       if (!shouldMultiRow) {
         return { ...d, _chord_row: 'Chords', _base_chord: baseLabel };
+      }
+      if (isGroupDisjoint) {
+        return {
+          ...d,
+          _chord_row: String(d._group_label ?? 'Ungrouped'),
+          _base_chord: baseLabel || 'N',
+        };
       }
       return {
         ...d,
@@ -2020,20 +2078,24 @@ export function buildBoppVegaLiteSpec(
       return CHROMATIC_ROOT_MAP[root] ?? -1;
     };
 
-    const uniqueChordRows = Array.from(new Set(chordDataWithLanes.map(d => d._chord_row))).filter(Boolean);
-    uniqueChordRows.sort((a, b) => {
-      const semA = getChordSemitone(a);
-      const semB = getChordSemitone(b);
-      // 'N' or unparsed non-harmonic tags go to the bottom
-      if (semA === -1 && semB === -1) return a.localeCompare(b);
-      if (semA === -1) return 1;
-      if (semB === -1) return -1;
-      if (semA !== semB) {
-        // Chromatic pitch height: higher pitch at top (domain[0]), C at bottom
-        return semB - semA;
-      }
-      return a.localeCompare(b);
-    });
+    const uniqueChordRows = isGroupDisjoint
+      ? activeGrouping!.orderedGroupLabels
+      : Array.from(new Set(chordDataWithLanes.map(d => d._chord_row))).filter(Boolean);
+    if (!isGroupDisjoint) {
+      uniqueChordRows.sort((a, b) => {
+        const semA = getChordSemitone(a);
+        const semB = getChordSemitone(b);
+        // 'N' or unparsed non-harmonic tags go to the bottom
+        if (semA === -1 && semB === -1) return a.localeCompare(b);
+        if (semA === -1) return 1;
+        if (semB === -1) return -1;
+        if (semA !== semB) {
+          // Chromatic pitch height: higher pitch at top (domain[0]), C at bottom
+          return semB - semA;
+        }
+        return a.localeCompare(b);
+      });
+    }
 
     const mainPlotHeight = enableOverviewBrush ? chartHeight - 80 : chartHeight - 40;
     const patchStroke = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(15,23,42,0.65)';
@@ -2050,7 +2112,7 @@ export function buildBoppVegaLiteSpec(
         ? {
             field: '_chord_row',
             type: 'nominal',
-            title: 'Chord',
+            title: isGroupDisjoint ? activeGrouping!.name : 'Chord',
             sort: uniqueChordRows,
             scale: { domain: uniqueChordRows },
             axis: {
@@ -2069,9 +2131,10 @@ export function buildBoppVegaLiteSpec(
       },
       tooltip: [
         { field: '_display_value', type: 'nominal', title: 'Chord' },
-        ...(shouldMultiRow ? [{ field: '_chord_row', type: 'nominal', title: 'Row' }] : []),
+        ...(shouldMultiRow ? [{ field: '_chord_row', type: 'nominal', title: isGroupDisjoint ? activeGrouping!.name : 'Row' }] : []),
         { field: xField, type: 'quantitative', format: isScore ? '.1f' : isMidi ? 'd' : '.3f', title: 'Start' },
         { field: durField, type: 'quantitative', format: isScore ? '.1f' : isMidi ? 'd' : '.3f', title: 'Duration' },
+        ...groupTooltipFields,
         ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: confidenceType === 'agreement' ? 'Agreement' : 'Confidence' }] : []),
         ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
       ],
@@ -2104,6 +2167,7 @@ export function buildBoppVegaLiteSpec(
           tooltip: [
             { field: '_display_value', type: 'nominal', title: 'Chord' },
             { field: xField, type: 'quantitative', format: isScore ? '.1f' : isMidi ? 'd' : '.3f', title: 'Position' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
             ...(confidenceType === 'agreement' ? [{ field: 'agreement_text', type: 'nominal', title: 'Consensus' }] : []),
           ],
@@ -2168,6 +2232,32 @@ export function buildBoppVegaLiteSpec(
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: rectEncoding,
       });
+
+      if (activeGrouping && !isGroupDisjoint) {
+        layers.push({
+          transform: [{ filter: 'datum._group_id >= 0' }],
+          mark: {
+            type: shouldMultiRow ? 'bar' : 'rect',
+            fillOpacity: 0,
+            strokeWidth: 2.5,
+            cornerRadius: 3,
+          },
+          encoding: {
+            x: { field: xField, type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: shouldMultiRow
+              ? { field: '_chord_row', type: 'nominal', sort: uniqueChordRows, scale: { domain: uniqueChordRows } }
+              : { value: 0 },
+            ...(shouldMultiRow ? {} : { y2: { value: mainPlotHeight } }),
+            stroke: {
+              field: '_group_label',
+              type: 'nominal',
+              title: activeGrouping.name,
+              scale: groupColorScale,
+            },
+          },
+        });
+      }
 
       // Overlay confidence meter along top edge for single row
       if (!shouldMultiRow && hasConfidence && confidenceChannel !== 'none') {
@@ -2287,6 +2377,7 @@ export function buildBoppVegaLiteSpec(
   // 1.5. KEY_MODE (Key & Mode Modulations)
   // Supports standard keys (C:maj, A:min) and modal tonalities (dorian, phrygian, etc.)
   // When disjoint in time: renders as a single row on the vertical axis!
+  // When grouping.disjoint is true: renders 1 row per group ID!
   // When overlapping: renders across multiple rows on the vertical axis.
   // Modes use split coloring: top/outer colored to tonic, bottom/inner colored to relative major tonic.
   // =========================================================================
@@ -2304,8 +2395,8 @@ export function buildBoppVegaLiteSpec(
       });
     }
 
-    const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
-    const useSingleRow = Boolean(!forceMultiRow && isInterval && intervalAnalysis?.shouldUseSingleRow);
+    const isGroupDisjoint = isInterval && Boolean(activeGrouping && activeGrouping.disjoint);
+    const useSingleRow = Boolean(isInterval && !isGroupDisjoint && extentTopology.disjoint);
 
     const isPitchScheme = colorScheme === 'mir_eval_pitch' || colorScheme === 'pitch';
     const mode = isPitchScheme ? 'pitch' : 'fifths';
@@ -2350,16 +2441,14 @@ export function buildBoppVegaLiteSpec(
       if (minA !== minB) return minA - minB;
       return a.localeCompare(b);
     });
-    // In multi-row mode, scale domain ONLY to keys in the piece to avoid 20+ empty rows!
-    const keyDomain = orderedKeysInPiece.length > 0 ? orderedKeysInPiece : ALL_24_KEYS_TOP_TO_BOTTOM;
-    const keyColors = keyDomain.map(k => keyToMirEvalColor(k, mode));
+    // In multi-row mode, scale domain ONLY to keys in the piece (or group labels if grouping.disjoint)
+    const keyDomain = isGroupDisjoint
+      ? activeGrouping!.orderedGroupLabels
+      : orderedKeysInPiece.length > 0
+      ? orderedKeysInPiece
+      : ALL_24_KEYS_TOP_TO_BOTTOM;
 
-    const keyColorScale = {
-      domain: keyDomain,
-      range: keyColors,
-    };
-
-    const singleRowAxisTitle = intervalAnalysis?.singleRowLabel || 'Harmonic Key / Mode';
+    const singleRowAxisTitle = 'Harmonic Key / Mode';
     if (useSingleRow) {
       transforms.push({
         calculate: `'${singleRowAxisTitle}'`,
@@ -2367,9 +2456,9 @@ export function buildBoppVegaLiteSpec(
       });
     }
 
-    const yField = useSingleRow ? '_single_row' : 'value';
+    const yField = isGroupDisjoint ? '_group_label' : useSingleRow ? '_single_row' : 'value';
     const yType = 'nominal';
-    const yTitle = useSingleRow ? singleRowAxisTitle : 'Tonic Pitch';
+    const yTitle = isGroupDisjoint ? activeGrouping!.name : useSingleRow ? singleRowAxisTitle : 'Tonic Pitch';
 
     const layers: Record<string, unknown>[] = [];
 
@@ -2416,6 +2505,7 @@ export function buildBoppVegaLiteSpec(
             { field: '_display_value', type: 'nominal', title: 'Key/Mode' },
             { field: '_rel_maj_key', type: 'nominal', title: 'Relative Major' },
             { field: xField, type: 'quantitative', format: isMidi ? 'd' : '.3f', title: 'Start' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
           ],
         },
@@ -2437,7 +2527,7 @@ export function buildBoppVegaLiteSpec(
         : {
             field: yField,
             type: 'nominal',
-            title: 'Tonic Pitch',
+            title: yTitle,
             sort: keyDomain,
             scale: { domain: keyDomain },
             axis: {
@@ -2501,13 +2591,14 @@ export function buildBoppVegaLiteSpec(
     const cursor = makeCursorLayer(xField);
     if (cursor) layers.push(cursor);
 
-    const keyPlotWidth = typeof chartWidth === 'number' ? Math.max(280, chartWidth - 120) : chartWidth;
-    const computedHeight = useSingleRow ? Math.max(160, Math.min(220, chartHeight ?? 180)) : Math.max(520, chartHeight ?? 480);
+    const computedHeight = useSingleRow ? Math.max(160, Math.min(220, chartHeight ?? 180)) : Math.max(320, chartHeight ?? 420);
 
     const keyTitle = {
       text: `BOPP Key & Mode: ${annotation.media_id}`,
       subtitle: useSingleRow
         ? 'Disjoint Interval Track (1 Row) · Modal Split Colors: Top = Tonic, Bottom = Relative Major Tonic'
+        : isGroupDisjoint
+        ? `Grouped Key Tracks (${activeGrouping!.name}) · Modal Split Patches`
         : 'Overlapping Multi-Row Key Tracks · Modal Split Patches',
       color: textColor,
       subtitleColor: axisColor,
@@ -2572,6 +2663,7 @@ export function buildBoppVegaLiteSpec(
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Beat Number' },
             { field: 'time', type: 'quantitative', format: '.3f', title: 'Timestamp (s)' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
           ],
         },
@@ -2586,6 +2678,23 @@ export function buildBoppVegaLiteSpec(
         },
       },
     ];
+
+    if (activeGrouping) {
+      layers.push({
+        transform: [{ filter: 'datum._group_id >= 0' }],
+        mark: { type: 'point', filled: false, size: 140, strokeWidth: 2.5 },
+        encoding: {
+          x: { field: 'time', type: 'quantitative' },
+          y: { condition: { test: isDownbeat, value: 20 }, value: 60 },
+          stroke: {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping.name,
+            scale: groupColorScale,
+          },
+        },
+      });
+    }
 
     if (hasConfidence && confidenceChannel !== 'none') {
       layers.push(...buildInstantaneousConfidenceLayers({
@@ -2648,15 +2757,39 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 2.5. TIME / TIME_UNIFORM + ONSET / MARKER (Point Events / Transients)
+  // 2.5. TIME / TIME_UNIFORM + MARKER (Point Events / Transients)
   // Clean impulse / stem plot proportional to likelihood without crowding!
   // =========================================================================
-  if ((extentType === 'time' || extentType === 'time_uniform') && (payloadType === 'onset' || payloadType === 'marker')) {
+  if ((extentType === 'time' || extentType === 'time_uniform') && payloadType === 'marker') {
     const onsetColor = isDark ? '#38bdf8' : '#0284c7';
     const mainPlotHeight = chartHeight - 74;
-    const markerDesc = (annotation.payload as any)?.description || (data[0]?.description as string) || (payloadType === 'onset' ? 'onset' : 'marker');
+    const markerDesc = (annotation.payload as any)?.description || (data[0]?.description as string) || 'marker';
 
-    const layers: Record<string, unknown>[] = [
+    const layers: Record<string, unknown>[] = [];
+
+    if (activeGrouping) {
+      layers.push({
+        transform: [{ filter: 'datum._group_id >= 0' }],
+        mark: { type: 'rule', strokeWidth: 5.5, strokeCap: 'round', opacity: 0.7 },
+        encoding: {
+          x: { field: 'time', type: 'quantitative' },
+          y: { datum: 0 },
+          y2: {
+            field: hasConfidence ? 'confidence' : 'value',
+            type: 'quantitative',
+            scale: { domain: [0, 1], zero: true },
+          },
+          stroke: {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping.name,
+            scale: groupColorScale,
+          },
+        },
+      });
+    }
+
+    layers.push(
       // Stems from baseline 0 up to likelihood height
       {
         mark: { type: 'rule', strokeWidth: 2.5, strokeCap: 'round', stroke: onsetColor },
@@ -2672,11 +2805,12 @@ export function buildBoppVegaLiteSpec(
           tooltip: [
             { field: 'time', type: 'quantitative', format: '.3f', title: 'Timestamp (s)' },
             { field: 'description', type: 'nominal', title: 'Event' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Detection Likelihood' }] : []),
           ],
         },
       },
-      // Accent cap circle at peak of each onset spike
+      // Accent cap circle at peak of each marker spike
       {
         mark: { type: 'circle', size: 48, color: onsetColor },
         encoding: {
@@ -2693,19 +2827,18 @@ export function buildBoppVegaLiteSpec(
           tooltip: [
             { field: 'time', type: 'quantitative', format: '.3f', title: 'Timestamp (s)' },
             { field: 'description', type: 'nominal', title: 'Event' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Detection Likelihood' }] : []),
           ],
         },
-      },
-    ];
+      }
+    );
 
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
 
     const onsetTitle = {
-      text: payloadType === 'marker'
-        ? `BOPP Event Markers (${markerDesc}): ${annotation.media_id}`
-        : `BOPP Percussive Transient Onsets: ${annotation.media_id}`,
+      text: `BOPP Event Markers (${markerDesc}): ${annotation.media_id}`,
       color: textColor,
     };
     const overviewLayers = [
@@ -2734,18 +2867,14 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 3. NOTE, NOTE_MIDI, FREQUENCY_HZ & NOTE_HZ (Piano Roll)
+  // 3. NOTE & NOTE_MIDI (Piano Roll)
   // Unit height note bars centered on the MIDI pitch number with opaque boxes!
   // Axis is strictly NUMERICAL (quantitative), never categorical, reflecting true
   // semitone spacing from note names to MIDI numbers (and thus to log frequency).
   // Colors matched to mir_eval palette by pitch class (C=0 .. B=11).
   // Supports dimming unvoiced frequencies using the voiced flag vector.
   // =========================================================================
-  if (
-    payloadType === 'note_midi' ||
-    payloadType === 'note' ||
-    (payloadType as string) === 'piano_roll'
-  ) {
+  if (payloadType === 'note_midi' || payloadType === 'note') {
     const { isMidi, isScore, xField: rawXField, xTitle } = resolveExtentAxis(extentType, data, {
       scoreTitle: 'Musical Quarter Notes',
     });
@@ -2758,8 +2887,8 @@ export function buildBoppVegaLiteSpec(
     // Normalize each record so that datum.value is strictly a numerical MIDI note number
     // Even if the input provided string note names ("C3", "D3", "E3") or frequencies in Hz
     const enrichedNoteData = data.map(d => {
-      let numericMidi = typeof d.value === 'number' && payloadType !== 'note_hz' && payloadType !== 'frequency_hz' ? d.value : null;
-      let hzVal = typeof d.hz === 'number' ? d.hz : (typeof d.value === 'number' && (payloadType === 'note_hz' || payloadType === 'frequency_hz') ? d.value : null);
+      let numericMidi = typeof d.value === 'number' ? d.value : null;
+      let hzVal = typeof d.hz === 'number' ? d.hz : null;
       let noteName = d.note_name ? String(d.note_name) : null;
 
       // If string note name provided (e.g. "C3", "D3", "E3", "C♯4", "E♭3")
@@ -2862,7 +2991,7 @@ export function buildBoppVegaLiteSpec(
           y: {
             field: 'y_min',
             type: 'quantitative',
-            title: payloadType === 'note_hz' ? 'Pitch (Note / Log Hz)' : 'Pitch / Note',
+            title: 'Pitch / Note',
             scale: {
               domain: [minPitch - 1.5, maxPitch + 1.5],
               zero: false,
@@ -2908,17 +3037,42 @@ export function buildBoppVegaLiteSpec(
             { field: 'note_name', type: 'nominal', title: 'Note' },
             { field: 'pitch_class_name', type: 'nominal', title: 'Pitch Class' },
             { field: 'value', type: 'quantitative', format: '.1f', title: 'MIDI Pitch' },
-            ...(payloadType === 'frequency_hz' || payloadType === 'note_hz' || enrichedNoteData.some(d => d.hz != null)
+            ...(enrichedNoteData.some(d => d.hz != null)
               ? [{ field: 'hz', type: 'quantitative', format: '.1f', title: 'Frequency (Hz)' }]
               : []),
             ...(hasVoiced ? [{ field: 'voiced', type: 'nominal', title: 'Voiced' }] : []),
             { field: xField, type: 'quantitative', format: isScore ? '.2f' : isMidi ? 'd' : '.2f', title: 'Start' },
             { field: 'duration', type: 'quantitative', format: isScore ? '.2f' : isMidi ? 'd' : '.2f', title: 'Duration' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.3f', title: 'Confidence' }] : []),
           ],
         },
       },
     ];
+
+    if (activeGrouping) {
+      layers.push({
+        transform: [{ filter: 'datum._group_id >= 0' }],
+        mark: {
+          type: 'rect',
+          cornerRadius: 2,
+          fillOpacity: 0,
+          strokeWidth: 2.5,
+        },
+        encoding: {
+          x: { field: xField, type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: 'y_min', type: 'quantitative' },
+          y2: { field: 'y_max' },
+          stroke: {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping.name,
+            scale: groupColorScale,
+          },
+        },
+      });
+    }
 
     // Overlay confidence meter along the top edge of each piano note
     if (hasConfidence && confidenceChannel === 'meter') {
@@ -2956,10 +3110,9 @@ export function buildBoppVegaLiteSpec(
     }
 
     const cursor = makeCursorLayer(xField);
+    if (cursor) layers.push(cursor);
     const pianoTitle = {
-      text: payloadType === 'frequency_hz' || payloadType === 'note_hz'
-        ? `BOPP Frequency (Hz / Log Pitch) Piano Roll: ${annotation.media_id}`
-        : payloadType === 'note'
+      text: payloadType === 'note'
         ? `BOPP Scientific Pitch Notation Piano Roll: ${annotation.media_id}`
         : `BOPP MIDI Piano Roll: ${annotation.media_id}`,
       subtitle: 'Numerical Pitch Axis (Semitone Spacing / Log Frequency)',
@@ -3005,50 +3158,111 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 4. TIME_INTERVAL + TAG / LYRICS / MULTI_SEGMENT / SEGMENT_OPEN (Interval Spans)
+  // 4. TIME_INTERVAL + TAG / LYRICS (Interval Spans & Multi-Level Hierarchy)
   // =========================================================================
-  if (
-    extentType === 'time_interval' &&
-    (payloadType === 'multi_segment' ||
-      payloadType === 'segment_open' ||
-      payloadType === 'tag_open' ||
-      payloadType === 'tag' ||
-      payloadType === 'lyrics')
-  ) {
-    const isMulti = payloadType === 'multi_segment';
-    const intervalAnalysis = analyzeIntervalAnnotation(annotation, data);
-    const useSingleRow = Boolean(!forceMultiRow && !isMulti && intervalAnalysis.shouldUseSingleRow);
+  if (extentType === 'time_interval' && (payloadType === 'tag' || payloadType === 'lyrics')) {
+    const isGroupDisjoint = Boolean(activeGrouping && activeGrouping.disjoint);
+    const isGroupedNonDisjointTags = Boolean(activeGrouping && !activeGrouping.disjoint && payloadType === 'tag');
+    const useSingleRow = Boolean(!isGroupDisjoint && !isGroupedNonDisjointTags && extentTopology.disjoint);
 
-    if (useSingleRow) {
-      transforms.push({
-        calculate: `'${intervalAnalysis.singleRowLabel}'`,
-        as: '_single_row',
-      });
-    }
-
-    const yField = isMulti ? 'level' : useSingleRow ? '_single_row' : 'value';
-    const yType = isMulti ? 'ordinal' : 'nominal';
-    const yTitle = isMulti
-      ? 'Structural Level'
-      : useSingleRow
-      ? intervalAnalysis.singleRowLabel
-      : payloadType === 'tag_open' || payloadType === 'tag'
-      ? 'Tags / Labels'
-      : payloadType === 'lyrics'
-      ? 'Lyrics'
-      : 'Section';
-    const colorField = isMulti ? 'label' : 'value';
-    const uniqueLabels = Array.from(new Set(data.map(d => String(d[colorField] ?? d.value ?? '')))).filter(Boolean);
+    const colorField = 'value';
+    const uniqueLabels = Array.from(new Set(data.map(d => String(d.value ?? '')))).filter(Boolean);
     const colorScale = resolveColorScale(colorScheme, payloadType, uniqueLabels);
-
-    const levels = isMulti
-      ? Array.from(new Set(data.map(d => Number(d.level)).filter(l => !isNaN(l)))).sort((a, b) => a - b)
-      : [];
 
     transforms.push({
       calculate: 'datum.time + (datum.duration != null ? datum.duration : 0)',
       as: '_calc_end',
     });
+
+    if (isGroupedNonDisjointTags && activeGrouping) {
+      // Ordered vertical subplots (vconcat) per group ID!
+      const subplotSpecs = activeGrouping.orderedGroupLabels.map((grpLabel, gIdx) => {
+        const groupRows = data.filter(d => d._group_label === grpLabel);
+        const groupUniqueLabels = Array.from(new Set(groupRows.map(d => String(d.value ?? '')))).filter(Boolean);
+        const subHeight = Math.max(54, groupUniqueLabels.length * 28 + 16);
+        const isLast = gIdx === activeGrouping.orderedGroupLabels.length - 1;
+        const subLayers: Record<string, unknown>[] = [
+          {
+            mark: {
+              type: 'rect',
+              stroke: isDark ? '#ffffff' : '#0f172a',
+              strokeWidth: 1.5,
+              cornerRadius: 4,
+            },
+            encoding: {
+              x: {
+                field: 'time',
+                type: 'quantitative',
+                title: isLast ? 'Time (seconds)' : null,
+                scale: { domain: [minX, maxX] },
+                axis: isLast ? {} : { labels: false, ticks: false },
+              },
+              x2: { field: '_calc_end' },
+              y: {
+                field: 'value',
+                type: 'nominal',
+                title: grpLabel,
+                scale: { domain: groupUniqueLabels },
+                axis: { labelFontWeight: 'bold', labelPadding: 8, titlePadding: 14, minExtent: 75 },
+              },
+              color: { field: 'value', type: 'nominal', title: 'Tag / Segment', scale: colorScale },
+              opacity: hasConfidence && confidenceChannel === 'opacity'
+                ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
+                : { value: 1.0 },
+              tooltip: [
+                { field: 'value', type: 'nominal', title: 'Tag' },
+                ...groupTooltipFields,
+                { field: 'time', type: 'quantitative', format: '.2f', title: 'Start (s)' },
+                { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
+                ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+              ],
+            },
+          },
+        ];
+
+        const cursor = makeCursorLayer('time');
+        if (cursor) subLayers.push(cursor);
+
+        return {
+          width: chartWidth,
+          height: subHeight,
+          transform: [{ filter: `datum._group_label === ${JSON.stringify(grpLabel)}` }],
+          layer: subLayers,
+        };
+      });
+
+      return {
+        $schema: VEGA_LITE_SCHEMA,
+        title: {
+          text: `BOPP Grouped Interval Tags (${activeGrouping.name}): ${annotation.media_id}`,
+          color: textColor,
+        },
+        data: { values: data },
+        transform: transforms,
+        config: baseConfig,
+        vconcat: subplotSpecs,
+        resolve: { scale: { y: 'independent', x: 'shared', color: 'shared' } },
+      };
+    }
+
+    const singleRowLabel = payloadType === 'lyrics' ? 'Lyrics' : 'Segments';
+    if (useSingleRow) {
+      transforms.push({
+        calculate: `'${singleRowLabel}'`,
+        as: '_single_row',
+      });
+    }
+
+    const yField = isGroupDisjoint ? '_group_label' : useSingleRow ? '_single_row' : 'value';
+    const yType = 'nominal';
+    const yTitle = isGroupDisjoint
+      ? activeGrouping!.name
+      : useSingleRow
+      ? singleRowLabel
+      : payloadType === 'lyrics'
+      ? 'Lyrics'
+      : 'Tags / Labels';
+    const rowDomain = isGroupDisjoint ? activeGrouping!.orderedGroupLabels : uniqueLabels;
 
     const layers: Record<string, unknown>[] = [
       {
@@ -3066,20 +3280,21 @@ export function buildBoppVegaLiteSpec(
             field: yField,
             type: yType,
             title: yTitle,
-            scale: isMulti ? { domain: levels } : !useSingleRow ? { domain: uniqueLabels } : undefined,
+            ...(isGroupDisjoint ? { sort: rowDomain } : {}),
+            scale: !useSingleRow ? { domain: rowDomain } : undefined,
             axis: {
               ...(useSingleRow ? { labels: false, ticks: false } : { labelFontWeight: 'bold', labelPadding: 8 }),
               titlePadding: 14,
               minExtent: 75,
             },
           },
-          color: { field: colorField, type: 'nominal', title: payloadType === 'tag_open' ? 'Tag' : 'Segment', scale: colorScale },
+          color: { field: colorField, type: 'nominal', title: payloadType === 'lyrics' ? 'Lyric' : 'Segment / Tag', scale: colorScale },
           opacity: hasConfidence && confidenceChannel === 'opacity'
             ? { field: 'confidence', type: 'quantitative', scale: { domain: [0, 1], range: [0.35, 1.0] } }
             : { value: 1.0 },
           tooltip: [
-            { field: colorField, type: 'nominal', title: payloadType === 'tag_open' ? 'Tag' : 'Section' },
-            ...(payloadType === 'multi_segment' ? [{ field: 'level', type: 'quantitative', title: 'Level' }] : []),
+            { field: colorField, type: 'nominal', title: payloadType === 'lyrics' ? 'Lyric' : 'Section / Tag' },
+            ...groupTooltipFields,
             { field: 'time', type: 'quantitative', format: '.2f', title: 'Start (s)' },
             { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
             ...(hasConfidence ? [
@@ -3110,7 +3325,7 @@ export function buildBoppVegaLiteSpec(
         },
         encoding: {
           x: { field: '_label_midpoint', type: 'quantitative' },
-          y: { field: yField, type: yType, scale: isMulti ? { domain: levels } : !useSingleRow ? { domain: uniqueLabels } : undefined },
+          y: { field: yField, type: yType, ...(isGroupDisjoint ? { sort: rowDomain } : {}), scale: !useSingleRow ? { domain: rowDomain } : undefined },
           text: {
             condition: {
               test: "((scale('concat_0_x', datum._calc_end) != null ? scale('concat_0_x', datum._calc_end) : scale('x', datum._calc_end)) - (scale('concat_0_x', datum.time) != null ? scale('concat_0_x', datum.time) : scale('x', datum.time))) <= 12",
@@ -3154,7 +3369,7 @@ export function buildBoppVegaLiteSpec(
           encoding: {
             x: { field: 'time', type: 'quantitative' },
             x2: { field: '_calc_end' },
-            y: { field: yField, type: yType, scale: isMulti ? { domain: levels } : { domain: uniqueLabels } },
+            y: { field: yField, type: yType, ...(isGroupDisjoint ? { sort: rowDomain } : {}), scale: { domain: rowDomain } },
             yOffset: { value: 2.5 },
           },
         },
@@ -3174,7 +3389,7 @@ export function buildBoppVegaLiteSpec(
           encoding: {
             x: { field: 'time', type: 'quantitative' },
             x2: { field: '_seg_conf_end' },
-            y: { field: yField, type: yType, scale: isMulti ? { domain: levels } : { domain: uniqueLabels } },
+            y: { field: yField, type: yType, ...(isGroupDisjoint ? { sort: rowDomain } : {}), scale: { domain: rowDomain } },
             yOffset: { value: 2.5 },
             color: {
               field: 'confidence',
@@ -3195,18 +3410,21 @@ export function buildBoppVegaLiteSpec(
     const cursor = makeCursorLayer('time');
     if (cursor) layers.push(cursor);
 
-    const segTitle = { text: `BOPP Structural Analysis: ${annotation.media_id}`, color: textColor };
+    const segTitle = {
+      text: isGroupDisjoint
+        ? `BOPP Hierarchical Segmentation (${activeGrouping!.name}): ${annotation.media_id}`
+        : `BOPP Structural Analysis: ${annotation.media_id}`,
+      color: textColor,
+    };
     const segOverviewLayers = [
       {
         mark: { type: useSingleRow ? 'rect' : 'bar', opacity: 0.85, cornerRadius: 2 },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: isMulti
-            ? { field: 'level', type: 'ordinal', scale: { domain: levels }, axis: null }
-            : useSingleRow
+          y: useSingleRow
             ? { value: 2 }
-            : { field: 'value', type: 'nominal', scale: { domain: uniqueLabels }, axis: null },
+            : { field: yField, type: 'nominal', ...(isGroupDisjoint ? { sort: rowDomain } : {}), scale: { domain: rowDomain }, axis: null },
           ...(useSingleRow ? { y2: { value: 50 } } : {}),
           color: { field: colorField, type: 'nominal', scale: colorScale, legend: null },
         },
@@ -3237,33 +3455,52 @@ export function buildBoppVegaLiteSpec(
       as: '_calc_end',
     });
 
-    // Harmonize scale domains with standard 0..8000 Hz spectrogram audio analysis
-    const tfMaxTime = Math.max(12.0, Math.ceil(maxX + 0.5));
-    const tfMaxFreq = 8000;
+    const freqMins = data.map(d => Number(d.freq_min)).filter(v => !isNaN(v));
+    const freqMaxs = data.map(d => Number(d.freq_max)).filter(v => !isNaN(v));
+    const obsMinFreq = freqMins.length ? Math.min(0, ...freqMins) : 0;
+    const obsMaxFreq = freqMaxs.length ? Math.max(8000, ...freqMaxs) : 8000;
+
+    const [tfMinTime, tfMaxTime] = resolveDomainRange(
+      minX,
+      Math.max(12.0, Math.ceil(maxX + 0.5)),
+      extentTopology.min_time,
+      extentTopology.max_time,
+      0,
+      12.0
+    );
+    const [tfMinFreq, tfMaxFreq] = resolveDomainRange(
+      obsMinFreq,
+      obsMaxFreq,
+      extentTopology.min_freq,
+      extentTopology.max_freq,
+      0,
+      8000
+    );
 
     const layers: Record<string, unknown>[] = [
       {
         mark: {
           type: 'rect',
-          fillOpacity: isDark ? 0.45 : 0.4,
+          fillOpacity: extentTopology.disjoint ? (isDark ? 0.65 : 0.6) : (isDark ? 0.42 : 0.35),
           strokeWidth: 2,
           cornerRadius: 2,
         },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
-          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [0, tfMaxTime] } },
+          x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [tfMinTime, tfMaxTime] } },
           x2: { field: '_calc_end' },
           y: {
             field: 'freq_min',
             type: 'quantitative',
             title: 'Frequency (Hz)',
-            scale: { domain: [0, tfMaxFreq], zero: true },
+            scale: { domain: [tfMinFreq, tfMaxFreq], zero: tfMinFreq === 0 },
           },
           y2: { field: 'freq_max' },
           color: { field: 'value', type: 'nominal', title: 'Event / Sound Class', scale: colorScale },
           stroke: { field: 'value', type: 'nominal', scale: colorScale },
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Class' },
+            ...groupTooltipFields,
             { field: 'time', type: 'quantitative', format: '.3f', title: 'Start Time (s)' },
             { field: 'duration', type: 'quantitative', format: '.3f', title: 'Duration (s)' },
             { field: 'freq_min', type: 'quantitative', format: '.1f', title: 'Freq Min (Hz)' },
@@ -3273,6 +3510,31 @@ export function buildBoppVegaLiteSpec(
         },
       },
     ];
+
+    if (activeGrouping) {
+      layers.push({
+        transform: [{ filter: 'datum._group_id >= 0' }],
+        mark: {
+          type: 'rect',
+          fillOpacity: 0,
+          strokeWidth: 3.5,
+          strokeDash: [5, 2],
+          cornerRadius: 2,
+        },
+        encoding: {
+          x: { field: 'time', type: 'quantitative' },
+          x2: { field: '_calc_end' },
+          y: { field: 'freq_min', type: 'quantitative' },
+          y2: { field: 'freq_max' },
+          stroke: {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping.name,
+            scale: groupColorScale,
+          },
+        },
+      });
+    }
 
     // Top-edge confidence meter overlay for bounding boxes
     if (hasConfidence && confidenceChannel === 'meter') {
@@ -3314,7 +3576,7 @@ export function buildBoppVegaLiteSpec(
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           x2: { field: '_calc_end' },
-          y: { field: 'freq_min', type: 'quantitative', scale: { domain: [0, tfMaxFreq], zero: true }, axis: null },
+          y: { field: 'freq_min', type: 'quantitative', scale: { domain: [tfMinFreq, tfMaxFreq], zero: tfMinFreq === 0 }, axis: null },
           y2: { field: 'freq_max' },
           color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
         },
@@ -3328,7 +3590,7 @@ export function buildBoppVegaLiteSpec(
       overviewLayers: tfOverviewLayers,
       xField: 'time',
       xTitle: 'Time (seconds)',
-      minXVal: 0,
+      minXVal: tfMinTime,
       maxXVal: tfMaxTime,
       plotTitle: tfTitle,
       detailPlotHeight: chartHeight - 74,
@@ -3340,6 +3602,31 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'pixel_box') {
     const colorScale = resolveColorScale(colorScheme, payloadType);
+    const xVals = data.map(d => Number(d.x)).filter(v => !isNaN(v));
+    const xEnds = data.map(d => (Number(d.x) || 0) + (Number(d.width) || 0)).filter(v => !isNaN(v));
+    const yVals = data.map(d => Number(d.y)).filter(v => !isNaN(v));
+    const yEnds = data.map(d => (Number(d.y) || 0) + (Number(d.height) || 0)).filter(v => !isNaN(v));
+    const [minPxX, maxPxX] = resolveDomainRange(
+      xVals.length ? Math.min(0, ...xVals) : 0,
+      xEnds.length ? Math.max(100, ...xEnds) : 100,
+      extentTopology.min_x,
+      extentTopology.max_x,
+      0,
+      100
+    );
+    const [minPxY, maxPxY] = resolveDomainRange(
+      yVals.length ? Math.min(0, ...yVals) : 0,
+      yEnds.length ? Math.max(100, ...yEnds) : 100,
+      extentTopology.min_y,
+      extentTopology.max_y,
+      0,
+      100
+    );
+    const pxXDomain = extentTopology.min_x !== undefined || extentTopology.max_x !== undefined ? { domain: [minPxX, maxPxX] } : undefined;
+    const pxYScale = extentTopology.min_y !== undefined || extentTopology.max_y !== undefined
+      ? { reverse: true, domain: [minPxY, maxPxY] }
+      : { reverse: true };
+
     const boxLayers: Record<string, unknown>[] = [
       {
         transform: [
@@ -3350,15 +3637,17 @@ export function buildBoppVegaLiteSpec(
           type: 'rect',
           fillOpacity: hasConfidence && confidenceChannel === 'opacity'
             ? undefined
-            : isDark ? 0.35 : 0.25,
+            : extentTopology.disjoint
+            ? (isDark ? 0.5 : 0.4)
+            : (isDark ? 0.32 : 0.22),
           strokeWidth: 2,
         },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
         encoding: {
-          x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
+          x: { field: 'x', type: 'quantitative', title: 'X (pixels)', ...(pxXDomain ? { scale: pxXDomain } : {}) },
           x2: { field: 'x2' },
           // Invert Y axis for image coordinates standard (top-left 0,0)
-          y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
+          y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: pxYScale },
           y2: { field: 'y2' },
           color: { field: 'value', type: 'nominal', title: 'Object Class', scale: colorScale },
           stroke: { field: 'value', type: 'nominal', scale: colorScale },
@@ -3367,6 +3656,7 @@ export function buildBoppVegaLiteSpec(
           } : {}),
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Object' },
+            ...groupTooltipFields,
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
             { field: 'x', type: 'quantitative', title: 'X' },
             { field: 'y', type: 'quantitative', title: 'Y' },
@@ -3376,6 +3666,34 @@ export function buildBoppVegaLiteSpec(
         },
       },
     ];
+
+    if (activeGrouping) {
+      boxLayers.push({
+        transform: [
+          { filter: 'datum._group_id >= 0' },
+          { calculate: 'datum.x + datum.width', as: 'x2' },
+          { calculate: 'datum.y + datum.height', as: 'y2' },
+        ],
+        mark: {
+          type: 'rect',
+          fillOpacity: 0,
+          strokeWidth: 3.5,
+          strokeDash: [5, 2],
+        },
+        encoding: {
+          x: { field: 'x', type: 'quantitative' },
+          x2: { field: 'x2' },
+          y: { field: 'y', type: 'quantitative', scale: pxYScale },
+          y2: { field: 'y2' },
+          stroke: {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping.name,
+            scale: groupColorScale,
+          },
+        },
+      });
+    }
 
     // Top-edge confidence meter for pixel bounding boxes
     if (hasConfidence && confidenceChannel !== 'none') {
@@ -3391,7 +3709,7 @@ export function buildBoppVegaLiteSpec(
             { calculate: 'datum.x + datum.width', as: 'x2' },
             { calculate: 'datum.y + max(4, min(10, datum.height * 0.15))', as: '_pixel_meter_bottom' },
           ],
-          yEncoding: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+          yEncoding: { field: 'y', type: 'quantitative', scale: pxYScale },
           y2Encoding: { field: '_pixel_meter_bottom' },
         })
       );
@@ -3402,7 +3720,7 @@ export function buildBoppVegaLiteSpec(
         ...buildBoundingBoxCornerLabelLayers({
           xField: 'x',
           yField: 'y',
-          yScale: { reverse: true },
+          yScale: pxYScale,
           labelField: '_box_label',
           hasConfidence,
         })
@@ -3426,9 +3744,11 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'pixel') {
     const colorScale = resolveColorScale(colorScheme, payloadType);
-    const pixelLayers: Record<string, unknown>[] = [
-      // Optional faint connecting trajectory line if sequential
-      {
+    const canConnectLine = extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint);
+    const pixelLayers: Record<string, unknown>[] = [];
+
+    if (canConnectLine) {
+      pixelLayers.push({
         mark: {
           type: 'line',
           strokeDash: [4, 4],
@@ -3440,31 +3760,51 @@ export function buildBoppVegaLiteSpec(
           x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
           y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
           order: { field: '__index', type: 'quantitative' },
+          ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
         },
+      });
+    }
+
+    // 2D Pixel point markers
+    pixelLayers.push({
+      mark: {
+        type: 'circle',
+        size: 110,
+        stroke: isDark ? '#ffffff' : '#0f172a',
+        strokeWidth: 1.5,
+        opacity: 0.9,
       },
-      // 2D Pixel point markers
-      {
-        mark: {
-          type: 'circle',
-          size: 110,
-          stroke: isDark ? '#ffffff' : '#0f172a',
-          strokeWidth: 1.5,
-          opacity: 0.9,
-        },
-        ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+      ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
+      encoding: {
+        x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
+        y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
+        color: { field: 'value', type: 'nominal', title: 'Label / Class', scale: colorScale },
+        tooltip: [
+          { field: 'value', type: 'nominal', title: 'Observation' },
+          ...groupTooltipFields,
+          { field: 'x', type: 'quantitative', title: 'X' },
+          { field: 'y', type: 'quantitative', title: 'Y' },
+          ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
+        ],
+      },
+    });
+
+    if (activeGrouping) {
+      pixelLayers.push({
+        transform: [{ filter: 'datum._group_id >= 0' }],
+        mark: { type: 'point', filled: false, size: 170, strokeWidth: 2.5 },
         encoding: {
-          x: { field: 'x', type: 'quantitative', title: 'X (pixels)' },
-          y: { field: 'y', type: 'quantitative', title: 'Y (pixels)', scale: { reverse: true } },
-          color: { field: 'value', type: 'nominal', title: 'Label / Class', scale: colorScale },
-          tooltip: [
-            { field: 'value', type: 'nominal', title: 'Observation' },
-            { field: 'x', type: 'quantitative', title: 'X' },
-            { field: 'y', type: 'quantitative', title: 'Y' },
-            ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
-          ],
+          x: { field: 'x', type: 'quantitative' },
+          y: { field: 'y', type: 'quantitative', scale: { reverse: true } },
+          stroke: {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping.name,
+            scale: groupColorScale,
+          },
         },
-      },
-    ];
+      });
+    }
 
     if (showLabels) {
       pixelLayers.push({
@@ -3506,17 +3846,46 @@ export function buildBoppVegaLiteSpec(
     const colorScale = resolveColorScale(colorScheme, payloadType);
     const textTransforms = [...transforms];
 
-    const maxOffset = Math.max(
+    const obsMaxOffset = Math.max(
       ...data.map(d => Number(d._offset_end) || (Number(d.offset) || 0) + (Number(d.length) || 1)),
       10
+    );
+    const [minOff, maxOffset] = resolveDomainRange(
+      0,
+      obsMaxOffset + 2,
+      extentTopology.min_offset,
+      extentTopology.max_offset,
+      0,
+      12
     );
 
     const textLayers: Record<string, unknown>[] = [];
 
     if (isInterval) {
+      const isGroupDisjoint = Boolean(activeGrouping && activeGrouping.disjoint);
+      const useSingleRow = Boolean(!isGroupDisjoint && extentTopology.disjoint);
       const maxLane = Math.max(...data.map(d => Number(d._lane) || 0), 0);
-      const numLanes = maxLane + 1;
+      const numLanes = isGroupDisjoint ? activeGrouping!.orderedGroupLabels.length : useSingleRow ? 1 : maxLane + 1;
       const textPlotHeight = Math.max(160, numLanes * 50 + 80);
+
+      if (useSingleRow) {
+        textTransforms.push({ calculate: "'Text Spans'", as: '_single_text_row' });
+      }
+      const yField = isGroupDisjoint ? '_group_label' : useSingleRow ? '_single_text_row' : '_lane';
+      const yEncoding = isGroupDisjoint
+        ? {
+            field: '_group_label',
+            type: 'nominal',
+            title: activeGrouping!.name,
+            sort: activeGrouping!.orderedGroupLabels,
+            scale: { domain: activeGrouping!.orderedGroupLabels },
+          }
+        : {
+            field: yField,
+            type: 'ordinal',
+            title: null,
+            axis: null,
+          };
 
       // Horizontal interval span pill
       textLayers.push({
@@ -3533,18 +3902,14 @@ export function buildBoppVegaLiteSpec(
             field: 'offset',
             type: 'quantitative',
             title: 'Document Character Offset',
-            scale: { domain: [0, maxOffset + 2], zero: true },
+            scale: { domain: [minOff, maxOffset], zero: minOff === 0 },
           },
           x2: { field: '_offset_end' },
-          y: {
-            field: '_lane',
-            type: 'ordinal',
-            title: null,
-            axis: null,
-          },
+          y: yEncoding,
           color: { field: 'value', type: 'nominal', title: 'Category', scale: colorScale },
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Text Span' },
+            ...groupTooltipFields,
             { field: 'offset', type: 'quantitative', title: 'Start Offset' },
             { field: '_offset_end', type: 'quantitative', title: 'End Offset' },
             { field: 'length', type: 'quantitative', title: 'Length (chars)' },
@@ -3565,7 +3930,7 @@ export function buildBoppVegaLiteSpec(
         },
         encoding: {
           x: { field: '_mid_offset', type: 'quantitative' },
-          y: { field: '_lane', type: 'ordinal', title: null, axis: null },
+          y: yEncoding,
           text: { field: 'value', type: 'nominal' },
         },
       });
@@ -3596,12 +3961,13 @@ export function buildBoppVegaLiteSpec(
               field: 'offset',
               type: 'quantitative',
               title: 'Document Character Offset',
-              scale: { domain: [0, maxOffset + 2], zero: true },
+              scale: { domain: [minOff, maxOffset], zero: minOff === 0 },
             },
             y: { datum: 15 },
             y2: { datum: 65 },
             tooltip: [
               { field: 'value', type: 'nominal', title: 'Token Label' },
+              ...groupTooltipFields,
               { field: 'offset', type: 'quantitative', title: 'Char Offset' },
               ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' }] : []),
             ],
@@ -3658,12 +4024,14 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'spherical' || extentType === 'spherical_time' || extentType === 'spherical_time_interval') {
     const isTemporal = extentType === 'spherical_time' || extentType === 'spherical_time_interval';
+    const canConnectLine = extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint);
     const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
     const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 340;
     const panelWidth = Math.max(300, Math.floor((totalWidth - 60) / 2));
     const panelHeight = Math.max(300, totalHeight - 40);
 
-    const maxR = Math.max(...data.map(d => Number(d.radius) || 1), 1);
+    const obsMaxR = Math.max(...data.map(d => Number(d.radius) || 1), 1);
+    const [, maxR] = resolveDomainRange(0, obsMaxR, extentTopology.min_radius, extentTopology.max_radius, 0, 1);
     const rLimit = +(maxR * 1.2).toFixed(2);
     const rStep = +(rLimit / 3).toFixed(2);
     const ringRadii = [rStep, +(rStep * 2).toFixed(2), rLimit];
@@ -3725,10 +4093,16 @@ export function buildBoppVegaLiteSpec(
     const sharedPointEncoding = {
       size: hoverConditions(220, 85),
       opacity: hoverConditions(1.0, 0.8),
-      stroke: { value: isDark ? '#ffffff' : '#0f172a' },
-      strokeWidth: hoverConditions(2.5, 1.2),
+      stroke: activeGrouping
+        ? {
+            condition: { test: 'datum._group_id >= 0', field: '_group_label', type: 'nominal', title: activeGrouping.name, scale: groupColorScale },
+            value: isDark ? '#ffffff' : '#0f172a',
+          }
+        : { value: isDark ? '#ffffff' : '#0f172a' },
+      strokeWidth: hoverConditions(3.0, activeGrouping ? 2.2 : 1.2),
       tooltip: [
         { field: 'value', type: 'nominal', title: 'Observation' },
+        ...groupTooltipFields,
         { field: 'azimuth', type: 'quantitative', format: '.1f', title: 'Azimuth θ (°)' },
         { field: 'elevation', type: 'quantitative', format: '.1f', title: 'Elevation φ (°)' },
         { field: 'radius', type: 'quantitative', format: '.2f', title: 'Radius r (meters)' },
@@ -3785,15 +4159,20 @@ export function buildBoppVegaLiteSpec(
             text: { field: 'text', type: 'nominal' },
           },
         },
-        // Sound source trajectory path in polar space
-        {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.6, stroke: isDark ? '#38bdf8' : '#0284c7' },
-          encoding: {
-            x: { field: '_x_polar', type: 'quantitative' },
-            y: { field: '_y_polar', type: 'quantitative' },
-            order: { field: '__index', type: 'quantitative' },
-          },
-        },
+        // Sound source trajectory path in polar space (only when disjoint / per-group disjoint)
+        ...(canConnectLine
+          ? [
+              {
+                mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.6, stroke: isDark ? '#38bdf8' : '#0284c7' },
+                encoding: {
+                  x: { field: '_x_polar', type: 'quantitative' },
+                  y: { field: '_y_polar', type: 'quantitative' },
+                  order: { field: '__index', type: 'quantitative' },
+                  ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                },
+              },
+            ]
+          : []),
         // Observation points colored by Elevation φ (Altitude)
         {
           params: [
@@ -3829,22 +4208,27 @@ export function buildBoppVegaLiteSpec(
             encoding: { y: { datum: 0 } },
           },
           // Multi-line trajectory for Azimuth and Elevation
-          {
-            transform: [
-              { fold: ['azimuth', 'elevation'], as: ['angle_type', 'angle_deg'] },
-            ],
-            mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
-            encoding: {
-              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-              y: { field: 'angle_deg', type: 'quantitative', title: 'Angle (degrees [°])', scale: { domain: [-185, 185] } },
-              color: {
-                field: 'angle_type',
-                type: 'nominal',
-                title: 'Direction',
-                scale: { domain: ['azimuth', 'elevation'], range: ['#38bdf8', '#f59e0b'] },
-              },
-            },
-          },
+          ...(canConnectLine
+            ? [
+                {
+                  transform: [
+                    { fold: ['azimuth', 'elevation'], as: ['angle_type', 'angle_deg'] },
+                  ],
+                  mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
+                  encoding: {
+                    x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+                    y: { field: 'angle_deg', type: 'quantitative', title: 'Angle (degrees [°])', scale: { domain: [-185, 185] } },
+                    color: {
+                      field: 'angle_type',
+                      type: 'nominal',
+                      title: 'Direction',
+                      scale: { domain: ['azimuth', 'elevation'], range: ['#38bdf8', '#f59e0b'] },
+                    },
+                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                  },
+                },
+              ]
+            : []),
           // Linked observation points
           {
             params: [
@@ -3852,8 +4236,8 @@ export function buildBoppVegaLiteSpec(
             ],
             mark: { type: 'circle' },
             encoding: {
-              x: { field: 'time', type: 'quantitative' },
-              y: { field: 'azimuth', type: 'quantitative' },
+              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+              y: { field: 'azimuth', type: 'quantitative', title: 'Angle (degrees [°])', scale: { domain: [-185, 185] } },
               color: { value: '#38bdf8' },
               ...sharedPointEncoding,
             },
@@ -3870,14 +4254,19 @@ export function buildBoppVegaLiteSpec(
             mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.45 },
             encoding: { y: { datum: 0 } },
           },
-          {
-            mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
-            encoding: {
-              x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ (degrees [-180°, +180°))', scale: { domain: [-180, 180] } },
-              y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ (degrees [-90°, +90°])', scale: { domain: [-90, 90] } },
-              order: { field: '__index', type: 'quantitative' },
-            },
-          },
+          ...(canConnectLine
+            ? [
+                {
+                  mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
+                  encoding: {
+                    x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ (degrees [-180°, +180°))', scale: { domain: [-180, 180] } },
+                    y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ (degrees [-90°, +90°])', scale: { domain: [-90, 90] } },
+                    order: { field: '__index', type: 'quantitative' },
+                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                  },
+                },
+              ]
+            : []),
           {
             params: [
               { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
@@ -3909,6 +4298,7 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (extentType === 'cartesian' || extentType === 'cartesian_time' || extentType === 'cartesian_time_interval') {
     const isTemporal = extentType === 'cartesian_time' || extentType === 'cartesian_time_interval';
+    const canConnectLine = extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint);
     const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
     const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 340;
     const panelWidth = Math.max(300, Math.floor((totalWidth - 60) / 2));
@@ -3925,10 +4315,16 @@ export function buildBoppVegaLiteSpec(
     const sharedPointEncoding = {
       size: hoverConditions(220, 85),
       opacity: hoverConditions(1.0, 0.8),
-      stroke: { value: isDark ? '#ffffff' : '#0f172a' },
-      strokeWidth: hoverConditions(2.5, 1.2),
+      stroke: activeGrouping
+        ? {
+            condition: { test: 'datum._group_id >= 0', field: '_group_label', type: 'nominal', title: activeGrouping.name, scale: groupColorScale },
+            value: isDark ? '#ffffff' : '#0f172a',
+          }
+        : { value: isDark ? '#ffffff' : '#0f172a' },
+      strokeWidth: hoverConditions(3.0, activeGrouping ? 2.2 : 1.2),
       tooltip: [
         { field: 'value', type: 'nominal', title: 'Observation' },
+        ...groupTooltipFields,
         { field: 'x', type: 'quantitative', format: '.2f', title: 'Lateral Position X (m)' },
         { field: 'y', type: 'quantitative', format: '.2f', title: 'Forward Position Y (m)' },
         { field: 'z', type: 'quantitative', format: '.2f', title: 'Vertical Height Z (m)' },
@@ -3943,14 +4339,19 @@ export function buildBoppVegaLiteSpec(
       width: panelWidth,
       height: panelHeight,
       layer: [
-        {
-          mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.5, stroke: isDark ? '#94a3b8' : '#64748b' },
-          encoding: {
-            x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
-            y: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)' },
-            order: { field: '__index', type: 'quantitative' },
-          },
-        },
+        ...(canConnectLine
+          ? [
+              {
+                mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.5, stroke: isDark ? '#94a3b8' : '#64748b' },
+                encoding: {
+                  x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+                  y: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)' },
+                  order: { field: '__index', type: 'quantitative' },
+                  ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                },
+              },
+            ]
+          : []),
         {
           params: [
             { name: 'obs_hover_cart_1', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
@@ -3978,30 +4379,35 @@ export function buildBoppVegaLiteSpec(
             mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.4 },
             encoding: { y: { datum: 0 } },
           },
-          {
-            transform: [
-              { fold: ['x', 'y', 'z'], as: ['coord', 'pos'] },
-            ],
-            mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
-            encoding: {
-              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-              y: { field: 'pos', type: 'quantitative', title: 'Position (meters)' },
-              color: {
-                field: 'coord',
-                type: 'nominal',
-                title: 'Coordinate',
-                scale: { domain: ['x', 'y', 'z'], range: ['#06b6d4', '#f59e0b', '#10b981'] },
-              },
-            },
-          },
+          ...(canConnectLine
+            ? [
+                {
+                  transform: [
+                    { fold: ['x', 'y', 'z'], as: ['coord', 'pos'] },
+                  ],
+                  mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
+                  encoding: {
+                    x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+                    y: { field: 'pos', type: 'quantitative', title: 'Position (meters)' },
+                    color: {
+                      field: 'coord',
+                      type: 'nominal',
+                      title: 'Coordinate',
+                      scale: { domain: ['x', 'y', 'z'], range: ['#06b6d4', '#f59e0b', '#10b981'] },
+                    },
+                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                  },
+                },
+              ]
+            : []),
           {
             params: [
               { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
             ],
             mark: { type: 'circle' },
             encoding: {
-              x: { field: 'time', type: 'quantitative' },
-              y: { field: 'x', type: 'quantitative' },
+              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+              y: { field: 'x', type: 'quantitative', title: 'Position (meters)' },
               color: { value: '#06b6d4' },
               ...sharedPointEncoding,
             },
@@ -4015,14 +4421,19 @@ export function buildBoppVegaLiteSpec(
         width: panelWidth,
         height: panelHeight,
         layer: [
-          {
-            mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
-            encoding: {
-              x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
-              y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
-              order: { field: '__index', type: 'quantitative' },
-            },
-          },
+          ...(canConnectLine
+            ? [
+                {
+                  mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
+                  encoding: {
+                    x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+                    y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
+                    order: { field: '__index', type: 'quantitative' },
+                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                  },
+                },
+              ]
+            : []),
           {
             params: [
               { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
@@ -4054,9 +4465,10 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (
     (extentType === 'time' || extentType === 'time_uniform' || extentType === 'time_interval') &&
-    (payloadType === 'pitch_contour' || payloadType === 'frequency_hz')
+    payloadType === 'frequency_hz'
   ) {
     const isInterval = extentType === 'time_interval';
+    const canConnectLine = !isInterval && (extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint));
     const layers: Record<string, unknown>[] = [];
     const freqValues = data.map(d => Number(d.hz ?? d.frequency ?? d.value)).filter(f => !isNaN(f) && f > 0);
     const minFreq = freqValues.length ? Math.min(...freqValues) : 100;
@@ -4080,6 +4492,30 @@ export function buildBoppVegaLiteSpec(
         as: '_calc_end',
       });
 
+      if (activeGrouping) {
+        // Outer colored casing for grouped frequency interval bars
+        layers.push({
+          transform: [{ filter: 'datum._group_id >= 0' }],
+          mark: {
+            type: 'rule',
+            strokeWidth: 8.5,
+            strokeCap: 'round',
+            opacity: 0.75,
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: 'hz', type: 'quantitative' },
+            stroke: {
+              field: '_group_label',
+              type: 'nominal',
+              title: activeGrouping.name,
+              scale: groupColorScale,
+            },
+          },
+        });
+      }
+
       // Horizontal frequency tone intervals at y = hz
       layers.push(
         {
@@ -4101,6 +4537,7 @@ export function buildBoppVegaLiteSpec(
             },
             tooltip: [
               { field: 'hz', type: 'quantitative', format: '.2f', title: 'Frequency (Hz)' },
+              ...groupTooltipFields,
               { field: 'time', type: 'quantitative', format: '.2f', title: 'Start (s)' },
               { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
               { field: 'voiced', type: 'nominal', title: 'Voiced' },
@@ -4190,21 +4627,50 @@ export function buildBoppVegaLiteSpec(
         }));
       }
 
-      // Trajectory smooth guide line in Hz
-      layers.push({
-        mark: {
-          type: 'line',
-          strokeWidth: 2.2,
-          stroke: isDark ? '#38bdf8' : '#0284c7',
-          interpolate: 'monotone',
-        },
-        encoding: {
-          x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
-          y: { field: 'hz', type: 'quantitative', title: 'Frequency (Hz)', scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false } },
-        },
-      });
+      if (canConnectLine) {
+        if (activeGrouping) {
+          // Colored outer line casing per group ID underneath the inner trajectory line!
+          layers.push({
+            transform: [{ filter: "datum._group_id >= 0 && datum.voiced !== false && datum.voiced !== 'false'" }],
+            mark: {
+              type: 'line',
+              strokeWidth: 6.5,
+              strokeCap: 'round',
+              strokeJoin: 'round',
+              opacity: 0.72,
+              interpolate: 'monotone',
+            },
+            encoding: {
+              x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
+              y: { field: 'hz', type: 'quantitative', scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false } },
+              detail: { field: '_group_id', type: 'nominal' },
+              stroke: {
+                field: '_group_label',
+                type: 'nominal',
+                title: activeGrouping.name,
+                scale: groupColorScale,
+              },
+            },
+          });
+        }
 
-      // Sample points colored by voiced state and modulated by likelihood confidence
+        // Trajectory smooth guide line in Hz
+        layers.push({
+          mark: {
+            type: 'line',
+            strokeWidth: 2.2,
+            stroke: isDark ? '#38bdf8' : '#0284c7',
+            interpolate: 'monotone',
+          },
+          encoding: {
+            x: { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX] } },
+            y: { field: 'hz', type: 'quantitative', title: 'Frequency (Hz)', scale: { domain: [Math.max(20, minFreq - freqPad), maxFreq + freqPad], zero: false } },
+            ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+          },
+        });
+      }
+
+      // Sample points colored by voiced state and modulated by likelihood confidence (with group outline stroke when activeGrouping is present)
       layers.push({
         mark: { type: 'point', filled: true },
         ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
@@ -4225,6 +4691,24 @@ export function buildBoppVegaLiteSpec(
               labelExpr: "datum.value === true || datum.value === 'true' ? 'Voiced' : 'Unvoiced'",
             },
           },
+          ...(activeGrouping
+            ? {
+                stroke: {
+                  condition: {
+                    test: 'datum._group_id >= 0',
+                    field: '_group_label',
+                    type: 'nominal',
+                    title: activeGrouping.name,
+                    scale: groupColorScale,
+                  },
+                  value: 'transparent',
+                },
+                strokeWidth: {
+                  condition: { test: 'datum._group_id >= 0', value: 2.2 },
+                  value: 0,
+                },
+              }
+            : {}),
           opacity: {
             condition: { test: "datum.voiced === false || datum.voiced === 'false'", value: 0.35 },
             ...(hasConfidence && confidenceType === 'likelihood'
@@ -4238,6 +4722,7 @@ export function buildBoppVegaLiteSpec(
             { field: 'time', type: 'quantitative', format: '.3f', title: 'Time (s)' },
             { field: 'hz', type: 'quantitative', format: '.2f', title: 'Frequency (Hz)' },
             { field: 'voiced', type: 'nominal', title: 'Voiced' },
+            ...groupTooltipFields,
             ...(hasConfidence && confidenceType === 'likelihood' ? [
               { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Model Likelihood' },
             ] : []),
@@ -4256,22 +4741,25 @@ export function buildBoppVegaLiteSpec(
     const contourTitle = {
       text: isInterval
         ? `BOPP Frequency Tone Segments (Hz): ${annotation.media_id}`
-        : `BOPP Frequency Trajectory (Hz): ${annotation.media_id}`,
+        : canConnectLine
+        ? `BOPP Frequency Trajectory (Hz): ${annotation.media_id}`
+        : `BOPP Multipitch Scatter (Hz): ${annotation.media_id}`,
       color: textColor,
     };
 
     const overviewLayers = [
       {
         mark: {
-          type: isInterval ? 'rect' : 'line',
+          type: isInterval ? 'rect' : canConnectLine ? 'line' : 'point',
           strokeWidth: 2,
           stroke: isDark ? '#38bdf8' : '#0284c7',
-          fill: isInterval ? (isDark ? '#38bdf8' : '#0284c7') : null,
+          fill: isInterval || !canConnectLine ? (isDark ? '#38bdf8' : '#0284c7') : null,
           opacity: isInterval ? 0.7 : 1,
         },
         encoding: {
           x: { field: 'time', type: 'quantitative' },
           ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
+          ...(canConnectLine && activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
           y: {
             field: 'hz',
             type: 'quantitative',
@@ -4301,6 +4789,7 @@ export function buildBoppVegaLiteSpec(
   // =========================================================================
   if (payloadType === 'mood_thayer') {
     const hasTimeExtent = Boolean(extentType && data.some(d => typeof d.time === 'number'));
+    const canConnectLine = extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint);
 
     // Case A: Static mood without time dynamics (e.g., overall track emotional appraisal)
     if (!hasTimeExtent) {
@@ -4464,6 +4953,7 @@ export function buildBoppVegaLiteSpec(
                 tooltip: [
                   { field: 'valence', type: 'quantitative', format: '.3f', title: 'Mean Valence' },
                   { field: 'arousal', type: 'quantitative', format: '.3f', title: 'Mean Arousal' },
+                  ...groupTooltipFields,
                   { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
                   { field: 'confidence_std', type: 'quantitative', format: '.3f', title: 'Std Dev (σ)' },
                 ],
@@ -4519,8 +5009,7 @@ export function buildBoppVegaLiteSpec(
             mark: {
               type: 'circle',
               size: 140,
-              stroke: '#ffffff',
-              strokeWidth: 1.5,
+              strokeWidth: activeGrouping ? 2.5 : 1.5,
               opacity: 0.9,
             },
             encoding: {
@@ -4541,9 +5030,16 @@ export function buildBoppVegaLiteSpec(
               color: hasConfidence
                 ? { field: 'confidence', type: 'quantitative', scale: { scheme: 'viridis' }, title: 'Confidence' }
                 : { value: '#6366f1' },
+              stroke: activeGrouping
+                ? {
+                    condition: { test: 'datum._group_id >= 0', field: '_group_label', type: 'nominal', title: activeGrouping.name, scale: groupColorScale },
+                    value: '#ffffff',
+                  }
+                : { value: '#ffffff' },
               tooltip: [
                 { field: 'valence', type: 'quantitative', format: '.3f', title: 'Valence' },
                 { field: 'arousal', type: 'quantitative', format: '.3f', title: 'Arousal' },
+                ...groupTooltipFields,
                 ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', format: '.2%', title: 'Confidence' }] : []),
               ],
             },
@@ -4575,7 +5071,7 @@ export function buildBoppVegaLiteSpec(
                     transform: [{ filter: 'datum.valence_ci_lower != null && datum.valence_ci_upper != null' }],
                     mark: { type: 'area', opacity: 0.22, color: '#06b6d4' },
                     encoding: {
-                      x: { field: xTimeField, type: 'quantitative' },
+                      x: { field: xTimeField, type: 'quantitative', scale: { domain: [minX, maxX] } },
                       y: { field: 'valence_ci_lower', type: 'quantitative' },
                       y2: { field: 'valence_ci_upper' },
                     },
@@ -4585,9 +5081,31 @@ export function buildBoppVegaLiteSpec(
                     transform: [{ filter: 'datum.arousal_ci_lower != null && datum.arousal_ci_upper != null' }],
                     mark: { type: 'area', opacity: 0.22, color: '#f59e0b' },
                     encoding: {
-                      x: { field: xTimeField, type: 'quantitative' },
+                      x: { field: xTimeField, type: 'quantitative', scale: { domain: [minX, maxX] } },
                       y: { field: 'arousal_ci_lower', type: 'quantitative' },
                       y2: { field: 'arousal_ci_upper' },
+                    },
+                  },
+                ]
+              : []),
+            ...(canConnectLine && activeGrouping
+              ? [
+                  {
+                    transform: [
+                      { filter: 'datum._group_id >= 0' },
+                      { fold: ['valence', 'arousal'], as: ['dimension', 'score'] },
+                    ],
+                    mark: { type: 'line', strokeWidth: 5.5, opacity: 0.65, interpolate: 'monotone' },
+                    encoding: {
+                      x: { field: xTimeField, type: 'quantitative', scale: { domain: [minX, maxX] } },
+                      y: { field: 'score', type: 'quantitative', scale: { domain: [-1, 1] } },
+                      detail: { field: '_group_id', type: 'nominal' },
+                      stroke: {
+                        field: '_group_label',
+                        type: 'nominal',
+                        title: activeGrouping.name,
+                        scale: groupColorScale,
+                      },
                     },
                   },
                 ]
@@ -4599,9 +5117,11 @@ export function buildBoppVegaLiteSpec(
                   as: ['dimension', 'score'],
                 },
               ],
-              mark: { type: 'line', point: true, strokeWidth: 2.5, interpolate: 'monotone' },
+              mark: canConnectLine
+                ? { type: 'line', point: true, strokeWidth: 2.5, interpolate: 'monotone' }
+                : { type: 'point', filled: true, size: 75 },
               encoding: {
-                x: { field: xTimeField, type: 'quantitative', title: 'Time (seconds)' },
+                x: { field: xTimeField, type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
                 y: { field: 'score', type: 'quantitative', title: 'Dimension Value', scale: { domain: [-1, 1] } },
                 color: {
                   field: 'dimension',
@@ -4609,10 +5129,12 @@ export function buildBoppVegaLiteSpec(
                   scale: { domain: ['valence', 'arousal'], range: ['#06b6d4', '#f59e0b'] },
                   title: 'Dimension',
                 },
+                ...(canConnectLine && activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
                 tooltip: [
                   { field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' },
                   { field: 'dimension', type: 'nominal', title: 'Dimension' },
                   { field: 'score', type: 'quantitative', format: '.3f', title: 'Score' },
+                  ...groupTooltipFields,
                   ...(hasConfidence ? [
                     { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
                     { field: 'confidence_std', type: 'quantitative', format: '.3f', title: 'Std Dev (σ)' },
@@ -4638,15 +5160,20 @@ export function buildBoppVegaLiteSpec(
           title: { text: 'Russell Circumplex 2D Space', color: textColor },
           layer: [
             ...buildCircumplexQuadrantLayers(gridColor, axisColor),
-            // Path trajectory
-            {
-              mark: { type: 'line', color: '#6366f1', opacity: 0.5, strokeWidth: 1.75 },
-              encoding: {
-                x: { field: 'valence', type: 'quantitative' },
-                y: { field: 'arousal', type: 'quantitative' },
-                order: { field: '__index' },
-              },
-            },
+            // Path trajectory (only when disjoint / per-group disjoint)
+            ...(canConnectLine
+              ? [
+                  {
+                    mark: { type: 'line', color: '#6366f1', opacity: 0.5, strokeWidth: 1.75 },
+                    encoding: {
+                      x: { field: 'valence', type: 'quantitative' },
+                      y: { field: 'arousal', type: 'quantitative' },
+                      order: { field: '__index' },
+                      ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                    },
+                  },
+                ]
+              : []),
             // Crosshair error bars when variance confidence is present
             ...(hasConfidence && confidenceType === 'variance' && confidenceChannel !== 'none'
               ? [
@@ -4674,7 +5201,7 @@ export function buildBoppVegaLiteSpec(
               : []),
             // Points colored by time progression
             {
-              mark: { type: 'circle', size: 90, stroke: isDark ? '#ffffff' : '#0f172a', strokeWidth: 1 },
+              mark: { type: 'circle', size: 90, strokeWidth: activeGrouping ? 2.2 : 1 },
               encoding: {
                 x: { field: 'valence', type: 'quantitative', title: 'Valence (Pleasure)', scale: { domain: [-1.1, 1.1] } },
                 y: { field: 'arousal', type: 'quantitative', title: 'Arousal (Energy)', scale: { domain: [-1.1, 1.1] } },
@@ -4684,10 +5211,17 @@ export function buildBoppVegaLiteSpec(
                   title: 'Time (s)',
                   scale: { scheme: 'viridis' },
                 },
+                stroke: activeGrouping
+                  ? {
+                      condition: { test: 'datum._group_id >= 0', field: '_group_label', type: 'nominal', title: activeGrouping.name, scale: groupColorScale },
+                      value: isDark ? '#ffffff' : '#0f172a',
+                    }
+                  : { value: isDark ? '#ffffff' : '#0f172a' },
                 tooltip: [
                   { field: 'time', type: 'quantitative', format: '.2f', title: 'Time (s)' },
                   { field: 'valence', type: 'quantitative', format: '.3f', title: 'Valence' },
                   { field: 'arousal', type: 'quantitative', format: '.3f', title: 'Arousal' },
+                  ...groupTooltipFields,
                   ...(hasConfidence ? [
                     { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
                     { field: 'confidence_std', type: 'quantitative', format: '.3f', title: 'Std Dev (σ)' },
@@ -4711,8 +5245,9 @@ export function buildBoppVegaLiteSpec(
     extentType === 'score_quarter_float'
   ) {
     const isInterval = extentType === 'score_interval' || extentType === 'score_interval_float';
-    const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
-    const useSingleRow = Boolean(!forceMultiRow && isInterval && intervalAnalysis?.shouldUseSingleRow);
+    const isGroupDisjoint = isInterval && Boolean(activeGrouping && activeGrouping.disjoint);
+    const useSingleRow = Boolean(isInterval && !isGroupDisjoint && extentTopology.disjoint);
+    const singleRowLabel = payloadType === 'lyrics' ? 'Lyrics' : 'Segments';
 
     const markType = isInterval ? 'rect' : 'tick';
     const colorScale = resolveColorScale(colorScheme, payloadType);
@@ -4722,19 +5257,33 @@ export function buildBoppVegaLiteSpec(
         calculate: 'datum.quarter + (datum.duration != null ? datum.duration : 0)',
         as: '_calc_end',
       });
-      if (useSingleRow && intervalAnalysis) {
+      if (useSingleRow) {
         transforms.push({
-          calculate: `'${intervalAnalysis.singleRowLabel}'`,
+          calculate: `'${singleRowLabel}'`,
           as: '_single_row',
         });
       }
     }
 
-    const yEncoding = useSingleRow && intervalAnalysis
+    const yEncoding = isGroupDisjoint
+      ? {
+          field: '_group_label',
+          type: 'nominal',
+          title: activeGrouping!.name,
+          sort: activeGrouping!.orderedGroupLabels,
+          scale: { domain: activeGrouping!.orderedGroupLabels },
+          axis: {
+            titlePadding: 14,
+            labelPadding: 8,
+            labelFontWeight: 'bold',
+            minExtent: 70,
+          },
+        }
+      : useSingleRow
       ? {
           field: '_single_row',
           type: 'nominal',
-          title: intervalAnalysis.singleRowLabel,
+          title: singleRowLabel,
           axis: {
             titlePadding: 14,
             labelPadding: 8,
@@ -4775,6 +5324,7 @@ export function buildBoppVegaLiteSpec(
           color: { field: 'value', type: 'nominal', scale: colorScale },
           tooltip: [
             { field: 'value', type: 'nominal', title: 'Value' },
+            ...groupTooltipFields,
             { field: 'quarter_str', type: 'nominal', title: 'Quarter Fraction' },
             ...(isInterval ? [{ field: 'duration', type: 'quantitative', title: 'Duration' }] : []),
             ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
@@ -4783,7 +5333,7 @@ export function buildBoppVegaLiteSpec(
       },
     ];
 
-    if (isInterval && useSingleRow && showLabels) {
+    if (isInterval && (useSingleRow || isGroupDisjoint) && showLabels) {
       transforms.push({
         calculate: '(datum.quarter + (datum.quarter + (datum.duration != null ? datum.duration : 0))) / 2',
         as: '_label_midpoint',
@@ -4840,6 +5390,7 @@ export function buildBoppVegaLiteSpec(
   if (payloadType === 'tempo') {
     const xTime = extentType?.includes('time') ? 'time' : '__index';
     const isInterval = extentType?.includes('interval');
+    const canConnectLine = !isInterval && (extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint));
     const layers: Record<string, unknown>[] = [];
 
     if (isInterval) {
@@ -4853,6 +5404,29 @@ export function buildBoppVegaLiteSpec(
           as: '_mid_time',
         }
       );
+
+      if (activeGrouping) {
+        layers.push({
+          transform: [{ filter: 'datum._group_id >= 0' }],
+          mark: {
+            type: 'rule',
+            strokeWidth: 8,
+            strokeCap: 'round',
+            opacity: 0.72,
+          },
+          encoding: {
+            x: { field: xTime, type: 'quantitative' },
+            x2: { field: '_calc_end' },
+            y: { field: 'value', type: 'quantitative', scale: { zero: false } },
+            stroke: {
+              field: '_group_label',
+              type: 'nominal',
+              title: activeGrouping.name,
+              scale: groupColorScale,
+            },
+          },
+        });
+      }
 
       // Horizontal Rubato Tempo Shelves (clean shelf line for each section)
       layers.push({
@@ -4869,6 +5443,7 @@ export function buildBoppVegaLiteSpec(
           y: { field: 'value', type: 'quantitative', title: 'Tempo (BPM)', scale: { zero: false } },
           tooltip: [
             { field: 'value', type: 'quantitative', format: '.1f', title: 'Rubato Tempo (BPM)' },
+            ...groupTooltipFields,
             { field: xTime, type: 'quantitative', format: '.2f', title: 'Start (s)' },
             { field: 'duration', type: 'quantitative', format: '.2f', title: 'Duration (s)' },
             ...(hasConfidence ? [
@@ -4879,20 +5454,23 @@ export function buildBoppVegaLiteSpec(
         },
       });
 
-      // Step transition guide connecting tempo changes
-      layers.push({
-        mark: {
-          type: 'line',
-          interpolate: 'step-after',
-          strokeWidth: 1.5,
-          strokeDash: [4, 4],
-          stroke: isDark ? '#94a3b8' : '#64748b',
-        },
-        encoding: {
-          x: { field: xTime, type: 'quantitative', scale: { domain: [minX, maxX] } },
-          y: { field: 'value', type: 'quantitative', scale: { zero: false } },
-        },
-      });
+      // Step transition guide connecting tempo changes (only when disjoint / per-group disjoint)
+      if (extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint)) {
+        layers.push({
+          mark: {
+            type: 'line',
+            interpolate: 'step-after',
+            strokeWidth: 1.5,
+            strokeDash: [4, 4],
+            stroke: isDark ? '#94a3b8' : '#64748b',
+          },
+          encoding: {
+            x: { field: xTime, type: 'quantitative', scale: { domain: [minX, maxX] } },
+            y: { field: 'value', type: 'quantitative', scale: { zero: false } },
+            ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+          },
+        });
+      }
 
       // Section start circle and BPM label
       layers.push(
@@ -4977,37 +5555,80 @@ export function buildBoppVegaLiteSpec(
         layers.push(...buildVarianceErrorBarLayers({ xField: xTime, yField: 'value', isDark }));
       }
 
-      layers.push(
-        {
+      if (canConnectLine) {
+        if (activeGrouping) {
+          layers.push({
+            transform: [{ filter: 'datum._group_id >= 0' }],
+            mark: { type: 'line', interpolate: 'step-after', strokeWidth: 6.5, opacity: 0.72 },
+            encoding: {
+              x: { field: xTime, type: 'quantitative', scale: { domain: [minX, maxX] } },
+              y: { field: 'value', type: 'quantitative', scale: { zero: false } },
+              detail: { field: '_group_id', type: 'nominal' },
+              stroke: {
+                field: '_group_label',
+                type: 'nominal',
+                title: activeGrouping.name,
+                scale: groupColorScale,
+              },
+            },
+          });
+        }
+
+        layers.push({
           mark: { type: 'line', interpolate: 'step-after', strokeWidth: 2.5, color: '#f59e0b' },
           ...(makeZoomParam().length ? { params: makeZoomParam() } : {}),
           encoding: {
             x: { field: xTime, type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
             y: { field: 'value', type: 'quantitative', title: 'Tempo (BPM)', scale: { zero: false } },
+            ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
             tooltip: [
               { field: xTime, type: 'quantitative', format: '.2f', title: 'Time (s)' },
               { field: 'value', type: 'quantitative', format: '.1f', title: 'Tempo (BPM)' },
+              ...groupTooltipFields,
               ...(hasConfidence ? [
                 { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' },
                 { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
               ] : []),
             ],
           },
+        });
+      }
+
+      layers.push({
+        mark: { type: 'circle', size: 65, color: '#f59e0b' },
+        ...(canConnectLine ? {} : makeZoomParam().length ? { params: makeZoomParam() } : {}),
+        encoding: {
+          x: { field: xTime, type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
+          y: { field: 'value', type: 'quantitative', title: 'Tempo (BPM)', scale: { zero: false } },
+          ...(activeGrouping
+            ? {
+                stroke: {
+                  condition: { test: 'datum._group_id >= 0', field: '_group_label', type: 'nominal', title: activeGrouping.name, scale: groupColorScale },
+                  value: 'transparent',
+                },
+                strokeWidth: {
+                  condition: { test: 'datum._group_id >= 0', value: 2.2 },
+                  value: 0,
+                },
+              }
+            : {}),
+          tooltip: [
+            { field: xTime, type: 'quantitative', format: '.2f', title: 'Time (s)' },
+            { field: 'value', type: 'quantitative', format: '.1f', title: 'Tempo (BPM)' },
+            ...groupTooltipFields,
+            ...(hasConfidence ? [
+              { field: 'confidence', type: 'quantitative', format: '.1%', title: 'Confidence' },
+              { field: 'confidence_variance', type: 'quantitative', format: '.4f', title: 'Variance (σ²)' },
+            ] : []),
+          ],
         },
-        {
-          mark: { type: 'circle', size: 60, color: '#f59e0b' },
-          encoding: {
-            x: { field: xTime, type: 'quantitative' },
-            y: { field: 'value', type: 'quantitative' },
-          },
-        }
-      );
+      });
     }
 
     const tempoTitle = { text: `BOPP Tempo (BPM): ${annotation.media_id}`, color: textColor };
     const tempoOverviewLayers = [
       {
-        mark: { type: 'line', interpolate: 'step-after', stroke: '#f59e0b', strokeWidth: 1.8, opacity: 0.8 },
+        mark: { type: isInterval || canConnectLine ? 'line' : 'point', interpolate: 'step-after', stroke: '#f59e0b', strokeWidth: 1.8, opacity: 0.8 },
         encoding: {
           x: { field: xTime, type: 'quantitative' },
           y: { field: 'value', type: 'quantitative', scale: { zero: false }, axis: null },
@@ -5033,28 +5654,102 @@ export function buildBoppVegaLiteSpec(
   // 11. GENERAL FALLBACK COMPOSITION (Supports any extent + payload)
   // =========================================================================
   const { isMidi, isScore, isTime, isInterval, xField } = resolveExtentAxis(extentType, data);
-  const intervalAnalysis = isInterval ? analyzeIntervalAnnotation(annotation, data) : null;
-  const useSingleRow = Boolean(!forceMultiRow && isInterval && intervalAnalysis?.shouldUseSingleRow);
+  const isGroupDisjoint = isInterval && Boolean(activeGrouping && activeGrouping.disjoint);
+  const useSingleRow = Boolean(isInterval && !isGroupDisjoint && extentTopology.disjoint);
+  const singleRowLabel = payloadType === 'lyrics' ? 'Lyrics' : 'Segments';
 
   if (isInterval) {
     transforms.push({
       calculate: `datum.${xField} + (datum.duration != null ? datum.duration : 0)`,
       as: '_calc_end',
     });
-    if (useSingleRow && intervalAnalysis) {
+    if (useSingleRow) {
       transforms.push({
-        calculate: `'${intervalAnalysis.singleRowLabel}'`,
+        calculate: `'${singleRowLabel}'`,
         as: '_single_row',
       });
     }
   }
   const colorScale = resolveColorScale(colorScheme, payloadType);
 
-  const yEncoding = useSingleRow && intervalAnalysis
+  // If payloadType === 'tag' and activeGrouping is present with !isGroupDisjoint, render ordered vertical subplots (vconcat)!
+  if (payloadType === 'tag' && activeGrouping && !isGroupDisjoint) {
+    const subplotSpecs = activeGrouping.orderedGroupLabels.map((grpLabel, gIdx) => {
+      const groupRows = data.filter(d => d._group_label === grpLabel);
+      const groupUniqueLabels = Array.from(new Set(groupRows.map(d => String(d.value ?? '')))).filter(Boolean);
+      const subHeight = Math.max(54, groupUniqueLabels.length * 28 + 16);
+      const isLast = gIdx === activeGrouping.orderedGroupLabels.length - 1;
+      const subLayers: Record<string, unknown>[] = [
+        {
+          mark: isInterval ? { type: 'bar', cornerRadius: 2 } : { type: 'tick', thickness: 3 },
+          encoding: {
+            x: {
+              field: xField,
+              type: 'quantitative',
+              title: isLast ? xField : null,
+              scale: { domain: [minX, maxX] },
+              axis: isLast ? {} : { labels: false, ticks: false },
+            },
+            ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
+            y: {
+              field: 'value',
+              type: 'nominal',
+              title: grpLabel,
+              scale: { domain: groupUniqueLabels },
+              axis: { titlePadding: 14, labelPadding: 8, labelFontWeight: 'bold', minExtent: 70 },
+            },
+            color: { field: 'value', type: 'nominal', scale: colorScale, title: payloadType },
+            tooltip: [
+              { field: 'value', type: 'nominal', title: 'Value' },
+              ...groupTooltipFields,
+              { field: xField, type: 'quantitative', format: '.3f', title: 'Position' },
+              ...(isInterval ? [{ field: 'duration', type: 'quantitative', format: '.3f', title: 'Duration' }] : []),
+              ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
+            ],
+          },
+        },
+      ];
+      return {
+        width: chartWidth,
+        height: subHeight,
+        transform: [{ filter: `datum._group_label === ${JSON.stringify(grpLabel)}` }],
+        layer: subLayers,
+      };
+    });
+
+    return {
+      $schema: VEGA_LITE_SCHEMA,
+      title: {
+        text: `BOPP Grouped Tags (${activeGrouping.name}): ${annotation.media_id}`,
+        color: textColor,
+      },
+      data: { values: data },
+      transform: transforms,
+      config: baseConfig,
+      vconcat: subplotSpecs,
+      resolve: { scale: { y: 'independent', x: 'shared', color: 'shared' } },
+    };
+  }
+
+  const yEncoding = isGroupDisjoint
+    ? {
+        field: '_group_label',
+        type: 'nominal',
+        title: activeGrouping!.name,
+        sort: activeGrouping!.orderedGroupLabels,
+        scale: { domain: activeGrouping!.orderedGroupLabels },
+        axis: {
+          titlePadding: 14,
+          labelPadding: 8,
+          labelFontWeight: 'bold',
+          minExtent: 70,
+        },
+      }
+    : useSingleRow
     ? {
         field: '_single_row',
         type: 'nominal',
-        title: intervalAnalysis.singleRowLabel,
+        title: singleRowLabel,
         axis: {
           titlePadding: 14,
           labelPadding: 8,
@@ -5088,6 +5783,7 @@ export function buildBoppVegaLiteSpec(
           : { value: 1.0 },
         tooltip: [
           { field: 'value', type: 'nominal', title: 'Value' },
+          ...groupTooltipFields,
           { field: xField, type: 'quantitative', format: '.3f', title: 'Position' },
           ...(isInterval ? [{ field: 'duration', type: 'quantitative', format: '.3f', title: 'Duration' }] : []),
           ...(hasConfidence ? [{ field: 'confidence', type: 'quantitative', title: 'Confidence' }] : []),
@@ -5096,7 +5792,7 @@ export function buildBoppVegaLiteSpec(
     },
   ];
 
-  if (isInterval && useSingleRow && showLabels) {
+  if (isInterval && (useSingleRow || isGroupDisjoint) && showLabels) {
     transforms.push({
       calculate: `(datum.${xField} + (datum.${xField} + (datum.duration != null ? datum.duration : 0))) / 2`,
       as: '_label_midpoint',
@@ -5137,6 +5833,8 @@ export function buildBoppVegaLiteSpec(
             x2: { field: '_calc_end' },
             ...(useSingleRow
               ? { y: { value: 2 }, y2: { value: 50 } }
+              : isGroupDisjoint
+              ? { y: { field: '_group_label', type: 'nominal', sort: activeGrouping!.orderedGroupLabels, axis: null } }
               : { y: { field: 'value', type: 'nominal', axis: null } }),
             color: { field: 'value', type: 'nominal', scale: colorScale, legend: null },
           },

@@ -6,12 +6,10 @@
  */
 
 import { decode as decodeMsgpack, encode as encodeMsgpack } from '@msgpack/msgpack';
-import { normalizeKeyName, toAsciiAccidentals } from './mirEvalColors';
+import { normalizeKeyName } from './mirEvalColors';
+import { getExtentTopology, resolveActiveGrouping, resolveDomainRange } from './extentTopology';
 import type {
   BoppAnnotation,
-  BoppExtent,
-  BoppPayload,
-  BoppConfidence,
   TabularRecord,
   Fraction,
 } from '../types/bopp';
@@ -73,7 +71,10 @@ function fractionToString(frac: Fraction | unknown): string {
 /**
  * Converts a BoppAnnotation into tabular records, matching bopp.util.to_dataframe
  */
-export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[] {
+export function annotationToTabular(
+  annotation: BoppAnnotation,
+  activeGroupingIndex?: number | null
+): TabularRecord[] {
   const payload = annotation.payload;
   if (!payload || !payload.payload_type) {
     return [];
@@ -81,13 +82,12 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
 
   const extent = annotation.extent;
   const confidence = annotation.confidence;
+  const activeGrouping = resolveActiveGrouping(annotation, activeGroupingIndex);
 
   // Determine observation count across payload, extent, and confidence facets
   let rowCount = 0;
   if ('value' in payload && Array.isArray(payload.value)) {
     rowCount = payload.value.length;
-  } else if ('label' in payload && Array.isArray(payload.label)) {
-    rowCount = payload.label.length;
   } else if ('valence' in payload && Array.isArray(payload.valence)) {
     rowCount = payload.valence.length;
   } else if (extent) {
@@ -298,42 +298,6 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
         }
         break;
       }
-      case 'note_hz': {
-        const raw = payload.value?.[i];
-        let hz: number | null = null;
-        let midi: number | null = null;
-        if (typeof raw === 'number') {
-          hz = raw;
-          midi = hzToMidi(raw);
-        } else if (typeof raw === 'string') {
-          const parsedMidi = noteNameToMidi(raw);
-          if (parsedMidi !== null) {
-            midi = parsedMidi;
-            hz = midiToHz(parsedMidi);
-          } else {
-            const num = parseFloat(raw);
-            if (!isNaN(num) && num > 0) {
-              hz = num;
-              midi = hzToMidi(num);
-            }
-          }
-        }
-        record.value = midi ?? hz ?? raw;
-        record.hz = hz ?? (typeof midi === 'number' ? midiToHz(midi) : null);
-        record.frequency = hz ?? (typeof raw === 'number' ? raw : (typeof midi === 'number' ? midiToHz(midi) : undefined));
-        record.midi = midi;
-        if (typeof midi === 'number') {
-          record.note_name = midiToNoteName(midi);
-        } else if (typeof raw === 'string') {
-          record.note_name = raw;
-        }
-        if (Array.isArray(payload.voiced)) {
-          const isV = Boolean(payload.voiced[i]);
-          record.voiced = isV;
-          record.voicing = isV ? 1 : 0;
-        }
-        break;
-      }
       case 'note_midi': {
         const raw = payload.value?.[i];
         let midi: number | null = null;
@@ -358,53 +322,11 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
           record.description = payload.description;
         }
         break;
-      case 'onset':
-        record.value = (payload.value?.[i] as any) ?? 1;
-        record.description = payload.description || 'onset';
-        break;
-      case 'pitch_contour': {
-        const item = payload.value?.[i];
-        if (item && typeof item === 'object') {
-          const rawV = item.voicing ?? (item as Record<string, unknown>).voiced;
-          let v = 1;
-          if (rawV !== undefined && rawV !== null) {
-            v = (rawV === 1 || rawV === true || rawV === 'voiced' || (typeof rawV === 'number' && rawV >= 0.5)) ? 1 : 0;
-          }
-          record.frequency = item.frequency;
-          record.voicing = v;
-          record.voiced = v === 1;
-          record.value = item.frequency;
-        } else {
-          const pAny = payload as unknown as Record<string, any>;
-          const f = typeof item === 'number' ? item : (pAny.frequency?.[i] ?? pAny.f0?.[i]);
-          const rawV = pAny.voicing?.[i] ?? pAny.voiced?.[i];
-          let v = 1;
-          if (rawV !== undefined && rawV !== null) {
-            v = (rawV === 1 || rawV === true || rawV === 'voiced' || (typeof rawV === 'number' && rawV >= 0.5)) ? 1 : 0;
-          } else if (f === 0 || f === null || f === undefined) {
-            v = 0;
-          }
-          record.frequency = f;
-          record.voicing = v;
-          record.voiced = v === 1;
-          record.value = f;
-        }
-        break;
-      }
       case 'relation':
         record.value = payload.value?.[i];
         record.relation = payload.relation?.[i];
         break;
-      case 'multi_segment':
-        record.label = payload.label?.[i];
-        record.level = payload.level?.[i];
-        record.value = payload.label?.[i];
-        break;
-      case 'segment_open':
-        record.value = payload.value?.[i];
-        break;
       case 'tag':
-      case 'tag_open':
         record.value = payload.value?.[i];
         break;
       case 'tempo':
@@ -414,6 +336,14 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
         record.value = payload.value?.[i] as string | number | boolean | Record<string, unknown> | undefined;
         record.ext_schema = payload.ext_schema;
         break;
+    }
+
+    // Active grouping fields
+    if (activeGrouping) {
+      const gid = activeGrouping.grouping.ids[i] ?? -1;
+      record._group_id = gid;
+      record._group_label = activeGrouping.getLabelForId(gid);
+      record._group_order = activeGrouping.getOrderForId(gid);
     }
 
     // Confidence fields
@@ -518,26 +448,32 @@ export function annotationToTabular(annotation: BoppAnnotation): TabularRecord[]
     records.push(record);
   }
 
-  // Assign greedy non-overlapping lanes for text_interval spans
+  // Assign greedy non-overlapping lanes for text_interval spans when overlapping
   if (annotation.extent?.extent_type === 'text_interval') {
-    const sorted = [...records].sort((a, b) => (Number(a.offset) || 0) - (Number(b.offset) || 0));
-    const laneEnds: number[] = [];
-    for (const r of sorted) {
-      const start = Number(r.offset) || 0;
-      const end = Number(r._offset_end) || start + 1;
-      let placedLane = -1;
-      for (let l = 0; l < laneEnds.length; l++) {
-        if (laneEnds[l] <= start) {
-          placedLane = l;
-          laneEnds[l] = end;
-          break;
+    if (annotation.extent.disjoint && !activeGrouping) {
+      for (const r of records) {
+        r._lane = 0;
+      }
+    } else {
+      const sorted = [...records].sort((a, b) => (Number(a.offset) || 0) - (Number(b.offset) || 0));
+      const laneEnds: number[] = [];
+      for (const r of sorted) {
+        const start = Number(r.offset) || 0;
+        const end = Number(r._offset_end) || start + 1;
+        let placedLane = -1;
+        for (let l = 0; l < laneEnds.length; l++) {
+          if (laneEnds[l] <= start) {
+            placedLane = l;
+            laneEnds[l] = end;
+            break;
+          }
         }
+        if (placedLane === -1) {
+          placedLane = laneEnds.length;
+          laneEnds.push(end);
+        }
+        r._lane = placedLane;
       }
-      if (placedLane === -1) {
-        placedLane = laneEnds.length;
-        laneEnds.push(end);
-      }
-      r._lane = placedLane;
     }
   }
 
@@ -687,6 +623,27 @@ export function computeSummaryStats(annotation: BoppAnnotation, records: Tabular
       const endSec = startSec + durSec;
       minTime = minTime === null ? startSec : Math.min(minTime, startSec);
       maxTime = maxTime === null ? endSec : Math.max(maxTime, endSec);
+    }
+  }
+
+  const topology = getExtentTopology(annotation.extent);
+  if (minTime !== null && maxTime !== null) {
+    if (topology.min_time !== undefined || topology.max_time !== undefined) {
+      [minTime, maxTime] = resolveDomainRange(minTime, maxTime, topology.min_time, topology.max_time);
+    } else if (topology.min_tick !== undefined || topology.max_tick !== undefined) {
+      [minTime, maxTime] = resolveDomainRange(
+        minTime,
+        maxTime,
+        topology.min_tick !== undefined ? topology.min_tick / MIDI_TICKS_PER_SECOND : undefined,
+        topology.max_tick !== undefined ? topology.max_tick / MIDI_TICKS_PER_SECOND : undefined
+      );
+    } else if (topology.min_quarter !== undefined || topology.max_quarter !== undefined) {
+      [minTime, maxTime] = resolveDomainRange(
+        minTime,
+        maxTime,
+        topology.min_quarter !== undefined ? topology.min_quarter * SCORE_SECONDS_PER_QUARTER : undefined,
+        topology.max_quarter !== undefined ? topology.max_quarter * SCORE_SECONDS_PER_QUARTER : undefined
+      );
     }
   }
 

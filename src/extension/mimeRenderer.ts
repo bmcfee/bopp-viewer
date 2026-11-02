@@ -15,11 +15,10 @@ import {
   parseBoppJson,
   parseBoppMsgpack,
   annotationToTabular,
-  exportToBoppCsv,
 } from '../utils/boppParser';
-import { buildBoppVegaLiteSpec } from '../utils/vegaLiteBuilder';
+import { buildBoppVegaLiteSpec, computeOptimalChartHeight } from '../utils/vegaLiteBuilder';
 import { validateBoppAnnotation } from '../utils/schemaValidator';
-import { analyzeIntervalDisjointness } from '../utils/intervalOverlap';
+import { getExtentTopology } from '../utils/extentTopology';
 import { createAnnotationMetadataCardDOM } from './metadataCard';
 import type { BoppAnnotation } from '../types/bopp';
 
@@ -40,7 +39,7 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
   private _containerNode: HTMLDivElement;
   private _cachedAnnotation: BoppAnnotation | null = null;
   private _activeTab: 'visualizer' | 'table' | 'raw' = 'visualizer';
-  private _forceMultiRow: boolean = false;
+  private _activeGroupingIndex: number | null = 0;
   private _vegaResult: VegaEmbedResult | null = null;
   private _resizeObserver: ResizeObserver | null = null;
 
@@ -179,11 +178,12 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
       this._vegaResult = null;
     }
 
-    const tabular = annotationToTabular(annotation);
+    const tabular = annotationToTabular(annotation, this._activeGroupingIndex);
     const validation = validateBoppAnnotation(annotation);
     const extentType = annotation.extent?.extent_type ?? 'none';
     const payloadType = annotation.payload?.payload_type ?? 'unknown';
     const confidenceType = annotation.confidence?.confidence_type ?? 'none';
+    const topology = getExtentTopology(annotation.extent);
 
     const bg = isDark ? '#18181b' : '#ffffff';
     const fg = isDark ? '#f4f4f5' : '#0f172a';
@@ -225,6 +225,11 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
       <span style="font-weight: 700; color: #2563eb; background: rgba(37,99,235,0.12); padding: 2px 7px; border-radius: 4px; font-size: 11px;">BOPP</span>
       <span style="font-family: monospace; font-weight: 600; color: ${fg}; font-size: 11px;" title="${annotation.media_id}">${annotation.media_id}</span>
       <span style="background: ${badgeBg}; color: ${badgeFg}; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-family: monospace;">${extentType}</span>
+      ${
+        extentType !== 'none'
+          ? `<span style="background: ${badgeBg}; color: ${badgeFg}; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-family: monospace;">${topology.disjoint ? 'disjoint' : 'overlapping'} · ${topology.exhaustive ? 'exhaustive' : 'partial'}</span>`
+          : ''
+      }
       <span style="background: rgba(37,99,235,0.1); color: #2563eb; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; font-family: monospace;">${payloadType}</span>
       ${
         confidenceType !== 'none'
@@ -239,35 +244,40 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
     `;
     header.appendChild(leftBadges);
 
-    // Center/Right: Disjoint Interval Layout Toggle Button (flips between Single Row and Multi-Row)
-    const intervalAnalysis = analyzeIntervalDisjointness(annotation, tabular);
-    if (intervalAnalysis.isIntervalExtent && intervalAnalysis.isDisjoint) {
-      const toggleBtn = document.createElement('button');
-      toggleBtn.type = 'button';
-      toggleBtn.innerHTML = this._forceMultiRow ? '⧉ Multi-Row (Overlapping)' : '⧉ Single Row (Disjoint)';
-      toggleBtn.title = this._forceMultiRow
-        ? 'Currently forced to Multi-Row (overlapping style). Click to switch to consolidated Single-Row display.'
-        : 'Currently in consolidated Single-Row (disjoint style). Click to flip to Multi-Row display.';
-      toggleBtn.style.border = `1px solid ${this._forceMultiRow ? (isDark ? '#6366f1' : '#4f46e5') : (isDark ? '#10b981' : '#059669')}`;
-      toggleBtn.style.background = this._forceMultiRow
-        ? (isDark ? 'rgba(99,102,241,0.2)' : 'rgba(99,102,241,0.1)')
-        : (isDark ? 'rgba(16,185,129,0.2)' : 'rgba(16,185,129,0.1)');
-      toggleBtn.style.color = this._forceMultiRow
-        ? (isDark ? '#a5b4fc' : '#4338ca')
-        : (isDark ? '#6ee7b7' : '#065f46');
-      toggleBtn.style.padding = '3px 9px';
-      toggleBtn.style.borderRadius = '4px';
-      toggleBtn.style.fontSize = '11px';
-      toggleBtn.style.fontWeight = '600';
-      toggleBtn.style.cursor = 'pointer';
-      toggleBtn.style.transition = 'all 0.15s ease';
-      toggleBtn.style.marginLeft = 'auto';
-      toggleBtn.style.marginRight = '8px';
-      toggleBtn.onclick = () => {
-        this._forceMultiRow = !this._forceMultiRow;
+    // Center/Right: Grouping Selector Dropdown
+    if (annotation.groupings && annotation.groupings.length > 0) {
+      const groupSelect = document.createElement('select');
+      groupSelect.style.border = `1px solid ${border}`;
+      groupSelect.style.background = badgeBg;
+      groupSelect.style.color = fg;
+      groupSelect.style.padding = '3px 8px';
+      groupSelect.style.borderRadius = '4px';
+      groupSelect.style.fontSize = '11px';
+      groupSelect.style.fontWeight = '600';
+      groupSelect.style.cursor = 'pointer';
+      groupSelect.style.marginLeft = 'auto';
+      groupSelect.style.marginRight = '8px';
+
+      const noneOpt = document.createElement('option');
+      noneOpt.value = 'none';
+      noneOpt.textContent = 'Group: None (Ungrouped)';
+      if (this._activeGroupingIndex === null) noneOpt.selected = true;
+      groupSelect.appendChild(noneOpt);
+
+      annotation.groupings.forEach((g, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(idx);
+        opt.textContent = `Group: ${g.name || `Grouping #${idx + 1}`} (${g.disjoint ? 'disjoint' : 'overlapping'})`;
+        if (this._activeGroupingIndex === idx) opt.selected = true;
+        groupSelect.appendChild(opt);
+      });
+
+      groupSelect.onchange = () => {
+        const val = groupSelect.value;
+        this._activeGroupingIndex = val === 'none' ? null : Number(val);
         this._renderUI(annotation, isDark);
       };
-      header.appendChild(toggleBtn);
+      header.appendChild(groupSelect);
     }
 
     // Right Tabs (Plot / Table / JSON)
@@ -330,40 +340,17 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
         const availableW = this._containerNode.clientWidth;
         const chartWidth = Math.max(340, Math.min(1080, (availableW > 0 ? availableW : 780) - 36));
 
-        // Compute optimal responsive plot height avoiding squished vertical displays
         const payloadType = annotation.payload?.payload_type as string | undefined;
         const extentType = annotation.extent?.extent_type as string | undefined;
-        let optimalHeight = 360;
+        const isGlobal = !extentType || extentType === 'none';
+        const isTag = payloadType === 'genre' || payloadType === 'tag';
+        const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
 
-        if (payloadType === 'key_mode') {
-          // If disjoint interval extent, 220px is optimal; if overlapping or 24-key vertical axis, need 520px
-          const isInterval = extentType?.includes('interval');
-          optimalHeight = isInterval ? (this._forceMultiRow ? 520 : 220) : 520;
-        } else if (payloadType === 'note_midi' || payloadType === 'piano_roll') {
-          optimalHeight = 440;
-        } else if (payloadType === 'chord') {
-          optimalHeight = 360;
-        } else if (payloadType === 'multi_segment' || payloadType === 'segment_open' || payloadType === 'tag_open') {
-          if (!extentType || extentType === 'none') {
-            const hasConf = Boolean(annotation.confidence?.confidence_type) && tabular.some((d: any) => typeof d.confidence === 'number');
-            if (!hasConf) {
-              const numCols = Math.max(1, Math.min(tabular.length, Math.floor((chartWidth - 60) / 194)));
-              const numRows = Math.ceil(tabular.length / numCols);
-              optimalHeight = Math.max(120, numRows * 50 + 70);
-            } else {
-              optimalHeight = Math.max(180, Math.min(420, tabular.length * 44 + 80));
-            }
-          } else {
-            optimalHeight = this._forceMultiRow ? 360 : 240;
-          }
-        } else if (payloadType === 'pitch_contour' || payloadType === 'note_hz') {
-          optimalHeight = 380;
-        } else if (payloadType === 'tempo') {
-          optimalHeight = 320;
-        } else if (!extentType || extentType === 'none') {
-          // Static radial circumplex or circular circle of fifths
-          optimalHeight = Math.max(360, Math.min(480, chartWidth - 40));
-        }
+        const optimalHeight = computeOptimalChartHeight(annotation, tabular.length, {
+          isGlobalNoConfGenres: isGlobal && isTag && !hasConf,
+          containerWidth: chartWidth,
+          activeGroupingIndex: this._activeGroupingIndex,
+        });
 
         const spec = buildBoppVegaLiteSpec(annotation, tabular, {
           theme: isDark ? 'dark' : 'light',
@@ -372,7 +359,7 @@ export class BOPPMimeRenderer extends Widget implements IRenderMime.IRenderer {
           showLabels: true,
           enableZoomPan: true,
           enableOverviewBrush: true,
-          forceMultiRow: this._forceMultiRow,
+          activeGroupingIndex: this._activeGroupingIndex,
         });
 
         vizTarget.innerHTML = '';

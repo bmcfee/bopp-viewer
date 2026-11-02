@@ -6,9 +6,10 @@
  * Overlays interactive bounding boxes and 2D pixel coordinates directly on top of sheet music or image documents.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { BoppAnnotation, TabularRecord } from '../types/bopp';
 import { Eye, EyeOff, ZoomIn, ZoomOut, RotateCcw, ArrowDownUp } from 'lucide-react';
+import { resolveActiveGrouping } from '../utils/extentTopology';
 
 interface PixelBoxImageOverlayProps {
   annotation: BoppAnnotation;
@@ -17,6 +18,7 @@ interface PixelBoxImageOverlayProps {
   imageName: string;
   theme: 'light' | 'dark';
   onUnlinkImage: () => void;
+  activeGroupingIndex?: number | null;
 }
 
 export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
@@ -26,6 +28,7 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
   imageName,
   theme,
   onUnlinkImage,
+  activeGroupingIndex,
 }) => {
   const [boxOpacity, setBoxOpacity] = useState<number>(0.4);
   const [strokeWidth, setStrokeWidth] = useState<number>(2);
@@ -37,6 +40,10 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
 
   const isDark = theme === 'dark';
   const isPointPixel = annotation.extent?.extent_type === 'pixel';
+  const activeGrouping = useMemo(
+    () => resolveActiveGrouping(annotation, activeGroupingIndex),
+    [annotation, activeGroupingIndex]
+  );
 
   // Distinct colors for object classes
   const colors = [
@@ -193,6 +200,9 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
               const h = record.height ?? 0;
               const color = colors[idx % colors.length];
               const isHovered = hoveredIndex === idx;
+              const gid = activeGrouping ? (activeGrouping.ids[idx] ?? -1) : -1;
+              const groupLabel = activeGrouping && gid >= 0 ? (activeGrouping.idToLabel.get(gid) ?? `Group ${gid}`) : null;
+              const groupColor = gid >= 0 ? colors[(gid + 2) % colors.length] : null;
 
               return (
                 <g
@@ -209,23 +219,38 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
                       r={isHovered ? 8 : 5}
                       fill={color}
                       fillOpacity={isHovered ? Math.min(1, boxOpacity + 0.4) : boxOpacity}
-                      stroke="#ffffff"
-                      strokeWidth={isHovered ? strokeWidth + 1.5 : strokeWidth}
+                      stroke={groupColor || '#ffffff'}
+                      strokeWidth={isHovered ? strokeWidth + 1.5 : groupColor ? strokeWidth + 1 : strokeWidth}
                     />
                   ) : (
                     // Bounding Box
-                    <rect
-                      x={x}
-                      y={y}
-                      width={w}
-                      height={h}
-                      fill={color}
-                      fillOpacity={isHovered ? Math.min(1, boxOpacity + 0.3) : boxOpacity}
-                      stroke={color}
-                      strokeWidth={isHovered ? strokeWidth + 2 : strokeWidth}
-                      strokeDasharray={isHovered ? '4 2' : undefined}
-                      rx={2}
-                    />
+                    <>
+                      <rect
+                        x={x}
+                        y={y}
+                        width={w}
+                        height={h}
+                        fill={color}
+                        fillOpacity={isHovered ? Math.min(1, boxOpacity + 0.3) : boxOpacity}
+                        stroke={color}
+                        strokeWidth={isHovered ? strokeWidth + 2 : strokeWidth}
+                        strokeDasharray={isHovered ? '4 2' : undefined}
+                        rx={2}
+                      />
+                      {groupColor && (
+                        <rect
+                          x={x - 2}
+                          y={y - 2}
+                          width={w + 4}
+                          height={h + 4}
+                          fill="none"
+                          stroke={groupColor}
+                          strokeWidth={2.5}
+                          strokeDasharray="5 2"
+                          rx={3}
+                        />
+                      )}
+                    </>
                   )}
 
                   {/* Top-edge Likelihood Confidence Meter Bar on Bounding Box */}
@@ -256,7 +281,8 @@ export const PixelBoxImageOverlay: React.FC<PixelBoxImageOverlayProps> = ({
                     <g transform={`translate(${isPointPixel ? x + 8 : x}, ${isPointPixel ? y - 4 : Math.max(14, y - 4)})`}>
                       {(() => {
                         const confStr = record.confidence != null ? ` · ${Math.round(Number(record.confidence) * 100)}%` : '';
-                        const fullText = `${String(record.value || '')}${confStr}`;
+                        const grpStr = groupLabel ? ` [${groupLabel}]` : '';
+                        const fullText = `${String(record.value || '')}${grpStr}${confStr}`;
                         return (
                           <>
                             <rect

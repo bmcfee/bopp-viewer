@@ -21,7 +21,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { BoppAnnotation } from '../types/bopp';
-import { analyzeIntervalAnnotation } from '../utils/intervalOverlap';
+import { getExtentTopology, formatExtentBoundsSummary } from '../utils/extentTopology';
 
 interface AnnotationMetadataCardProps {
   annotation: BoppAnnotation;
@@ -40,7 +40,8 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
   const hasMetadata = metadata && Object.keys(metadata).length > 0;
   const hasSandbox = annotation.sandbox && Object.keys(annotation.sandbox).length > 0;
   const hasParents = annotation.parents && annotation.parents.length > 0;
-  const intervalAnalysis = analyzeIntervalAnnotation(annotation);
+  const extentTopology = getExtentTopology(annotation.extent);
+  const boundsSummary = formatExtentBoundsSummary(annotation.extent);
 
   const handleCopyId = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -105,20 +106,16 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
             extent: {annotation.extent?.extent_type || 'global (none)'}
           </span>
 
-          {intervalAnalysis.isIntervalExtent && (
+          {annotation.extent && (
             <span
               className={`hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[11px] font-medium border ${
-                intervalAnalysis.isDisjoint
+                extentTopology.disjoint
                   ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
                   : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800'
               }`}
-              title={
-                intervalAnalysis.isDisjoint
-                  ? 'All intervals are disjoint in time: rendered in a single consolidated row'
-                  : `${intervalAnalysis.overlapCount} interval collisions detected: rendered across distinct vertical rows`
-              }
+              title={`disjoint=${String(extentTopology.disjoint)}, exhaustive=${String(extentTopology.exhaustive)}${boundsSummary ? ` (${boundsSummary})` : ''}`}
             >
-              {intervalAnalysis.isDisjoint ? '⏱️ Disjoint (1 Row)' : `🔀 Overlapping (${intervalAnalysis.overlapCount})`}
+              {extentTopology.disjoint ? 'Disjoint' : 'Overlapping'} · {extentTopology.exhaustive ? 'Exhaustive' : 'Non-Exhaustive'}
             </span>
           )}
 
@@ -258,6 +255,20 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
             </div>
           )}
 
+          {/* Extent Bounds if present */}
+          {annotation.extent && (
+            <div className="p-2.5 rounded bg-slate-50 dark:bg-neutral-800 border border-slate-300 dark:border-neutral-700 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+              <span>
+                <strong>Extent Topology:</strong> disjoint={String(extentTopology.disjoint)}, exhaustive={String(extentTopology.exhaustive)}
+              </span>
+              {boundsSummary && (
+                <span className="text-blue-700 dark:text-blue-300">
+                  <strong>Bounds:</strong> {boundsSummary}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Groupings if present */}
           {annotation.groupings && annotation.groupings.length > 0 && (
             <div className="p-2.5 rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800">
@@ -267,9 +278,11 @@ export const AnnotationMetadataCard: React.FC<AnnotationMetadataCardProps> = ({
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
                 {annotation.groupings.map((g, idx) => (
-                  <div key={idx} className="p-2 rounded bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-900 flex flex-col">
+                  <div key={idx} className="p-2 rounded bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-900 flex flex-col gap-0.5">
                     <span className="font-bold text-slate-800 dark:text-slate-200">{g.name}</span>
-                    <span className="text-[11px] text-slate-500 font-mono">{g.ids?.length ?? 0} elements mapped</span>
+                    <span className="text-[11px] text-slate-500 font-mono">
+                      {g.ids?.length ?? 0} elements · {g.disjoint ? 'disjoint' : 'overlapping'} · {g.exhaustive ? 'exhaustive' : 'non-exhaustive'}
+                    </span>
                   </div>
                 ))}
               </div>

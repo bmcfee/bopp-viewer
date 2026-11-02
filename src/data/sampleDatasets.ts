@@ -41,6 +41,10 @@ const DRIVE_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: true,
+    min_time: 0.0,
+    max_time: 114.707,
     time: [
       0.0, 2.136, 3.065, 6.966, 16.997, 20.526, 22.663, 24.613,
       26.564, 28.514, 31.300, 32.415, 33.344, 34.366, 36.316, 38.266,
@@ -102,6 +106,8 @@ const LONGBEATS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time",
+    disjoint: true,
+    exhaustive: false,
     time: Array.from({ length: 80 }, (_, i) => +(i * 0.52).toFixed(3))
   },
   payload: {
@@ -174,6 +180,10 @@ const MOZART_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: false,
+    exhaustive: false,
+    min_time: 0.0,
+    max_time: 12.0,
     time: mozartNotes.map(n => n.t),
     duration: mozartNotes.map(n => n.d)
   },
@@ -184,7 +194,23 @@ const MOZART_DATA: BoppAnnotation = {
   confidence: {
     confidence_type: "likelihood",
     confidence: mozartNotes.map(n => n.conf)
-  }
+  },
+  groupings: [
+    {
+      name: "Hand / Voice",
+      disjoint: true,
+      exhaustive: false,
+      labels: { "Right Hand (Melody)": 0, "Left Hand (Alberti Bass)": 1 },
+      ids: mozartNotes.map(n => (n.midi >= 60 ? 0 : 1))
+    },
+    {
+      name: "Harmonic Phrase",
+      disjoint: false,
+      exhaustive: true,
+      labels: { "Opening Tonic Arpeggio": 0, "Sequential Descent": 1, "Cadential Resolution": 2 },
+      ids: mozartNotes.map(n => (n.t < 4.5 ? 0 : n.t < 8.0 ? 1 : 2))
+    }
+  ]
 };
 
 // Mozart K.545: MIDI Interval Extent (Standard PPQ=480, BPM=120 ticks)
@@ -202,6 +228,8 @@ const MOZART_MIDI_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "midi_interval",
+    disjoint: false,
+    exhaustive: false,
     tick: mozartNotes.map(n => Math.round(n.t * 960)),
     duration: mozartNotes.map(n => Math.round(n.d * 960)),
   },
@@ -230,6 +258,8 @@ const MOZART_SCORE_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_interval",
+    disjoint: false,
+    exhaustive: false,
     quarter: mozartNotes.map(n => floatToFraction(n.t * 2)),
     duration: mozartNotes.map(n => floatToFraction(n.d * 2)),
   },
@@ -258,6 +288,8 @@ const NOTE_NAMES_PIANOROLL_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: false,
     time: [0.0, 0.6, 1.2, 1.8, 2.4, 3.0],
     duration: [0.5, 0.5, 0.5, 0.5, 0.5, 0.8]
   },
@@ -290,6 +322,8 @@ const FREQUENCY_HZ_PIANOROLL_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: false,
     time: [0.0, 0.6, 1.2, 1.8, 2.4, 3.0],
     duration: [0.5, 0.5, 0.5, 0.5, 0.5, 0.8]
   },
@@ -330,6 +364,12 @@ const TF_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_frequency_box",
+    disjoint: true,
+    exhaustive: false,
+    min_time: 0.0,
+    max_time: 12.5,
+    min_freq: 0,
+    max_freq: 8000,
     time: tfBoxes.map(b => b.t),
     duration: tfBoxes.map(b => b.d),
     freq_min: tfBoxes.map(b => b.fmin),
@@ -342,7 +382,16 @@ const TF_DATA: BoppAnnotation = {
   confidence: {
     confidence_type: "likelihood",
     confidence: tfBoxes.map(b => b.conf)
-  }
+  },
+  groupings: [
+    {
+      name: "Ecological Guild",
+      disjoint: false,
+      exhaustive: false,
+      labels: { "Canopy Songbirds": 0, "Understory Passerines": 1, "Nocturnal Raptors": 2 },
+      ids: [0, 0, 0, 1, 0, 0, 0, 2]
+    }
+  ]
 };
 
 // 25-Annotator Crowd Consensus on Song Structure
@@ -368,6 +417,10 @@ const CROWD_AGREEMENT_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: true,
+    min_time: 0.0,
+    max_time: 128.0,
     time: [0.0, 12.5, 36.0, 48.0, 72.0, 88.0, 112.0],
     duration: [12.5, 23.5, 12.0, 24.0, 16.0, 24.0, 16.0]
   },
@@ -407,6 +460,8 @@ const MOOD_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time",
+    disjoint: true,
+    exhaustive: true,
     time: moodPoints.map(m => m.t)
   },
   payload: {
@@ -435,6 +490,8 @@ const SCORE_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_interval",
+    disjoint: true,
+    exhaustive: true,
     quarter: [[0, 1], [1, 2], [1, 1], [2, 1], [9, 4], [3, 1]],
     duration: [[1, 2], [1, 2], [1, 1], [1, 4], [3, 4], [1, 1]]
   },
@@ -464,6 +521,12 @@ const PIXEL_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "pixel_box",
+    disjoint: true,
+    exhaustive: false,
+    min_x: 0,
+    max_x: 720,
+    min_y: 0,
+    max_y: 260,
     x: [45, 240, 330, 390, 450, 520, 590],
     y: [120, 115, 95, 85, 75, 65, 90],
     width: [180, 75, 45, 45, 45, 50, 80],
@@ -480,7 +543,16 @@ const PIXEL_DATA: BoppAnnotation = {
       "Quarter Note C5",
       "Measure Barline"
     ]
-  }
+  },
+  groupings: [
+    {
+      name: "Symbol Class",
+      disjoint: true,
+      exhaustive: false,
+      labels: { "Clef & Signature": 0, "Note Events": 1, "Barline": 2 },
+      ids: [0, 0, 1, 1, 1, 1, 2]
+    }
+  ]
 };
 
 // ---------------------------------------------------------------------------
@@ -526,6 +598,8 @@ const KEY_MODULATION_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: true,
     time: [0.0, 32.5, 78.0, 124.5, 180.0],
     duration: [32.5, 45.5, 46.5, 55.5, 40.0]
   },
@@ -553,6 +627,8 @@ const KEY_SCORE_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_interval",
+    disjoint: true,
+    exhaustive: true,
     quarter: [[0, 1], [32, 1], [64, 1], [96, 1]],
     duration: [[32, 1], [32, 1], [32, 1], [48, 1]]
   },
@@ -609,6 +685,8 @@ const MODAL_KEY_TIME_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: true,
     time: [0.0, 16.0, 32.0, 48.0, 64.0, 80.0, 96.0],
     duration: [16.0, 16.0, 16.0, 16.0, 16.0, 16.0, 24.0]
   },
@@ -659,6 +737,8 @@ const TEMPO_RUBATO_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: true,
     time: [0.0, 15.0, 32.0, 48.0, 68.0, 85.0],
     duration: [15.0, 17.0, 16.0, 20.0, 17.0, 25.0]
   },
@@ -687,6 +767,8 @@ const TEMPO_METRIC_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time",
+    disjoint: true,
+    exhaustive: false,
     time: [0.0, 0.52, 1.05, 1.57, 2.08, 2.61, 3.12, 3.65, 4.16, 4.69]
   },
   payload: {
@@ -695,7 +777,7 @@ const TEMPO_METRIC_DATA: BoppAnnotation = {
   }
 };
 
-// 7. TAG_OPEN: Global (No Extent at all)
+// 7. TAG: Global (No Extent at all) with Groupings
 const TAGS_GLOBAL_DATA: BoppAnnotation = {
   media_id: "spotify:track:17d5wZz4Z2n1rKq7XWzR2F",
   bopp_version: "1.0",
@@ -707,7 +789,7 @@ const TAGS_GLOBAL_DATA: BoppAnnotation = {
   },
   sandbox: {
     curator: "MusicBrainz / AcousticBrainz",
-    description: "Global genre, instrumentation, and mood tags describing the entire media object",
+    description: "Global genre, instrumentation, and mood tags describing the entire media object, organized into ordered subplots by grouping",
   },
   payload: {
     payload_type: "tag",
@@ -716,10 +798,26 @@ const TAGS_GLOBAL_DATA: BoppAnnotation = {
   confidence: {
     confidence_type: "likelihood",
     confidence: [0.96, 0.92, 0.95, 0.99, 0.88, 0.91]
-  }
+  },
+  groupings: [
+    {
+      name: "Tag Facet",
+      disjoint: true,
+      exhaustive: true,
+      labels: { "Genre / Style": 0, "Instrumentation": 1, "Dynamics & Mood": 2 },
+      ids: [0, 0, 1, 1, 2, 2]
+    },
+    {
+      name: "Taxonomy Source",
+      disjoint: true,
+      exhaustive: false,
+      labels: { "MusicBrainz Core": 0, "AcousticBrainz Mood": 1 },
+      ids: [0, 0, 0, 0, 1, 1]
+    }
+  ]
 };
 
-// 8. TAG_OPEN: Time Interval Extent (Active Instrumentation)
+// 8. TAG: Time Interval Extent (Active Instrumentation)
 const TAGS_TIME_INTERVAL_DATA: BoppAnnotation = {
   media_id: "audio:orchestra_arrangement",
   bopp_version: "1.0",
@@ -729,10 +827,12 @@ const TAGS_TIME_INTERVAL_DATA: BoppAnnotation = {
     tool: "sonic_annotator"
   },
   sandbox: {
-    description: "Active instrument section presence over time_interval bounds",
+    description: "Active instrument section presence over disjoint time_interval bounds",
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: true,
     time: [0.0, 12.0, 28.0, 44.0, 60.0],
     duration: [12.0, 16.0, 16.0, 16.0, 20.0]
   },
@@ -742,7 +842,7 @@ const TAGS_TIME_INTERVAL_DATA: BoppAnnotation = {
   }
 };
 
-// 8B. TAG_OPEN: Time Interval Extent (Overlapping Concurrent Instrumentation)
+// 8B. TAG: Time Interval Extent (Overlapping Concurrent Instrumentation)
 const TAGS_OVERLAPPING_DATA: BoppAnnotation = {
   media_id: "audio:polyphonic_band_arrangement",
   bopp_version: "1.0",
@@ -752,10 +852,14 @@ const TAGS_OVERLAPPING_DATA: BoppAnnotation = {
     tool: "multitrack_annotator"
   },
   sandbox: {
-    description: "Concurrent overlapping instrument presences across time: automatically rendered across multiple distinct rows to prevent collisions",
+    description: "Concurrent overlapping instrument presences across time: rendered across multiple distinct rows or grouped into section subplots",
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: false,
+    exhaustive: false,
+    min_time: 0.0,
+    max_time: 85.0,
     time: [0.0, 8.0, 20.0, 32.0, 48.0],
     duration: [30.0, 40.0, 35.0, 30.0, 32.0]
   },
@@ -766,7 +870,16 @@ const TAGS_OVERLAPPING_DATA: BoppAnnotation = {
   confidence: {
     confidence_type: "likelihood",
     confidence: [0.98, 0.94, 0.96, 0.89, 0.95]
-  }
+  },
+  groupings: [
+    {
+      name: "Mix Bus Stem",
+      disjoint: false,
+      exhaustive: true,
+      labels: { "Rhythm & Harmony": 0, "Lead & Solo": 1 },
+      ids: [0, 0, 1, 0, 1]
+    }
+  ]
 };
 
 // 9. CHORD: MIDI Interval Extent (Ticks)
@@ -783,6 +896,8 @@ const CHORDS_MIDI_TICKS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "midi_interval",
+    disjoint: true,
+    exhaustive: true,
     tick: [0, 960, 1920, 2880, 3840],
     duration: [960, 960, 960, 960, 1920]
   },
@@ -823,6 +938,8 @@ const BACH_MIDI_TICKS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "midi_interval",
+    disjoint: true,
+    exhaustive: true,
     tick: bachTicks.map(n => n.tick),
     duration: bachTicks.map(n => n.dur)
   },
@@ -893,6 +1010,8 @@ const DRIVE_TIME_POINTS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time",
+    disjoint: true,
+    exhaustive: false,
     time: (DRIVE_DATA.extent as { time: number[] }).time,
   },
   payload: DRIVE_DATA.payload,
@@ -935,6 +1054,8 @@ const DRIVE_SCORE_QUARTERS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_interval",
+    disjoint: true,
+    exhaustive: true,
     quarter: (DRIVE_DATA.extent as { time: number[] }).time.map((t, idx) => [idx * 4, 1]),
     duration: (DRIVE_DATA.extent as { duration: number[] }).duration.map(() => [4, 1]),
   },
@@ -961,6 +1082,8 @@ const PERCUSSIVE_MARKER_LIKELIHOOD: BoppAnnotation = {
   },
   extent: {
     extent_type: "time",
+    disjoint: true,
+    exhaustive: false,
     time: PERCUSSIVE_ONSETS,
   },
   payload: {
@@ -1012,6 +1135,8 @@ const CHORD_OVERLAPPING_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: false,
+    exhaustive: true,
     time: [0.0, 2.0, 6.0, 8.0, 12.0, 14.0],
     duration: [8.0, 8.0, 8.0, 8.0, 8.0, 8.0],
   },
@@ -1076,6 +1201,8 @@ const SCORE_QUARTER_POINTS_NOCONF: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_quarter",
+    disjoint: true,
+    exhaustive: false,
     quarter: [[0, 1], [4, 1], [8, 1], [12, 1], [16, 1]],
   },
   payload: {
@@ -1099,6 +1226,8 @@ const TIME_UNIFORM_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_uniform",
+    disjoint: true,
+    exhaustive: true,
     start_time: 0.0,
     sampling_period: 0.05,
   },
@@ -1111,6 +1240,15 @@ const TIME_UNIFORM_DATA: BoppAnnotation = {
     confidence_type: "likelihood",
     confidence: [0.95, 0.94, 0.96, 0.95, 0.97, 0.98, 0.96, 0.99, 0.97, 0.96, 0.95, 0.93, 0.45, 0.42, 0.38, 0.35],
   },
+  groupings: [
+    {
+      name: "Phrase Contour",
+      disjoint: true,
+      exhaustive: false,
+      labels: { "Ascending Glissando A": 0, "Ascending Glissando B": 1 },
+      ids: [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1]
+    }
+  ]
 };
 
 // 14. PIXEL Extent (Singular 2D Point Coordinates) with OBJECT Payload
@@ -1128,6 +1266,8 @@ const PIXEL_2D_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "pixel",
+    disjoint: true,
+    exhaustive: false,
     x: [120, 185, 250, 315, 380, 445, 510, 575],
     y: [340, 320, 295, 280, 260, 240, 220, 200],
   },
@@ -1166,6 +1306,10 @@ const TEXT_INTERVAL_LYRICS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "text_interval",
+    disjoint: true,
+    exhaustive: false,
+    min_offset: 0,
+    max_offset: 45,
     offset: [0, 4, 8, 13, 18, 23, 30, 35],
     length: [3, 3, 3, 4, 4, 6, 4, 10],
   },
@@ -1195,6 +1339,8 @@ const TEXT_TOKENS_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "text",
+    disjoint: true,
+    exhaustive: false,
     offset: [0, 4, 8, 13, 18, 23, 30, 35],
   },
   payload: {
@@ -1222,6 +1368,12 @@ const SPHERICAL_TIME_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "spherical_time",
+    disjoint: true,
+    exhaustive: true,
+    min_azimuth: -180,
+    max_azimuth: 180,
+    min_elevation: -90,
+    max_elevation: 90,
     azimuth: [-120.0, -90.0, -60.0, -30.0, 0.0, 30.0, 60.0, 90.0, 120.0],
     elevation: [0.0, 5.0, 12.0, 20.0, 25.0, 20.0, 12.0, 5.0, 0.0],
     radius: [2.5, 2.3, 2.0, 1.8, 1.5, 1.8, 2.0, 2.3, 2.5],
@@ -1252,6 +1404,8 @@ const CARTESIAN_TIME_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "cartesian_time",
+    disjoint: true,
+    exhaustive: true,
     x: [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0],
     y: [1.0, 1.2, 1.5, 1.8, 2.0, 1.8, 1.5, 1.2, 1.0],
     z: [0.0, 0.2, 0.5, 0.8, 1.0, 0.8, 0.5, 0.2, 0.0],
@@ -1281,6 +1435,8 @@ const NOTE_SPN_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "time_interval",
+    disjoint: true,
+    exhaustive: false,
     time: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
     duration: [0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.9],
   },
@@ -1309,6 +1465,8 @@ const SCORE_QUARTER_FLOAT_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_quarter_float",
+    disjoint: true,
+    exhaustive: false,
     quarter: [0.0, 1.0, 2.0, 2.5, 3.0, 4.0],
   },
   payload: {
@@ -1331,6 +1489,8 @@ const SCORE_INTERVAL_FLOAT_DATA: BoppAnnotation = {
   },
   extent: {
     extent_type: "score_interval_float",
+    disjoint: true,
+    exhaustive: true,
     quarter: [0.0, 0.5, 1.0, 2.0, 2.25, 3.0],
     duration: [0.5, 0.5, 1.0, 0.25, 0.75, 1.0],
   },
@@ -1342,6 +1502,141 @@ const SCORE_INTERVAL_FLOAT_DATA: BoppAnnotation = {
     confidence_type: "likelihood",
     confidence: [0.96, 0.94, 0.98, 0.92, 0.95, 0.99],
   },
+};
+
+// 22. MULTI-LEVEL HIERARCHICAL SEGMENTATION (Grouping disjoint: true on overlapping extent)
+const HIERARCHICAL_SEGMENTATION_DATA: BoppAnnotation = {
+  media_id: "audio:salami_hierarchical_structure_track",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "human",
+    annotator_id: "salami_musicologist",
+    tool: "SALAMI_Hierarchical_Annotator",
+  },
+  sandbox: {
+    description: "Multi-level hierarchical musical structure: extent is overlapping across levels, but each hierarchy level in Grouping #1 is mutually disjoint and exhaustive!",
+  },
+  extent: {
+    extent_type: "time_interval",
+    disjoint: false,
+    exhaustive: true,
+    min_time: 0.0,
+    max_time: 96.0,
+    time: [
+      // Level 0: Coarse Form (0..96)
+      0.0, 16.0, 48.0, 80.0,
+      // Level 1: Section / Phrase (0..96)
+      0.0, 16.0, 32.0, 48.0, 64.0, 80.0,
+      // Level 2: Sub-phrase Motifs (0..96)
+      0.0, 8.0, 16.0, 24.0, 32.0, 40.0, 48.0, 56.0, 64.0, 72.0, 80.0, 88.0,
+    ],
+    duration: [
+      // Level 0
+      16.0, 32.0, 32.0, 16.0,
+      // Level 1
+      16.0, 16.0, 16.0, 16.0, 16.0, 16.0,
+      // Level 2
+      8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0,
+    ],
+  },
+  payload: {
+    payload_type: "tag",
+    value: [
+      // Level 0
+      "Exposition", "Main Theme Cycle", "Development & Chorus", "Coda",
+      // Level 1
+      "Intro", "Verse 1", "Chorus 1", "Verse 2", "Chorus 2", "Outro",
+      // Level 2
+      "a", "a'", "b", "b'", "c", "c'", "b", "b''", "c", "c'", "d", "d'",
+    ],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [
+      0.98, 0.96, 0.95, 0.99,
+      0.97, 0.94, 0.96, 0.93, 0.97, 0.98,
+      0.92, 0.90, 0.91, 0.89, 0.94, 0.93, 0.91, 0.88, 0.95, 0.92, 0.94, 0.96,
+    ],
+  },
+  groupings: [
+    {
+      name: "Hierarchy Level",
+      disjoint: true,
+      exhaustive: true,
+      labels: { "Level 0: Coarse Form": 0, "Level 1: Functional Section": 1, "Level 2: Sub-Phrase Motif": 2 },
+      ids: [
+        0, 0, 0, 0,
+        1, 1, 1, 1, 1, 1,
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+      ],
+    },
+    {
+      name: "Thematic Family",
+      disjoint: false,
+      exhaustive: true,
+      labels: { "Framing (Intro/Coda)": 0, "Verse Material": 1, "Chorus Material": 2 },
+      ids: [
+        0, 1, 2, 0,
+        0, 1, 2, 1, 2, 0,
+        0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 0, 0,
+      ],
+    },
+  ],
+};
+
+// 23. POLYPHONIC F0 TRAJECTORIES WITH GROUPINGS (Soprano & Alto Duet)
+const duetTimes = [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0];
+const sopranoHz = [440.0, 466.16, 493.88, 523.25, 554.37, 587.33, 554.37, 523.25, 493.88, 466.16, 440.0, 415.3, 440.0];
+const altoHz = [329.63, 349.23, 369.99, 392.0, 415.3, 440.0, 415.3, 392.0, 369.99, 349.23, 329.63, 311.13, 329.63];
+
+const POLYPHONIC_F0_GROUPED_DATA: BoppAnnotation = {
+  media_id: "audio:vocal_duet_soprano_alto_f0",
+  bopp_version: "1.0",
+  metadata: {
+    metadata_type: "algorithm",
+    algorithm_id: "deep_salience_multipitch_tracker",
+    version: "2.0.0",
+    parameters: { hop_length: 256 },
+  },
+  sandbox: {
+    description: "Polyphonic vocal duet F0 estimates: extent.disjoint is false (two concurrent voices at each timestamp), while Voice Stream grouping has disjoint: true so each voice is connected as a continuous trajectory with its own colored outline!",
+  },
+  extent: {
+    extent_type: "time",
+    disjoint: false,
+    exhaustive: true,
+    min_time: 0.0,
+    max_time: 3.0,
+    time: [...duetTimes, ...duetTimes],
+  },
+  payload: {
+    payload_type: "frequency_hz",
+    value: [...sopranoHz, ...altoHz],
+    voiced: [...duetTimes.map(() => true), ...duetTimes.map(() => true)],
+  },
+  confidence: {
+    confidence_type: "likelihood",
+    confidence: [...duetTimes.map(() => 0.96), ...duetTimes.map(() => 0.91)],
+  },
+  groupings: [
+    {
+      name: "Voice Stream",
+      disjoint: true,
+      exhaustive: true,
+      labels: { "Soprano Lead": 0, "Alto Harmony": 1 },
+      ids: [...duetTimes.map(() => 0), ...duetTimes.map(() => 1)],
+    },
+    {
+      name: "Phrase Half (Non-Disjoint)",
+      disjoint: false,
+      exhaustive: true,
+      labels: { "Ascending Arch (0-1.5s)": 0, "Descending Resolution (1.5-3.0s)": 1 },
+      ids: [
+        ...duetTimes.map(t => (t <= 1.5 ? 0 : 1)),
+        ...duetTimes.map(t => (t <= 1.5 ? 0 : 1)),
+      ],
+    },
+  ],
 };
 
 export const SAMPLE_DATASETS: SampleFileInfo[] = [
@@ -1990,6 +2285,30 @@ export const SAMPLE_DATASETS: SampleFileInfo[] = [
     payloadType: "chord",
     confidenceType: "likelihood",
     data: SCORE_INTERVAL_FLOAT_DATA,
+  },
+  {
+    id: "hierarchical_segmentation_salami",
+    filename: "time_intervals/20_hierarchical_segmentation_groupings.bopp",
+    title: "Hierarchical Segmentation: SALAMI Multi-Level (Grouped)",
+    category: "music",
+    format: "json",
+    description: "time_interval extent with tag payload & multiple groupings: Grouping #1 (Hierarchy Level) has disjoint=true so each level renders on its own horizontal segmentation track; Grouping #2 (Thematic Family) has disjoint=false so it arranges into ordered vertical subplots.",
+    extentType: "time_interval",
+    payloadType: "tag",
+    confidenceType: "likelihood",
+    data: HIERARCHICAL_SEGMENTATION_DATA,
+  },
+  {
+    id: "polyphonic_f0_duet_grouped",
+    filename: "time_points/11_polyphonic_f0_duet_grouped.bopp",
+    title: "Polyphonic Vocal Duet F0: Soprano & Alto (Grouped)",
+    category: "music",
+    format: "json",
+    description: "time extent (disjoint=false) with frequency_hz payload & Voice Stream grouping (disjoint=true): connects each voice stream into a continuous F0 trajectory with distinct colored outer outlines, or switches to multipitch scatter when ungrouped.",
+    extentType: "time",
+    payloadType: "frequency_hz",
+    confidenceType: "likelihood",
+    data: POLYPHONIC_F0_GROUPED_DATA,
   },
 ];
 
