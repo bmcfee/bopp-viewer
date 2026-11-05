@@ -291,7 +291,9 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
     const fallbackDetailWidth = detailGroup?.width ?? (typeof view.width === 'function' && view.width() > 0 ? view.width() : containerWidth);
     const detailWidth = getScaleRangeSpan(detailScale, fallbackDetailWidth);
-    const detailHeight = detailGroup?.height ?? (isVConcat ? 220 : typeof view.height === 'function' && view.height() > 0 ? view.height() : 300);
+    const detailHeight = overviewGroup && isVConcat
+      ? Math.max(60, (overviewGroup.y ?? (detailGroup?.y ?? 0) + 220) - (detailGroup?.y ?? 0) - 10)
+      : detailGroup?.height ?? (isVConcat ? 220 : typeof view.height === 'function' && view.height() > 0 ? view.height() : 300);
     const detailGroupX = canvasOffsetX + originX + (detailGroup?.x ?? 0);
     const detailGroupY = canvasOffsetY + originY + (detailGroup?.y ?? 0);
 
@@ -299,9 +301,10 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
     const minDomain = dom && typeof dom[0] === 'number' ? dom[0] : 0;
     const maxDomain = dom && typeof dom[1] === 'number' ? dom[1] : Infinity;
 
+    const isSpatial = Boolean(extentType?.startsWith('spherical') || extentType?.startsWith('cartesian'));
     const detailRelX = detailScale(coordVal);
     const isInsideDomain = coordVal >= minDomain - 0.0001 && coordVal <= maxDomain + 0.0001;
-    const isInsideDetail = isInsideDomain && typeof detailRelX === 'number' && !isNaN(detailRelX) && detailRelX >= -0.5 && detailRelX <= detailWidth + 0.5;
+    const isInsideDetail = !isSpatial && isInsideDomain && typeof detailRelX === 'number' && !isNaN(detailRelX) && detailRelX >= -0.5 && detailRelX <= detailWidth + 0.5;
 
     if (isInsideDetail && targetTime >= 0) {
       const clampedRelX = Math.max(0, Math.min(detailWidth, detailRelX));
@@ -768,16 +771,21 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
 
         // Listen for clicks anywhere on the display to seek playhead
         res.view.addEventListener('click', (event: any, item: any) => {
-          const { detailScaleName, isVConcat, detailGroup } = resolveVegaTimelineScaleInfo(res.view);
+          const { detailScaleName, isVConcat, detailGroup, overviewScaleName, overviewGroup } = resolveVegaTimelineScaleInfo(res.view);
 
           // If clicked within overview navigator or brush window, ignore seek so brush dragging is uninterrupted!
-          if (item?.mark?.name?.includes('brush') || (isVConcat && item?.mark?.name?.includes('concat_1'))) {
+          const isOverviewMark = item?.mark?.name?.includes('brush') ||
+            (isVConcat && overviewScaleName && item?.mark?.name?.includes(overviewScaleName.replace('_x', '')));
+          if (isOverviewMark) {
             return;
           }
 
           if (item && item.datum) {
             setActiveItem(item.datum as TabularRecord);
           }
+
+          const isSpatial = Boolean(extentType?.startsWith('spherical') || extentType?.startsWith('cartesian'));
+          if (isSpatial) return;
 
           // Calculate exact clicked time anywhere in the detail plot
           try {
@@ -791,16 +799,18 @@ export const VegaLiteViewer: React.FC<VegaLiteViewerProps> = ({
               const sc = detailScaleName ? res.view.scale(detailScaleName) : null;
               const fallbackDetailWidth = detailGroup?.width ?? (typeof res.view.width === 'function' && res.view.width() > 0 ? res.view.width() : containerWidth);
               const detailWidth = getScaleRangeSpan(sc, fallbackDetailWidth);
-              const detailHeight = detailGroup?.height ?? (isVConcat ? 220 : typeof res.view.height === 'function' && res.view.height() > 0 ? res.view.height() : 300);
+              const detailTopY = originY + (detailGroup?.y ?? 0);
+              const detailBottomY = overviewGroup && isVConcat
+                ? originY + (overviewGroup.y ?? (detailGroup?.y ?? 0) + 220) - 10
+                : detailTopY + (detailGroup?.height ?? (isVConcat ? 220 : typeof res.view.height === 'function' && res.view.height() > 0 ? res.view.height() : 300));
               const detailGroupX = originX + (detailGroup?.x ?? 0);
-              const detailGroupY = originY + (detailGroup?.y ?? 0);
 
               // Only seek if clicked within the detail plot bounds
               if (
                 mx >= detailGroupX &&
                 mx <= detailGroupX + detailWidth &&
-                my >= detailGroupY &&
-                my <= detailGroupY + detailHeight
+                my >= detailTopY &&
+                my <= detailBottomY
               ) {
                 if (sc && typeof sc.invert === 'function') {
                   const clickedCoord = sc.invert(mx - detailGroupX);

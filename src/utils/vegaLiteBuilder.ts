@@ -113,10 +113,25 @@ export function resolveVegaTimelineScaleInfo(view: any): {
   overviewGroup: any;
 } {
   const scaleNames = Object.keys(view?._runtime?.scales || {});
+  const concatXIndices = scaleNames
+    .map(k => {
+      const m = k.match(/^concat_(\d+)_x$/);
+      return m ? parseInt(m[1], 10) : -1;
+    })
+    .filter(idx => idx >= 0)
+    .sort((a, b) => a - b);
+
+  const isVConcat = concatXIndices.length >= 2 || (scaleNames.includes('concat_1_x') && scaleNames.some(k => k.startsWith('concat_0_')));
+  const overviewIndex = concatXIndices.length >= 2
+    ? concatXIndices[concatXIndices.length - 1]
+    : scaleNames.includes('concat_1_x')
+    ? 1
+    : undefined;
+
   let detailScaleName = ['concat_0_x', 'x', 'layer_0_x', ...scaleNames.filter(k => k.endsWith('_x'))].find(k =>
     scaleNames.includes(k)
   );
-  if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x')) {
+  if (detailScaleName === 'concat_0_x' && scaleNames.includes('concat_1_x') && !isVConcat) {
     const s0 = typeof view?.scale === 'function' ? view.scale('concat_0_x') : null;
     const d0 = s0 && typeof s0.domain === 'function' ? s0.domain() : null;
     // If concat_0_x is a non-time scale with negative values (e.g. mood valence [-1.2, 1.2])
@@ -128,19 +143,21 @@ export function resolveVegaTimelineScaleInfo(view: any): {
   const detailYScaleName = ['concat_0_y', 'y', 'layer_0_y', ...scaleNames.filter(k => k.endsWith('_y'))].find(k =>
     scaleNames.includes(k)
   );
-  const overviewScaleName = ['concat_1_x', ...scaleNames.filter(k => k.includes('concat_1') && k.endsWith('_x'))].find(
-    k => scaleNames.includes(k)
-  );
-  const isVConcat = Boolean(
-    scaleNames.includes('concat_0_x') && scaleNames.includes('concat_1_x') && detailScaleName === 'concat_0_x'
-  );
+  const overviewScaleName = overviewIndex !== undefined
+    ? `concat_${overviewIndex}_x`
+    : ['concat_1_x', ...scaleNames.filter(k => k.includes('concat_1') && k.endsWith('_x'))].find(
+        k => scaleNames.includes(k)
+      );
+
   const sgRoot = view?.scenegraph?.()?.root?.items?.[0];
   const detailGroup = isVConcat
     ? resolveVegaGroupItem(sgRoot, 'concat_0_group', 0)
     : detailScaleName === 'concat_1_x'
     ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1)
     : sgRoot;
-  const overviewGroup = isVConcat ? resolveVegaGroupItem(sgRoot, 'concat_1_group', 1) : null;
+  const overviewGroup = isVConcat && overviewIndex !== undefined
+    ? resolveVegaGroupItem(sgRoot, `concat_${overviewIndex}_group`, overviewIndex)
+    : null;
 
   return {
     scaleNames,
@@ -1305,9 +1322,13 @@ export function buildBoppVegaLiteSpec(
               encoding: {
                 x: { field: xField, type: 'quantitative' },
                 x2: { field: '_calc_end' },
-                y: { value: 2 },
-                y2: { value: 50 },
-                color: { field: 'value', type: 'nominal', legend: null },
+                y: activeGrouping
+                  ? { field: '_group_label', type: 'nominal', sort: activeGrouping.orderedGroupLabels, scale: { domain: activeGrouping.orderedGroupLabels }, axis: null }
+                  : { value: 2 },
+                ...(activeGrouping ? {} : { y2: { value: 50 } }),
+                color: activeGrouping
+                  ? { field: '_group_label', type: 'nominal', scale: groupColorScale, legend: null }
+                  : { field: 'value', type: 'nominal', legend: null },
               },
             },
           ];
@@ -3194,7 +3215,7 @@ export function buildBoppVegaLiteSpec(
                 field: 'time',
                 type: 'quantitative',
                 title: isLast ? 'Time (seconds)' : null,
-                scale: { domain: [minX, maxX] },
+                scale: enableOverviewBrush ? { domain: { param: 'brush' } } : { domain: [minX, maxX] },
                 axis: isLast ? {} : { labels: false, ticks: false },
               },
               x2: { field: '_calc_end' },
@@ -3230,6 +3251,77 @@ export function buildBoppVegaLiteSpec(
           layer: subLayers,
         };
       });
+
+      if (enableOverviewBrush && data.length > 0) {
+        const brushParam = {
+          name: 'brush',
+          select: {
+            type: 'interval',
+            encodings: ['x'],
+            mark: {
+              fill: isDark ? '#38bdf8' : '#0284c7',
+              fillOpacity: isDark ? 0.38 : 0.28,
+              stroke: isDark ? '#38bdf8' : '#0284c7',
+              strokeWidth: 3,
+            },
+            zoom: true,
+            clear: false,
+          },
+          value: { time: [minX, maxX] },
+        };
+
+        const groupOverviewUnit = {
+          width: typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : undefined,
+          height: 56,
+          title: {
+            text: '🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window',
+            color: axisColor,
+            fontSize: 10.5,
+            fontWeight: 'bold',
+          },
+          params: [brushParam],
+          layer: [
+            {
+              mark: { type: 'bar', opacity: 0.85, cornerRadius: 2 },
+              encoding: {
+                x: {
+                  field: 'time',
+                  type: 'quantitative',
+                  title: 'Time (seconds)',
+                  scale: { domain: [minX, maxX], nice: false },
+                },
+                x2: { field: '_calc_end' },
+                y: {
+                  field: '_group_label',
+                  type: 'nominal',
+                  sort: activeGrouping.orderedGroupLabels,
+                  scale: { domain: activeGrouping.orderedGroupLabels },
+                  axis: null,
+                },
+                color: {
+                  field: '_group_label',
+                  type: 'nominal',
+                  scale: groupColorScale,
+                  legend: null,
+                },
+              },
+            },
+          ],
+        };
+
+        return {
+          $schema: VEGA_LITE_SCHEMA,
+          title: {
+            text: `BOPP Grouped Interval Tags (${activeGrouping.name}): ${annotation.media_id}`,
+            color: textColor,
+          },
+          data: { values: data },
+          transform: transforms,
+          config: baseConfig,
+          vconcat: [...subplotSpecs, groupOverviewUnit],
+          resolve: { scale: { x: 'independent', y: 'independent', color: 'shared' } },
+        };
+      }
 
       return {
         $schema: VEGA_LITE_SCHEMA,
@@ -3426,7 +3518,9 @@ export function buildBoppVegaLiteSpec(
             ? { value: 2 }
             : { field: yField, type: 'nominal', ...(isGroupDisjoint ? { sort: rowDomain } : {}), scale: { domain: rowDomain }, axis: null },
           ...(useSingleRow ? { y2: { value: 50 } } : {}),
-          color: { field: colorField, type: 'nominal', scale: colorScale, legend: null },
+          color: activeGrouping
+            ? { field: '_group_label', type: 'nominal', scale: groupColorScale, legend: null }
+            : { field: colorField, type: 'nominal', scale: colorScale, legend: null },
         },
       },
     ];
@@ -4020,21 +4114,23 @@ export function buildBoppVegaLiteSpec(
   }
 
   // =========================================================================
-  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (Polar Coordinates & DoA vs Time)
+  // 6d. SPHERICAL, SPHERICAL_TIME, SPHERICAL_TIME_INTERVAL (Polar Coordinates)
   // =========================================================================
   if (extentType === 'spherical' || extentType === 'spherical_time' || extentType === 'spherical_time_interval') {
     const isTemporal = extentType === 'spherical_time' || extentType === 'spherical_time_interval';
     const canConnectLine = extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint);
     const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
     const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 340;
-    const panelWidth = Math.max(300, Math.floor((totalWidth - 60) / 2));
-    const panelHeight = Math.max(300, totalHeight - 40);
+    const availableHeight = totalHeight - (isTemporal && enableOverviewBrush ? 86 : 40);
+    const availableWidth = Math.max(260, Math.floor((totalWidth - 80) / 2));
+    const polarSize = Math.max(260, Math.min(availableWidth, availableHeight));
 
     const obsMaxR = Math.max(...data.map(d => Number(d.radius) || 1), 1);
     const [, maxR] = resolveDomainRange(0, obsMaxR, extentTopology.min_radius, extentTopology.max_radius, 0, 1);
     const rLimit = +(maxR * 1.2).toFixed(2);
     const rStep = +(rLimit / 3).toFixed(2);
     const ringRadii = [rStep, +(rStep * 2).toFixed(2), rLimit];
+    const maxCoord = +(rLimit * 1.25).toFixed(2);
 
     // Background polar grid range rings
     const ringPoints: { ring: number; x: number; y: number; order: number }[] = [];
@@ -4058,27 +4154,47 @@ export function buildBoppVegaLiteSpec(
       spokePoints.push({ spoke: a, x: +(rLimit * Math.sin(rad)).toFixed(3), y: +(rLimit * Math.cos(rad)).toFixed(3), order: 1 });
     }
 
-    // Outer compass direction labels
-    const compassLabels: { text: string; x: number; y: number }[] = [
-      { text: '0° (Front)', x: 0, y: rLimit + 0.15 },
-      { text: '+45°', x: +(rLimit * 0.707 * 1.08).toFixed(2), y: +(rLimit * 0.707 * 1.08).toFixed(2) },
-      { text: '+90° (Right)', x: rLimit + 0.15, y: 0 },
-      { text: '+135°', x: +(rLimit * 0.707 * 1.08).toFixed(2), y: +(-rLimit * 0.707 * 1.08).toFixed(2) },
-      { text: '180° (Back)', x: 0, y: -(rLimit + 0.15) },
-      { text: '-135°', x: +(-rLimit * 0.707 * 1.08).toFixed(2), y: +(-rLimit * 0.707 * 1.08).toFixed(2) },
-      { text: '-90° (Left)', x: -(rLimit + 0.15), y: 0 },
-      { text: '-45°', x: +(-rLimit * 0.707 * 1.08).toFixed(2), y: +(rLimit * 0.707 * 1.08).toFixed(2) },
+    // Outer compass direction labels for Azimuth Plan View
+    const azCompassLabels: { text: string; x: number; y: number }[] = [
+      { text: '0° (Front)', x: 0, y: +(rLimit * 1.14).toFixed(3) },
+      { text: '+45°', x: +(rLimit * 0.707 * 1.14).toFixed(3), y: +(rLimit * 0.707 * 1.14).toFixed(3) },
+      { text: '+90° (Right)', x: +(rLimit * 1.14).toFixed(3), y: 0 },
+      { text: '+135°', x: +(rLimit * 0.707 * 1.14).toFixed(3), y: +(-rLimit * 0.707 * 1.14).toFixed(3) },
+      { text: '180° (Back)', x: 0, y: +(-rLimit * 1.14).toFixed(3) },
+      { text: '-135°', x: +(-rLimit * 0.707 * 1.14).toFixed(3), y: +(-rLimit * 0.707 * 1.14).toFixed(3) },
+      { text: '-90° (Left)', x: +(-rLimit * 1.14).toFixed(3), y: 0 },
+      { text: '-45°', x: +(-rLimit * 0.707 * 1.14).toFixed(3), y: +(rLimit * 0.707 * 1.14).toFixed(3) },
+    ];
+
+    // Outer compass direction labels for Elevation View
+    const elCompassLabels: { text: string; x: number; y: number }[] = [
+      { text: '0° (Front)', x: +(rLimit * 1.14).toFixed(3), y: 0 },
+      { text: '+45° (Up)', x: +(rLimit * 0.707 * 1.14).toFixed(3), y: +(rLimit * 0.707 * 1.14).toFixed(3) },
+      { text: '+90° (Zenith)', x: 0, y: +(rLimit * 1.14).toFixed(3) },
+      { text: '+135°', x: +(-rLimit * 0.707 * 1.14).toFixed(3), y: +(rLimit * 0.707 * 1.14).toFixed(3) },
+      { text: '180° (Back)', x: +(-rLimit * 1.14).toFixed(3), y: 0 },
+      { text: '-135°', x: +(-rLimit * 0.707 * 1.14).toFixed(3), y: +(-rLimit * 0.707 * 1.14).toFixed(3) },
+      { text: '-90° (Nadir)', x: 0, y: +(-rLimit * 1.14).toFixed(3) },
+      { text: '-45° (Down)', x: +(rLimit * 0.707 * 1.14).toFixed(3), y: +(-rLimit * 0.707 * 1.14).toFixed(3) },
     ];
 
     const sphericalTransforms = [
       ...transforms,
       {
-        calculate: 'datum.radius * sin(datum.azimuth * PI / 180)',
-        as: '_x_polar',
+        calculate: '(datum.radius != null ? datum.radius : 1) * sin(datum.azimuth * PI / 180)',
+        as: '_x_polar_az',
       },
       {
-        calculate: 'datum.radius * cos(datum.azimuth * PI / 180)',
-        as: '_y_polar',
+        calculate: '(datum.radius != null ? datum.radius : 1) * cos(datum.azimuth * PI / 180)',
+        as: '_y_polar_az',
+      },
+      {
+        calculate: '(datum.radius != null ? datum.radius : 1) * cos(datum.elevation * PI / 180)',
+        as: '_x_polar_el',
+      },
+      {
+        calculate: '(datum.radius != null ? datum.radius : 1) * sin(datum.elevation * PI / 180)',
+        as: '_y_polar_el',
       },
     ];
 
@@ -4089,6 +4205,22 @@ export function buildBoppVegaLiteSpec(
       ],
       value: defaultVal,
     });
+
+    const pointColorEncoding = isTemporal
+      ? {
+          field: 'time',
+          type: 'quantitative',
+          title: 'Time (s)',
+          scale: { domain: [minX, maxX], scheme: 'viridis' },
+        }
+      : activeGrouping
+      ? {
+          field: '_group_label',
+          type: 'nominal',
+          title: activeGrouping.name,
+          scale: groupColorScale,
+        }
+      : { value: isDark ? '#38bdf8' : '#0284c7' };
 
     const sharedPointEncoding = {
       size: hoverConditions(220, 85),
@@ -4111,11 +4243,11 @@ export function buildBoppVegaLiteSpec(
       ],
     };
 
-    // Panel 1: Traditional Polar Soundfield Map
-    const polarPanel: Record<string, unknown> = {
-      title: { text: 'Polar Soundfield Plan (Azimuth θ & Radius r)', color: textColor, fontSize: 12 },
-      width: panelWidth,
-      height: panelHeight,
+    // Subplot 1: Azimuth θ vs Distance (Plan View) - Fixed aspect ratio 1
+    const polarAzPanel: Record<string, unknown> = {
+      title: { text: 'Azimuth θ vs Distance (Plan View)', color: textColor, fontSize: 12 },
+      width: polarSize,
+      height: polarSize,
       layer: [
         // Concentric range rings
         {
@@ -4126,13 +4258,13 @@ export function buildBoppVegaLiteSpec(
               field: 'x',
               type: 'quantitative',
               title: 'Lateral Distance (meters: r · sin θ)',
-              scale: { domain: [-rLimit * 1.3, rLimit * 1.3] },
+              scale: { domain: [-maxCoord, maxCoord] },
             },
             y: {
               field: 'y',
               type: 'quantitative',
               title: 'Frontal Distance (meters: r · cos θ)',
-              scale: { domain: [-rLimit * 1.3, rLimit * 1.3] },
+              scale: { domain: [-maxCoord, maxCoord] },
             },
             detail: { field: 'ring', type: 'nominal' },
             order: { field: 'order', type: 'quantitative' },
@@ -4149,9 +4281,9 @@ export function buildBoppVegaLiteSpec(
             order: { field: 'order', type: 'quantitative' },
           },
         },
-        // Compass perimeter direction labels
+        // Perimeter direction labels
         {
-          data: { values: compassLabels },
+          data: { values: azCompassLabels },
           mark: { type: 'text', fontSize: 10, fontWeight: 'bold', fill: isDark ? '#94a3b8' : '#64748b', align: 'center', baseline: 'middle' },
           encoding: {
             x: { field: 'x', type: 'quantitative' },
@@ -4163,123 +4295,175 @@ export function buildBoppVegaLiteSpec(
         ...(canConnectLine
           ? [
               {
+                ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
                 mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.6, stroke: isDark ? '#38bdf8' : '#0284c7' },
                 encoding: {
-                  x: { field: '_x_polar', type: 'quantitative' },
-                  y: { field: '_y_polar', type: 'quantitative' },
+                  x: { field: '_x_polar_az', type: 'quantitative' },
+                  y: { field: '_y_polar_az', type: 'quantitative' },
                   order: { field: '__index', type: 'quantitative' },
                   ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
                 },
               },
             ]
           : []),
-        // Observation points colored by Elevation φ (Altitude)
+        // Observation points
         {
+          ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
           params: [
             { name: 'obs_hover_sph_1', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
           ],
           mark: { type: 'circle' },
           encoding: {
-            x: { field: '_x_polar', type: 'quantitative' },
-            y: { field: '_y_polar', type: 'quantitative' },
-            color: {
-              field: 'elevation',
-              type: 'quantitative',
-              title: 'Elevation φ (°)',
-              scale: { domain: [-90, 90], scheme: 'spectral' },
-            },
+            x: { field: '_x_polar_az', type: 'quantitative' },
+            y: { field: '_y_polar_az', type: 'quantitative' },
+            color: pointColorEncoding,
             ...sharedPointEncoding,
           },
         },
       ],
     };
 
-    // Panel 2: Direction of Arrival Angles vs Time (or DoA Map)
-    let panel2: Record<string, unknown>;
-    if (isTemporal) {
-      panel2 = {
-        title: { text: 'Direction of Arrival (DoA) & Elevation vs Time', color: textColor, fontSize: 12 },
-        width: panelWidth,
-        height: panelHeight,
-        layer: [
-          // Horizon reference line at 0 degrees
-          {
-            mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.45 },
-            encoding: { y: { datum: 0 } },
+    // Subplot 2: Elevation φ vs Distance (Elevation View) - Fixed aspect ratio 1
+    const polarElPanel: Record<string, unknown> = {
+      title: { text: 'Elevation φ vs Distance (Elevation View)', color: textColor, fontSize: 12 },
+      width: polarSize,
+      height: polarSize,
+      layer: [
+        // Concentric range rings
+        {
+          data: { values: ringPoints },
+          mark: { type: 'line', strokeDash: [3, 3], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.35 },
+          encoding: {
+            x: {
+              field: 'x',
+              type: 'quantitative',
+              title: 'Horizon Distance (meters: r · cos φ)',
+              scale: { domain: [-maxCoord, maxCoord] },
+            },
+            y: {
+              field: 'y',
+              type: 'quantitative',
+              title: 'Vertical Height (meters: r · sin φ)',
+              scale: { domain: [-maxCoord, maxCoord] },
+            },
+            detail: { field: 'ring', type: 'nominal' },
+            order: { field: 'order', type: 'quantitative' },
           },
-          // Multi-line trajectory for Azimuth and Elevation
-          ...(canConnectLine
-            ? [
-                {
-                  transform: [
-                    { fold: ['azimuth', 'elevation'], as: ['angle_type', 'angle_deg'] },
-                  ],
-                  mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
-                  encoding: {
-                    x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-                    y: { field: 'angle_deg', type: 'quantitative', title: 'Angle (degrees [°])', scale: { domain: [-185, 185] } },
-                    color: {
-                      field: 'angle_type',
-                      type: 'nominal',
-                      title: 'Direction',
-                      scale: { domain: ['azimuth', 'elevation'], range: ['#38bdf8', '#f59e0b'] },
-                    },
-                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
-                  },
+        },
+        // Radial compass spokes
+        {
+          data: { values: spokePoints },
+          mark: { type: 'line', strokeDash: [2, 2], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.25 },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            y: { field: 'y', type: 'quantitative' },
+            detail: { field: 'spoke', type: 'nominal' },
+            order: { field: 'order', type: 'quantitative' },
+          },
+        },
+        // Perimeter direction labels
+        {
+          data: { values: elCompassLabels },
+          mark: { type: 'text', fontSize: 10, fontWeight: 'bold', fill: isDark ? '#94a3b8' : '#64748b', align: 'center', baseline: 'middle' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative' },
+            y: { field: 'y', type: 'quantitative' },
+            text: { field: 'text', type: 'nominal' },
+          },
+        },
+        // Sound source trajectory path in polar space
+        ...(canConnectLine
+          ? [
+              {
+                ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
+                mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.6, stroke: isDark ? '#38bdf8' : '#0284c7' },
+                encoding: {
+                  x: { field: '_x_polar_el', type: 'quantitative' },
+                  y: { field: '_y_polar_el', type: 'quantitative' },
+                  order: { field: '__index', type: 'quantitative' },
+                  ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
                 },
-              ]
-            : []),
-          // Linked observation points
+              },
+            ]
+          : []),
+        // Observation points
+        {
+          ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
+          params: [
+            { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: '_x_polar_el', type: 'quantitative' },
+            y: { field: '_y_polar_el', type: 'quantitative' },
+            color: pointColorEncoding,
+            ...sharedPointEncoding,
+          },
+        },
+      ],
+    };
+
+    const vconcatWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : undefined;
+    if (isTemporal && enableOverviewBrush && data.length > 0) {
+      const brushParam = {
+        name: 'brush',
+        select: {
+          type: 'interval',
+          encodings: ['x'],
+          mark: {
+            fill: isDark ? '#38bdf8' : '#0284c7',
+            fillOpacity: isDark ? 0.38 : 0.28,
+            stroke: isDark ? '#38bdf8' : '#0284c7',
+            strokeWidth: 3,
+          },
+          zoom: true,
+          clear: false,
+        },
+        value: { time: [minX, maxX] },
+      };
+
+      const overviewUnit = {
+        width: vconcatWidth,
+        height: 56,
+        title: {
+          text: '🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window',
+          color: axisColor,
+          fontSize: 10.5,
+          fontWeight: 'bold',
+        },
+        params: [brushParam],
+        layer: [
           {
-            params: [
-              { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-            ],
-            mark: { type: 'circle' },
+            mark: { type: 'tick', thickness: 3, opacity: 0.85 },
             encoding: {
-              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-              y: { field: 'azimuth', type: 'quantitative', title: 'Angle (degrees [°])', scale: { domain: [-185, 185] } },
-              color: { value: '#38bdf8' },
-              ...sharedPointEncoding,
+              x: {
+                field: 'time',
+                type: 'quantitative',
+                title: 'Time (seconds)',
+                scale: { domain: [minX, maxX], nice: false },
+              },
+              color: activeGrouping
+                ? { field: '_group_label', type: 'nominal', scale: groupColorScale, legend: null }
+                : { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX], scheme: 'viridis' }, legend: null },
             },
           },
         ],
       };
-    } else {
-      panel2 = {
-        title: { text: 'Direction of Arrival Map (Azimuth vs Elevation)', color: textColor, fontSize: 12 },
-        width: panelWidth,
-        height: panelHeight,
-        layer: [
+
+      return {
+        $schema: VEGA_LITE_SCHEMA,
+        title: { text: `BOPP Spherical Polar Coordinates: ${annotation.media_id}`, color: textColor },
+        data: { values: data },
+        transform: sphericalTransforms,
+        config: baseConfig,
+        vconcat: [
           {
-            mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.45 },
-            encoding: { y: { datum: 0 } },
+            hconcat: [polarAzPanel, polarElPanel],
+            resolve: { scale: { color: 'shared' } },
           },
-          ...(canConnectLine
-            ? [
-                {
-                  mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#38bdf8' : '#0284c7' },
-                  encoding: {
-                    x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ (degrees [-180°, +180°))', scale: { domain: [-180, 180] } },
-                    y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ (degrees [-90°, +90°])', scale: { domain: [-90, 90] } },
-                    order: { field: '__index', type: 'quantitative' },
-                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
-                  },
-                },
-              ]
-            : []),
-          {
-            params: [
-              { name: 'obs_hover_sph_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-            ],
-            mark: { type: 'circle' },
-            encoding: {
-              x: { field: 'azimuth', type: 'quantitative', title: 'Azimuth θ (degrees [-180°, +180°))', scale: { domain: [-180, 180] } },
-              y: { field: 'elevation', type: 'quantitative', title: 'Elevation φ (degrees [-90°, +90°])', scale: { domain: [-90, 90] } },
-              color: { field: 'radius', type: 'quantitative', title: 'Radius r (m)', scale: { scheme: 'viridis' } },
-              ...sharedPointEncoding,
-            },
-          },
+          overviewUnit,
         ],
+        resolve: { scale: { color: 'shared' } },
       };
     }
 
@@ -4289,20 +4473,22 @@ export function buildBoppVegaLiteSpec(
       data: { values: data },
       transform: sphericalTransforms,
       config: baseConfig,
-      hconcat: [polarPanel, panel2],
+      hconcat: [polarAzPanel, polarElPanel],
+      resolve: { scale: { color: 'shared' } },
     };
   }
 
   // =========================================================================
-  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (Planar Trajectory & Time Profile)
+  // 6e. CARTESIAN, CARTESIAN_TIME, CARTESIAN_TIME_INTERVAL (Planar Trajectory & Front View)
   // =========================================================================
   if (extentType === 'cartesian' || extentType === 'cartesian_time' || extentType === 'cartesian_time_interval') {
     const isTemporal = extentType === 'cartesian_time' || extentType === 'cartesian_time_interval';
     const canConnectLine = extentTopology.disjoint || Boolean(activeGrouping && activeGrouping.disjoint);
     const totalWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : 760;
     const totalHeight = typeof chartHeight === 'number' && chartHeight > 0 ? chartHeight : 340;
-    const panelWidth = Math.max(300, Math.floor((totalWidth - 60) / 2));
-    const panelHeight = Math.max(300, totalHeight - 40);
+    const availableHeight = totalHeight - (isTemporal && enableOverviewBrush ? 86 : 40);
+    const availableWidth = Math.max(260, Math.floor((totalWidth - 80) / 2));
+    const cartSize = Math.max(260, Math.min(availableWidth, availableHeight));
 
     const hoverConditions = (activeVal: any, defaultVal: any) => ({
       condition: [
@@ -4311,6 +4497,22 @@ export function buildBoppVegaLiteSpec(
       ],
       value: defaultVal,
     });
+
+    const pointColorEncoding = isTemporal
+      ? {
+          field: 'time',
+          type: 'quantitative',
+          title: 'Time (s)',
+          scale: { domain: [minX, maxX], scheme: 'viridis' },
+        }
+      : activeGrouping
+      ? {
+          field: '_group_label',
+          type: 'nominal',
+          title: activeGrouping.name,
+          scale: groupColorScale,
+        }
+      : { value: isDark ? '#38bdf8' : '#0284c7' };
 
     const sharedPointEncoding = {
       size: hoverConditions(220, 85),
@@ -4333,15 +4535,16 @@ export function buildBoppVegaLiteSpec(
       ],
     };
 
-    // Panel 1: Planar Trajectory Map (X vs Y colored by Z)
-    const mapPanel: Record<string, unknown> = {
-      title: { text: 'Spatial Trajectory (X vs Y Plane)', color: textColor, fontSize: 12 },
-      width: panelWidth,
-      height: panelHeight,
+    // Subplot 1: XY Plane (Lateral X vs Forward Y)
+    const mapXYPanel: Record<string, unknown> = {
+      title: { text: 'Spatial Trajectory (XY Plane)', color: textColor, fontSize: 12 },
+      width: cartSize,
+      height: cartSize,
       layer: [
         ...(canConnectLine
           ? [
               {
+                ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
                 mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.5, stroke: isDark ? '#94a3b8' : '#64748b' },
                 encoding: {
                   x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
@@ -4353,6 +4556,7 @@ export function buildBoppVegaLiteSpec(
             ]
           : []),
         {
+          ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
           params: [
             { name: 'obs_hover_cart_1', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
           ],
@@ -4360,93 +4564,110 @@ export function buildBoppVegaLiteSpec(
           encoding: {
             x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
             y: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)' },
-            color: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)', scale: { scheme: 'turbo' } },
+            color: pointColorEncoding,
             ...sharedPointEncoding,
           },
         },
       ],
     };
 
-    let panel2: Record<string, unknown>;
-    if (isTemporal) {
-      // Panel 2: 3D Coordinate Trajectories vs Time (X(t), Y(t), Z(t))
-      panel2 = {
-        title: { text: '3D Coordinates vs Time (X, Y, Z)', color: textColor, fontSize: 12 },
-        width: panelWidth,
-        height: panelHeight,
+    // Subplot 2: XZ Plane (Lateral X vs Vertical Z)
+    const mapXZPanel: Record<string, unknown> = {
+      title: { text: 'Vertical Profile (XZ Plane)', color: textColor, fontSize: 12 },
+      width: cartSize,
+      height: cartSize,
+      layer: [
+        ...(canConnectLine
+          ? [
+              {
+                ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
+                mark: { type: 'line', interpolate: 'monotone', strokeWidth: 2, opacity: 0.5, stroke: isDark ? '#94a3b8' : '#64748b' },
+                encoding: {
+                  x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+                  y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
+                  order: { field: '__index', type: 'quantitative' },
+                  ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
+                },
+              },
+            ]
+          : []),
+        {
+          ...(isTemporal && enableOverviewBrush ? { transform: [{ filter: { param: 'brush' } }] } : {}),
+          params: [
+            { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
+          ],
+          mark: { type: 'circle' },
+          encoding: {
+            x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
+            y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
+            color: pointColorEncoding,
+            ...sharedPointEncoding,
+          },
+        },
+      ],
+    };
+
+    const vconcatWidth = typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : undefined;
+    if (isTemporal && enableOverviewBrush && data.length > 0) {
+      const brushParam = {
+        name: 'brush',
+        select: {
+          type: 'interval',
+          encodings: ['x'],
+          mark: {
+            fill: isDark ? '#38bdf8' : '#0284c7',
+            fillOpacity: isDark ? 0.38 : 0.28,
+            stroke: isDark ? '#38bdf8' : '#0284c7',
+            strokeWidth: 3,
+          },
+          zoom: true,
+          clear: false,
+        },
+        value: { time: [minX, maxX] },
+      };
+
+      const overviewUnit = {
+        width: vconcatWidth,
+        height: 56,
+        title: {
+          text: '🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window',
+          color: axisColor,
+          fontSize: 10.5,
+          fontWeight: 'bold',
+        },
+        params: [brushParam],
         layer: [
           {
-            mark: { type: 'rule', strokeDash: [4, 4], stroke: isDark ? '#64748b' : '#94a3b8', opacity: 0.4 },
-            encoding: { y: { datum: 0 } },
-          },
-          ...(canConnectLine
-            ? [
-                {
-                  transform: [
-                    { fold: ['x', 'y', 'z'], as: ['coord', 'pos'] },
-                  ],
-                  mark: { type: 'line', strokeWidth: 2.2, interpolate: 'monotone' },
-                  encoding: {
-                    x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-                    y: { field: 'pos', type: 'quantitative', title: 'Position (meters)' },
-                    color: {
-                      field: 'coord',
-                      type: 'nominal',
-                      title: 'Coordinate',
-                      scale: { domain: ['x', 'y', 'z'], range: ['#06b6d4', '#f59e0b', '#10b981'] },
-                    },
-                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
-                  },
-                },
-              ]
-            : []),
-          {
-            params: [
-              { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-            ],
-            mark: { type: 'circle' },
+            mark: { type: 'tick', thickness: 3, opacity: 0.85 },
             encoding: {
-              x: { field: 'time', type: 'quantitative', title: 'Time (seconds)', scale: { domain: [minX, maxX] } },
-              y: { field: 'x', type: 'quantitative', title: 'Position (meters)' },
-              color: { value: '#06b6d4' },
-              ...sharedPointEncoding,
+              x: {
+                field: 'time',
+                type: 'quantitative',
+                title: 'Time (seconds)',
+                scale: { domain: [minX, maxX], nice: false },
+              },
+              color: activeGrouping
+                ? { field: '_group_label', type: 'nominal', scale: groupColorScale, legend: null }
+                : { field: 'time', type: 'quantitative', scale: { domain: [minX, maxX], scheme: 'viridis' }, legend: null },
             },
           },
         ],
       };
-    } else {
-      // Panel 2: Front View (XZ Plane)
-      panel2 = {
-        title: { text: 'Front View (XZ Plane)', color: textColor, fontSize: 12 },
-        width: panelWidth,
-        height: panelHeight,
-        layer: [
-          ...(canConnectLine
-            ? [
-                {
-                  mark: { type: 'line', interpolate: 'monotone', strokeWidth: 1.5, opacity: 0.45, stroke: isDark ? '#94a3b8' : '#64748b' },
-                  encoding: {
-                    x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
-                    y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
-                    order: { field: '__index', type: 'quantitative' },
-                    ...(activeGrouping ? { detail: { field: '_group_id', type: 'nominal' } } : {}),
-                  },
-                },
-              ]
-            : []),
+
+      return {
+        $schema: VEGA_LITE_SCHEMA,
+        title: { text: `BOPP 3D Cartesian Coordinates: ${annotation.media_id}`, color: textColor },
+        data: { values: data },
+        transform: transforms,
+        config: baseConfig,
+        vconcat: [
           {
-            params: [
-              { name: 'obs_hover_cart_2', select: { type: 'point', on: 'pointerover', fields: ['__index'], clear: 'pointerout' } },
-            ],
-            mark: { type: 'circle' },
-            encoding: {
-              x: { field: 'x', type: 'quantitative', title: 'Lateral Position X (meters)' },
-              y: { field: 'z', type: 'quantitative', title: 'Vertical Height Z (meters)' },
-              color: { field: 'y', type: 'quantitative', title: 'Forward Position Y (meters)', scale: { scheme: 'turbo' } },
-              ...sharedPointEncoding,
-            },
+            hconcat: [mapXYPanel, mapXZPanel],
+            resolve: { scale: { color: 'shared' } },
           },
+          overviewUnit,
         ],
+        resolve: { scale: { color: 'shared' } },
       };
     }
 
@@ -4456,7 +4677,8 @@ export function buildBoppVegaLiteSpec(
       data: { values: data },
       transform: transforms,
       config: baseConfig,
-      hconcat: [mapPanel, panel2],
+      hconcat: [mapXYPanel, mapXZPanel],
+      resolve: { scale: { color: 'shared' } },
     };
   }
 
@@ -5687,7 +5909,7 @@ export function buildBoppVegaLiteSpec(
               field: xField,
               type: 'quantitative',
               title: isLast ? xField : null,
-              scale: { domain: [minX, maxX] },
+              scale: enableOverviewBrush ? { domain: { param: 'brush' } } : { domain: [minX, maxX] },
               axis: isLast ? {} : { labels: false, ticks: false },
             },
             ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
@@ -5716,6 +5938,77 @@ export function buildBoppVegaLiteSpec(
         layer: subLayers,
       };
     });
+
+    if (enableOverviewBrush && data.length > 0) {
+      const brushParam = {
+        name: 'brush',
+        select: {
+          type: 'interval',
+          encodings: ['x'],
+          mark: {
+            fill: isDark ? '#38bdf8' : '#0284c7',
+            fillOpacity: isDark ? 0.38 : 0.28,
+            stroke: isDark ? '#38bdf8' : '#0284c7',
+            strokeWidth: 3,
+          },
+          zoom: true,
+          clear: false,
+        },
+        value: { [xField]: [minX, maxX] },
+      };
+
+      const groupOverviewUnit = {
+        width: typeof chartWidth === 'number' && chartWidth > 0 ? chartWidth : undefined,
+        height: 56,
+        title: {
+          text: '🔍 TIMELINE NAVIGATOR: Drag window to pan · Drag edges or scroll wheel to zoom · Click & drag to select window',
+          color: axisColor,
+          fontSize: 10.5,
+          fontWeight: 'bold',
+        },
+        params: [brushParam],
+        layer: [
+          {
+            mark: isInterval ? { type: 'bar', cornerRadius: 2 } : { type: 'tick', thickness: 3 },
+            encoding: {
+              x: {
+                field: xField,
+                type: 'quantitative',
+                title: xField,
+                scale: { domain: [minX, maxX], nice: false },
+              },
+              ...(isInterval ? { x2: { field: '_calc_end' } } : {}),
+              y: {
+                field: '_group_label',
+                type: 'nominal',
+                sort: activeGrouping.orderedGroupLabels,
+                scale: { domain: activeGrouping.orderedGroupLabels },
+                axis: null,
+              },
+              color: {
+                field: '_group_label',
+                type: 'nominal',
+                scale: groupColorScale,
+                legend: null,
+              },
+            },
+          },
+        ],
+      };
+
+      return {
+        $schema: VEGA_LITE_SCHEMA,
+        title: {
+          text: `BOPP Grouped Tags (${activeGrouping.name}): ${annotation.media_id}`,
+          color: textColor,
+        },
+        data: { values: data },
+        transform: transforms,
+        config: baseConfig,
+        vconcat: [...subplotSpecs, groupOverviewUnit],
+        resolve: { scale: { x: 'independent', y: 'independent', color: 'shared' } },
+      };
+    }
 
     return {
       $schema: VEGA_LITE_SCHEMA,
